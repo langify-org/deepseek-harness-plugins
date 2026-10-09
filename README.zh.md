@@ -10,6 +10,8 @@
 
 每个插件都是普通的 DSH **组合包**（bundle）：在 `package.json` 中声明 `dsh.bundle` 的 npm 包，由随包附带的 `cordis.patch.yml` 插入插件。patch 以相对于自身的路径（`./lib/index.js`）指定插件，因此无论 DSH 以哪种方式加载，同一个包都能直接使用。
 
+由于 DSH 本身仍是候选发布版，所有插件都处于实验阶段（0.x）。各插件 README 的“状态”一节说明了它依赖哪些机制。
+
 ## 安装
 
 ### npm（推荐）
@@ -31,13 +33,10 @@ dsh web --patch /path/to/plugins/session-hooks/cordis.patch.yml
 
 ### Nix
 
-flake 会从源码构建每个插件、运行其测试，并把它与你所用 DSH 安装自带的模块连接起来。先把它加入 flake 的 inputs：
+flake 会从源码构建每个插件、运行其测试，并把它与你所用 DSH 安装自带的模块连接起来。先把它加入 flake 的 inputs。不要让它 follows 你自己的 `nixpkgs`：CI 测试的是 flake 自身固定的 nixpkgs，换用其他版本的 pnpm 可能导致依赖哈希不一致。
 
 ```nix
-inputs.dsh-plugins = {
-  url = "github:langify-org/deepseek-harness-plugins";
-  inputs.nixpkgs.follows = "nixpkgs";
-};
+inputs.dsh-plugins.url = "github:langify-org/deepseek-harness-plugins";
 ```
 
 再在组装 `dsh` 命令行的位置传入插件的 patch：

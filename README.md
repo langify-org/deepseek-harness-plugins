@@ -10,6 +10,8 @@ Plugins for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 
 
 Every plugin is an ordinary DSH **bundle**: an npm package whose `package.json` declares `dsh.bundle` and whose `cordis.patch.yml` inserts the plugin. The patch names the plugin by a path relative to itself (`./lib/index.js`), so the same package works with every way DSH can load it.
 
+The plugins are experimental (0.x) while DSH itself is a release candidate. Each plugin's README has a Status section that says what it relies on.
+
 ## Install
 
 ### npm (recommended)
@@ -31,13 +33,10 @@ The first line installs a tarball made with `pnpm pack`. The second loads a buil
 
 ### Nix
 
-The flake builds each plugin from source, runs its tests, and wires it to your DSH installation's own modules. Add the input to your flake:
+The flake builds each plugin from source, runs its tests, and wires it to your DSH installation's own modules. Add the input to your flake. Do not make it follow your `nixpkgs`: the flake's pinned nixpkgs is the one CI tests, and another pnpm version can change the dependency hash.
 
 ```nix
-inputs.dsh-plugins = {
-  url = "github:langify-org/deepseek-harness-plugins";
-  inputs.nixpkgs.follows = "nixpkgs";
-};
+inputs.dsh-plugins.url = "github:langify-org/deepseek-harness-plugins";
 ```
 
 Then pass the plugin's patch where you build the `dsh` command line:

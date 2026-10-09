@@ -12,6 +12,14 @@ Run your own shell commands when a [DeepSeek Harness](https://github.com/deepsee
 
 Requires DSH `0.2.x` and a POSIX shell (Linux or macOS).
 
+## Status
+
+**Experimental.** Until 1.0, the configuration and what commands receive may change between minor versions; the changelog says when.
+
+- Built and tested against DSH `0.2.0-rc.2` on Linux. macOS should work but has not been tested. Windows is not supported.
+- Archive and unarchive hooks depend on DSH internals. DSH has no archive event, so the plugin watches the archive list the workspace registry stores (see "How it works"). A DSH update can change that; archive hooks would then stop running without an error. The repository's end-to-end test checks this against the DSH version it targets.
+- A start command's `workdir` is a note to the model, not a real change of the session's directory (see "Pointing a session at another directory").
+
 ## Install
 
 **From npm** (any DSH installation):

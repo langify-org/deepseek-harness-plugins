@@ -10,6 +10,8 @@
 
 どのプラグインも、通常の DSH の **bundle** です。`package.json` で `dsh.bundle` を宣言した npm パッケージで、同梱の `cordis.patch.yml` がプラグインを追加します。patch はプラグインを自分自身からの相対パス（`./lib/index.js`）で指定しているので、DSH のどの読み込み方でも同じパッケージがそのまま動きます。
 
+DSH 自体がまだリリース候補版のため、どのプラグインも試験的（0.x）です。各プラグインの README の「ステータス」に、何に依存しているかを書いています。
+
 ## インストール
 
 ### npm（おすすめ）
@@ -31,13 +33,10 @@ dsh web --patch /path/to/plugins/session-hooks/cordis.patch.yml
 
 ### Nix
 
-flake は各プラグインをソースからビルドしてテストを実行し、利用中の DSH 本体のモジュールとつなぎます。まず flake の inputs に追加します。
+flake は各プラグインをソースからビルドしてテストを実行し、利用中の DSH 本体のモジュールとつなぎます。まず flake の inputs に追加します。このとき、自分の `nixpkgs` に follows させないでください。CI がテストしているのは flake 自身が固定している nixpkgs で、pnpm の版が変わると依存のハッシュが合わなくなることがあります。
 
 ```nix
-inputs.dsh-plugins = {
-  url = "github:langify-org/deepseek-harness-plugins";
-  inputs.nixpkgs.follows = "nixpkgs";
-};
+inputs.dsh-plugins.url = "github:langify-org/deepseek-harness-plugins";
 ```
 
 次に、`dsh` のコマンドラインを組み立てる場所で、プラグインの patch を渡します。

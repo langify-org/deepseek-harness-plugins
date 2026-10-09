@@ -36,6 +36,12 @@ catalogs:
     '@types/node':
       specifier: ^24.19.1
       version: 24.19.1
+    esbuild-wasm:
+      specifier: 0.28.2
+      version: 0.28.2
+    js-yaml:
+      specifier: ^5.4.3
+      version: 5.4.3
     typescript:
       specifier: ~6.0.3
       version: 6.0.3
@@ -83,6 +89,12 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.1
+      esbuild-wasm:
+        specifier: 'catalog:'
+        version: 0.28.2
+      js-yaml:
+        specifier: 'catalog:'
+        version: 5.4.3
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
@@ -307,9 +319,17 @@ packages:
   '@types/node@24.19.1':
     resolution: {integrity: sha512-aS3/DG0oM05K0RIXXP+hKjinGG5IgSSVGzswZxW3O0sS3pH4/fycXundUC9XsszgKCk4gHXylTEK6hyFxVxnoQ==}
 
+  argparse@2.0.1:
+    resolution: {integrity: sha512-8+9WqebbFzpX9OR+Wa6O29asIogeRMzcGtAINdpMHHyAg10f05aSFVBbcEqGf/PXw1EjAZ+q2/bEBg3DvurK3Q==}
+
   cac@7.0.1:
     resolution: {integrity: sha512-86diuUyeeWM8CrqhpGCaDafrzjS1s++7sWy2AbAPoFNz/xKv7ID57CR4pZsMuGCh60PtsnEx4z68b+Vgt07VPw==}
     engines: {node: '>=20.19.0'}
+
+  esbuild-wasm@0.28.2:
+    resolution: {integrity: sha512-GccVwhv3mmOUVQHCQm2Ox/rby8n/EqUwvZxE6Pjfikrq/lWw9g9WX/u9EykWnpot3Ko6j426DgQdea2xWKIAQA==}
+    engines: {node: '>=18'}
+    hasBin: true
 
   fast-string-truncated-width@3.0.3:
     resolution: {integrity: sha512-0jjjIEL6+0jag3l2XWWizO64/aZVtpiGE3t0Zgqxv0DPuxiMjvB3M24fCyhZUO4KomJQPj3LTSUnDP3GpdwC0g==}
@@ -338,6 +358,10 @@ packages:
 
   jju@1.4.0:
     resolution: {integrity: sha512-8wb9Yw966OSxApiCt0K3yNJL8pnNeIv+OEq2YMidz4FKP6nonSRoOXc80iXY4JaN2FC11B9qsNmDsm+ZOfMROA==}
+
+  js-yaml@5.4.3:
+    resolution: {integrity: sha512-yzzNtgczwgoVHNigCyKTXcQJU4Y8t/ikU4UxXW0BvrLfHTGWZhsNcOT2s/a7vn81/4KqVnNmHjaUEPlvWnNwVw==}
+    hasBin: true
 
   jsonc-parser@3.3.1:
     resolution: {integrity: sha512-HUgH65KyejrUFPvHFPbqOY0rsFip3Bo5wb4ngvdi1EpCYWUQDC5V+Y7mZws+DLkr4M//zQJoanu1SP+87Dv1oQ==}
@@ -654,7 +678,11 @@ snapshots:
     dependencies:
       undici-types: 7.24.6
 
+  argparse@2.0.1: {}
+
   cac@7.0.1: {}
+
+  esbuild-wasm@0.28.2: {}
 
   fast-string-truncated-width@3.0.3: {}
 
@@ -675,6 +703,10 @@ snapshots:
   import-meta-resolve@4.2.0: {}
 
   jju@1.4.0: {}
+
+  js-yaml@5.4.3:
+    dependencies:
+      argparse: 2.0.1
 
   jsonc-parser@3.3.1: {}
 

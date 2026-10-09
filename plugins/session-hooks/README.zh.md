@@ -2,7 +2,7 @@
 
 [English](https://github.com/langify-org/deepseek-harness-plugins/blob/main/plugins/session-hooks/README.md) | [日本語](https://github.com/langify-org/deepseek-harness-plugins/blob/main/plugins/session-hooks/README.ja.md) | 简体中文
 
-在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）的会话开始、被归档或被取消归档时，运行你自己的 shell 命令。典型用途：为每个会话准备独立的 git worktree、准备或清理资源，以及与外部任务跟踪工具保持同步。
+在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）的会话开始、被归档或被取消归档时，运行你自己的 shell 命令。典型用途：为每个会话准备独立的 git worktree、准备或清理资源，以及与外部任务跟踪工具保持同步。命令来自你的 DSH 配置，或来自受信任项目自己的 `.dsh/hooks.yml`。
 
 | 事件 | 运行时机 | 命令可以做什么 |
 |---|---|---|
@@ -65,11 +65,45 @@ dsh web --patch /path/to/dsh-session-hooks/cordis.patch.yml --patch ./my-hooks.p
 | `includeSubagents` | `false` | 也为 subagent 和队友（teammate）的会话运行钩子。 |
 | `defaultTimeoutMs` | `60000` | 未设置 `timeoutMs` 的命令的超时时间（毫秒）。 |
 | `shell` | `bash` | 命令以 `<shell> -c <command>` 的形式运行。 |
+| `projectHooks.trustedDirs` | `[]` | 允许其中的项目运行自己钩子文件的目录（可用 `~/`）。为空时项目钩子关闭。 |
+| `projectHooks.file` | `.dsh/hooks.yml` | 项目钩子文件的位置（相对于项目根目录）。 |
 | `stateDir` | `$DSH_HOME/langify-session-hooks` | 每个会话的记录和 `hooks.log` 的存放位置。 |
+
+## 项目钩子
+
+项目可以在根目录的 `.dsh/hooks.yml` 中定义自己的钩子，与它要运行的脚本放在同一个仓库里。可以像 GitHub Actions 工作流那样直接内联编写脚本：
+
+```yaml
+sessionStart:
+  - |
+    pnpm install --frozen-lockfile >&2
+    echo '{"context": "Dependencies are installed; use pnpm."}'
+sessionArchive:
+  - ./scripts/cleanup.sh
+  - command: ./scripts/backup.sh
+    timeoutMs: 300000
+```
+
+- 该文件使用与插件配置相同的三个列表，其中命令接收和输出的内容也与配置中的命令相同（见后面几节）。
+- 项目根目录是会话目录所属的 git 工作树；不在 git 中时就是会话目录本身。项目命令在根目录中运行，因此 `./scripts/cleanup.sh` 这样的相对路径从根目录解析。
+- 项目命令在配置中的命令之后运行，并收到前者选定的 `workdir`。
+- 每次事件都会重新读取该文件，因此修改无需重启即可生效。
+
+项目钩子只会在你信任的项目中运行。在插件配置中列出这些目录；只有根目录位于其中之一的项目才会运行自己的文件：
+
+```yaml
+- id: langify-session-hooks
+  config:
+    projectHooks:
+      trustedDirs:
+        - ~/Projects/my-org
+```
+
+在不受信任的项目中，钩子文件里的内容一概不会运行，DSH 的 stderr 会提示一次该文件已被跳过。
 
 ## 命令接收的信息
 
-每个命令都在会话的目录中运行（若该目录已不存在，则在 DSH 自身的目录中运行），并通过 stdin 接收一行 JSON：
+配置中的命令在会话的目录中运行（若该目录已不存在，则在 DSH 自身的目录中运行），项目命令在项目根目录中运行。两者都通过 stdin 接收一行 JSON：
 
 ```json
 {"hook_event_name":"SessionStart","session_id":"session-…","cwd":"/home/me/project","workdir":null,"source":"startup"}
@@ -97,7 +131,7 @@ DSH 在创建会话时就固定了它的目录，钩子无法修改。作为替�
 - `workdir` 必须是已存在的目录。插件会告诉模型在那里工作（在该目录中运行命令、编辑其下的文件），并把它传给后续的开始时命令，以及该会话归档和取消归档时的命令。
 - `context` 是给模型的额外文本。
 
-插件会在会话的第一次模型请求之前，把这些内容作为一条提示添加进去。Web UI 的文件面板以及会话在侧边栏中的归属，仍然以原来的目录为准。
+插件会在会话的第一次模型请求之前，把这些内容作为一条提示添加进去，并记录下来。当会话在不运行开始时命令的情况下再次开始（默认是 DSH 重启后恢复、清空或压缩时），且历史中已没有这条提示时，插件会重新发送记录的提示。Web UI 的文件面板以及会话在侧边栏中的归属，仍然以原来的目录为准。
 
 ## 示例：每个会话一个 git worktree
 
@@ -130,7 +164,7 @@ DSH 在创建会话时就固定了它的目录，钩子无法修改。作为替�
 
 ## 安全
 
-命令以 DSH 进程自身的权限、在 agent 沙箱之外运行，与 Claude Code 的钩子相同。命令只来自你的 patch 层：插件从不读取项目目录中的钩子配置，因此在克隆来的仓库中打开会话，不会运行该仓库的代码。
+命令以 DSH 进程自身的权限、在 agent 沙箱之外运行，与 Claude Code 的钩子相同。命令来自你的 patch 层；只有当项目位于 `projectHooks.trustedDirs` 所列目录之内时，才会读取该项目的 `.dsh/hooks.yml`。在从别处克隆来的仓库中打开会话，只要它不在受信任的目录之下，就不会运行其中的任何代码。因此只信任内容由你自己掌控的目录。
 
 ## 工作原理
 

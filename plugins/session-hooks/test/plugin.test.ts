@@ -3,7 +3,7 @@
  * `domain/changed` events drive real hook processes.
  */
 import assert from 'node:assert/strict'
-import { mkdir, readFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, it, mock } from 'node:test'
 import { Context } from '@deepseek-ai/cordis'
@@ -21,9 +21,13 @@ interface FakeHeader {
   parentSession?: string
 }
 
-function fakeAgent(header: FakeHeader): { agent: Agent; injected: UserMessage[] } {
+/** An agent whose model history is `history` (what `session.deriveMessages()` returns). */
+function fakeAgent(header: FakeHeader, history: readonly { source: { kind: string } }[] = []): { agent: Agent; injected: UserMessage[] } {
   const injected: UserMessage[] = []
-  const agent = { session: { header: { isSeeded: false, createdAt: 0, ...header } }, inject: (message: UserMessage) => injected.push(message) }
+  const agent = {
+    session: { header: { isSeeded: false, createdAt: 0, ...header }, deriveMessages: () => [...history] },
+    inject: (message: UserMessage) => injected.push(message),
+  }
   return { agent: agent as unknown as Agent, injected }
 }
 
@@ -202,5 +206,145 @@ describe('session archive', () => {
     await fiber.dispose()
     assert.ok(Date.now() - started < 5000, 'disposal does not wait for the hook to finish')
     await waitFor(() => (isAlive(pid) ? undefined : true))
+  })
+})
+
+describe('project hooks', () => {
+  /** A git project under `base` with `.dsh/hooks.yml`. */
+  async function hooksProject(base: string, name: string, hooksYaml: string): Promise<string> {
+    const root = join(base, name)
+    await mkdir(join(root, '.git'), { recursive: true })
+    await writeFile(join(root, '.git', 'HEAD'), 'ref: refs/heads/main\n')
+    await mkdir(join(root, 'app'), { recursive: true })
+    await mkdir(join(root, '.dsh'), { recursive: true })
+    await writeFile(join(root, '.dsh', 'hooks.yml'), hooksYaml)
+    return root
+  }
+
+  it('runs a trusted project file after the configured hooks, in the project root, with the chained workdir', async () => {
+    const dir = await tempDir()
+    const trusted = join(dir, 'trusted')
+    const worktree = join(dir, 'worktree')
+    await mkdir(worktree)
+    const root = await hooksProject(
+      trusted,
+      'repo',
+      [
+        'sessionStart:',
+        '  - |',
+        `    cat > ${join(dir, 'project-start.json')}`,
+        `    pwd > ${join(dir, 'project-start.pwd')}`,
+        `    echo '{"context": "Use pnpm here."}'`,
+        'sessionArchive:',
+        `  - cat > ${join(dir, 'project-archive.json')}`,
+        '',
+      ].join('\n'),
+    )
+    const { root: ctxRoot, fiber } = await mount(
+      {
+        stateDir: join(dir, 'state'),
+        projectHooks: { trustedDirs: [trusted] },
+        sessionStart: [`echo ${sh(JSON.stringify({ workdir: worktree }))}`],
+      },
+      { workspaceRegistry: { archivedSessionIds: [] } },
+    )
+    const { agent, injected } = fakeAgent({ id: 'session-p1', cwd: join(root, 'app') })
+    await ctxRoot.serial('agent/created', { agent, source: 'startup' })
+
+    const start = await readJson(join(dir, 'project-start.json'))
+    assert.equal(start.workdir, worktree, 'the project hook sees the workdir the configured hook chose')
+    assert.equal(start.cwd, join(root, 'app'))
+    assert.equal((await readFile(join(dir, 'project-start.pwd'), 'utf8')).trim(), root, 'project hooks run in the project root')
+    const text = injected[0]!.content.map((block) => (block.type === 'text' ? block.text : '')).join('')
+    assert.match(text, new RegExp(`working directory is ${worktree}`))
+    assert.match(text, /Use pnpm here\./)
+
+    ctxRoot.emit('domain/changed', archiveSet(['session-p1']))
+    const archived = await waitFor(() => tryReadJson(join(dir, 'project-archive.json')))
+    assert.equal(archived.hook_event_name, 'SessionArchive')
+    assert.equal(archived.workdir, worktree)
+
+    const log = (await readFile(join(dir, 'state', 'hooks.log'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line))
+    assert.deepEqual(
+      log.map((entry) => [entry.event, entry.hooks, entry.status]),
+      [
+        ['SessionStart', 'config', 'ok'],
+        ['SessionStart', 'project', 'ok'],
+        ['SessionArchive', 'project', 'ok'],
+      ],
+    )
+    await fiber.dispose()
+  })
+
+  it('skips an untrusted project file, reports it once, and never runs it', async () => {
+    const dir = await tempDir()
+    const marker = join(dir, 'ran')
+    const root = await hooksProject(dir, 'cloned', `sessionStart:\n  - touch ${marker}\n`)
+    const { root: ctxRoot, fiber } = await mount({ stateDir: join(dir, 'state'), projectHooks: { trustedDirs: [join(dir, 'mine')] } })
+    const stderr = mock.method(process.stderr, 'write', () => true)
+    try {
+      await ctxRoot.serial('agent/created', { agent: fakeAgent({ id: 'session-u1', cwd: root }).agent, source: 'startup' })
+      await ctxRoot.serial('agent/created', { agent: fakeAgent({ id: 'session-u2', cwd: root }).agent, source: 'startup' })
+    } finally {
+      stderr.mock.restore()
+    }
+    await assert.rejects(readFile(marker), 'the untrusted command never ran')
+    const warnings = stderr.mock.calls.map((call) => String(call.arguments[0]))
+    assert.equal(warnings.length, 1)
+    assert.match(warnings[0]!, /skipped .*cloned\/\.dsh\/hooks\.yml: .*cloned is not under projectHooks\.trustedDirs/)
+    await fiber.dispose()
+  })
+
+  it('reads the file again for every event, so edits apply without a restart', async () => {
+    const dir = await tempDir()
+    const root = await hooksProject(dir, 'repo', `sessionStart:\n  - echo first > ${join(dir, 'out')}\n`)
+    const { root: ctxRoot, fiber } = await mount({ stateDir: join(dir, 'state'), projectHooks: { trustedDirs: [dir] } })
+    await ctxRoot.serial('agent/created', { agent: fakeAgent({ id: 'session-e1', cwd: root }).agent, source: 'startup' })
+    assert.equal(await readFile(join(dir, 'out'), 'utf8'), 'first\n')
+    await writeFile(join(root, '.dsh', 'hooks.yml'), `sessionStart:\n  - echo second > ${join(dir, 'out')}\n`)
+    await ctxRoot.serial('agent/created', { agent: fakeAgent({ id: 'session-e2', cwd: root }).agent, source: 'startup' })
+    assert.equal(await readFile(join(dir, 'out'), 'utf8'), 'second\n')
+    await fiber.dispose()
+  })
+})
+
+describe('note restoration', () => {
+  it('re-sends the recorded note to a resumed session whose history lacks it, without running hooks again', async () => {
+    const dir = await tempDir()
+    const worktree = join(dir, 'worktree')
+    await mkdir(worktree)
+    const runs = join(dir, 'runs')
+    const { root, fiber } = await mount({
+      stateDir: join(dir, 'state'),
+      sessionStart: [`echo run >> ${sh(runs)}; echo ${sh(JSON.stringify({ workdir: worktree, context: 'Branch: x' }))}`],
+    })
+    const started = fakeAgent({ id: 'session-r1', cwd: dir })
+    await root.serial('agent/created', { agent: started.agent, source: 'startup' })
+    assert.equal(started.injected.length, 1)
+    const text = (message: UserMessage) => message.content.map((block) => (block.type === 'text' ? block.text : '')).join('')
+
+    // DSH restarted before the first request: the pending note was discarded.
+    const lost = fakeAgent({ id: 'session-r1', cwd: dir }, [{ source: { kind: 'user' } }])
+    await root.serial('agent/created', { agent: lost.agent, source: 'resume' })
+    assert.equal(lost.injected.length, 1)
+    assert.equal(text(lost.injected[0]!), text(started.injected[0]!))
+    assert.deepEqual(lost.injected[0]!.source, started.injected[0]!.source)
+
+    // The note reached the history: nothing to add.
+    const delivered = fakeAgent({ id: 'session-r1', cwd: dir }, [{ source: { kind: 'langify-session-hooks' } }])
+    await root.serial('agent/created', { agent: delivered.agent, source: 'compact' })
+    assert.equal(delivered.injected.length, 0)
+
+    assert.equal(await readFile(runs, 'utf8'), 'run\n', 'start hooks ran only once')
+    await fiber.dispose()
+  })
+
+  it('does nothing for sessions it never recorded', async () => {
+    const dir = await tempDir()
+    const { root, fiber } = await mount({ stateDir: join(dir, 'state'), sessionStart: ['true'] })
+    const unknown = fakeAgent({ id: 'session-r2', cwd: dir })
+    await root.serial('agent/created', { agent: unknown.agent, source: 'resume' })
+    assert.equal(unknown.injected.length, 0)
+    await fiber.dispose()
   })
 })

@@ -21,11 +21,12 @@ import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@deepseek-ai/dsh-workspace'
 import { archivedIdsOf, ArchiveWatcher } from './archive-watch.ts'
-import { Config, resolveConfig, type HookCommand, type StartSource } from './config.ts'
+import { Config, resolveConfig, type HookCommand, type HookLists, type StartSource } from './config.ts'
 import { CONTEXT_SOURCE_KIND, startContext } from './context.ts'
 import { parseStartOutput } from './output.ts'
 import { hookEnv, hookStdin, type HookEventName, type HookPayload } from './payload.ts'
-import { logEntry, RunLog } from './run-log.ts'
+import { loadProjectHooks } from './project.ts'
+import { logEntry, RunLog, type HookOrigin } from './run-log.ts'
 import { runCommand, succeeded, type RunResult } from './runner.ts'
 import { defaultStateDir, SessionStateStore, STATE_DIR_NAME, type SessionRecord } from './state.ts'
 import { KeyedQueue, TaskTracker } from './tasks.ts'
@@ -49,6 +50,13 @@ interface AppReadyLike {
 
 /** The launcher's Harness-home resolver (`@deepseek-ai/dsh-home-paths`), when present. */
 type DshHomePath = (...segments: string[]) => string
+
+/** The hook list each event runs. */
+const LIST_KEY = {
+  SessionStart: 'sessionStart',
+  SessionArchive: 'sessionArchive',
+  SessionUnarchive: 'sessionUnarchive',
+} as const satisfies Record<HookEventName, keyof HookLists>
 
 /** The outcome of running one event's command list. */
 interface ListOutcome {
@@ -74,18 +82,23 @@ export function apply(ctx: Context, rawConfig?: unknown): void {
     'langify-session-hooks: stop running hooks',
   )
 
-  if (config.sessionStart.length > 0) {
+  const projectHooksOn = config.projectHooks.trustedDirs.length > 0
+  /** Projects whose untrusted hooks file was already reported, to report each once. */
+  const reportedUntrusted = new Set<string>()
+
+  if (config.sessionStart.length > 0 || projectHooksOn) {
     ctx.on('agent/created', async ({ agent, source, signal }) => {
-      if (!config.startSources.includes(source)) return
       const header = agent.session.header
       if (header.origin === 'subagent' && !config.includeSubagents) return
-      const run = queue.run(header.id, () => onStart(agent, source, signal))
+      const run = config.startSources.includes(source)
+        ? queue.run(header.id, () => onStart(agent, source, signal))
+        : queue.run(header.id, () => restoreNote(agent))
       tracker.track(run)
       await run
     })
   }
 
-  if (config.sessionArchive.length > 0 || config.sessionUnarchive.length > 0) {
+  if (config.sessionArchive.length > 0 || config.sessionUnarchive.length > 0 || projectHooksOn) {
     const watcher = new ArchiveWatcher(() => ctx.get('workspaceRegistry')?.archivedSessionIds)
     watcher.prime()
     const appReady = ctx.get('appReady') as AppReadyLike | undefined
@@ -96,12 +109,8 @@ export function apply(ctx: Context, rawConfig?: unknown): void {
       const ids = archivedIdsOf(change)
       if (ids === undefined) return
       const { archived, unarchived } = watcher.update(ids)
-      if (config.sessionArchive.length > 0) {
-        for (const id of archived) tracker.track(queue.run(id, () => onLifecycle('SessionArchive', config.sessionArchive, id)))
-      }
-      if (config.sessionUnarchive.length > 0) {
-        for (const id of unarchived) tracker.track(queue.run(id, () => onLifecycle('SessionUnarchive', config.sessionUnarchive, id)))
-      }
+      for (const id of archived) tracker.track(queue.run(id, () => onLifecycle('SessionArchive', id)))
+      for (const id of unarchived) tracker.track(queue.run(id, () => onLifecycle('SessionUnarchive', id)))
     })
   }
 
@@ -118,12 +127,34 @@ export function apply(ctx: Context, rawConfig?: unknown): void {
       ...(header.origin !== undefined ? { origin: header.origin } : {}),
     }
     const runSignal = signal === undefined ? lifetime.signal : AbortSignal.any([signal, lifetime.signal])
-    const outcome = await runList('SessionStart', config.sessionStart, payload, runSignal)
-    const record: SessionRecord = { sessionId: header.id, cwd, workdir: outcome.workdir, startedAt: new Date().toISOString() }
+    const outcome = await runEvent('SessionStart', payload, runSignal)
+    const record: SessionRecord = {
+      sessionId: header.id,
+      cwd,
+      workdir: outcome.workdir,
+      contexts: outcome.contexts,
+      startedAt: new Date().toISOString(),
+    }
     await store.write(record).catch((error: unknown) => {
       warn(`could not record session ${header.id} in ${store.dir}: ${String(error)}`)
     })
-    const note = startContext(cwd, outcome.workdir, outcome.contexts)
+    injectNote(agent, record)
+  }
+
+  /**
+   * A session that starts without running start hooks (by default: resumed,
+   * cleared, or compacted) gets the recorded note again when its history does
+   * not hold it. DSH discards a note still waiting for the first model request
+   * when it stops, and compaction or clearing can drop a delivered one.
+   */
+  async function restoreNote(agent: Agent): Promise<void> {
+    const record = await store.read(agent.session.header.id).catch(() => undefined)
+    if (record === undefined || noteInHistory(agent)) return
+    injectNote(agent, record)
+  }
+
+  function injectNote(agent: Agent, record: SessionRecord): void {
+    const note = startContext(record.cwd, record.workdir, record.contexts)
     if (note === undefined) return
     agent.inject(
       createUserMessage({
@@ -133,7 +164,9 @@ export function apply(ctx: Context, rawConfig?: unknown): void {
     )
   }
 
-  async function onLifecycle(event: HookEventName, hooks: readonly HookCommand[], sessionId: string): Promise<void> {
+  async function onLifecycle(event: 'SessionArchive' | 'SessionUnarchive', sessionId: string): Promise<void> {
+    const configured = event === 'SessionArchive' ? config.sessionArchive : config.sessionUnarchive
+    if (configured.length === 0 && !projectHooksOn) return
     const facts = await sessionFacts(sessionId)
     if (facts.origin === 'subagent' && !config.includeSubagents) return
     const payload: HookPayload = {
@@ -144,7 +177,36 @@ export function apply(ctx: Context, rawConfig?: unknown): void {
       ...(facts.parentSessionId !== undefined ? { parent_session_id: facts.parentSessionId } : {}),
       ...(facts.origin !== undefined ? { origin: facts.origin } : {}),
     }
-    await runList(event, hooks, payload, lifetime.signal)
+    await runEvent(event, payload, lifetime.signal)
+  }
+
+  /**
+   * Run an event's configured commands in the session directory, then the
+   * project's own commands in the project root. The project's commands see the
+   * workdir the configured ones chose.
+   */
+  async function runEvent(event: HookEventName, payload: HookPayload, signal: AbortSignal): Promise<ListOutcome> {
+    const key = LIST_KEY[event]
+    const configured = await runList(event, config[key], payload, signal, { cwd: await hookDirectory(payload.cwd), origin: 'config' })
+    if (!projectHooksOn || payload.cwd === null || !(await isDirectory(payload.cwd)) || signal.aborted) return configured
+    const project = await loadProjectHooks(payload.cwd, config.projectHooks)
+    if (project.kind === 'none') return configured
+    if (project.kind === 'untrusted') {
+      if (!reportedUntrusted.has(project.root)) {
+        reportedUntrusted.add(project.root)
+        warn(`skipped ${project.file}: ${project.root} is not under projectHooks.trustedDirs`)
+      }
+      return configured
+    }
+    if (project.kind === 'invalid') {
+      warn(`skipped ${project.file}: ${project.problem}`)
+      return configured
+    }
+    const fromProject = await runList(event, project.hooks[key], { ...payload, workdir: configured.workdir }, signal, {
+      cwd: project.root,
+      origin: 'project',
+    })
+    return { workdir: fromProject.workdir, contexts: [...configured.contexts, ...fromProject.contexts] }
   }
 
   /** What is known about a session that may no longer be live. */
@@ -175,20 +237,20 @@ export function apply(ctx: Context, rawConfig?: unknown): void {
     }
   }
 
-  /** Run an event's commands in order. Later start commands see the workdir earlier ones chose. */
+  /** Run a list of commands in order. Later start commands see the workdir earlier ones chose. */
   async function runList(
     event: HookEventName,
     hooks: readonly HookCommand[],
     payload: HookPayload,
     signal: AbortSignal,
+    { cwd, origin }: { cwd: string; origin: HookOrigin },
   ): Promise<ListOutcome> {
     let workdir = payload.workdir
     const contexts: string[] = []
-    const cwd = await hookDirectory(payload.cwd)
     for (const [index, hook] of hooks.entries()) {
       if (signal.aborted) break
       const current: HookPayload = { ...payload, workdir }
-      const label = `${event} command #${index + 1} for ${payload.session_id}`
+      const label = `${event} ${origin === 'project' ? 'project ' : ''}command #${index + 1} for ${payload.session_id}`
       const result = await runCommand({
         command: hook.command,
         shell: config.shell,
@@ -198,7 +260,7 @@ export function apply(ctx: Context, rawConfig?: unknown): void {
         timeoutMs: hook.timeoutMs ?? config.defaultTimeoutMs,
         signal,
       })
-      await runLog.append(logEntry(event, payload.session_id, index + 1, result), (error) => {
+      await runLog.append(logEntry(event, payload.session_id, origin, index + 1, result), (error) => {
         logger.debug('could not write %s: %s', runLog.file, String(error))
       })
       report(label, result)
@@ -242,6 +304,15 @@ export function apply(ctx: Context, rawConfig?: unknown): void {
   function warn(message: string): void {
     logger.warn(message)
     process.stderr.write(`[langify-session-hooks] ${message}\n`)
+  }
+}
+
+/** Whether the session's model history already holds a note from this plugin. */
+function noteInHistory(agent: Agent): boolean {
+  try {
+    return agent.session.deriveMessages().some((message) => message.source.kind === CONTEXT_SOURCE_KIND)
+  } catch {
+    return false
   }
 }
 

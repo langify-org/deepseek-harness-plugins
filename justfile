@@ -46,6 +46,8 @@ dev plugin port="3091" *flags:
       git -C "{{playground}}" add README.md && \
       git -C "{{playground}}" -c user.name=dev -c user.email=dev@example.invalid commit -q -m init; \
     fi
+    seed="{{root}}/dev/{{plugin}}.playground"; marker="{{playground}}/.git/langify-seeded-{{plugin}}"; \
+    if [ -d "$seed" ] && [ ! -e "$marker" ]; then cp -R "$seed/." "{{playground}}/" && touch "$marker"; fi
     if [ ! -f "{{root}}/dev/local.patch.yml" ]; then \
       echo 'note: no dev/local.patch.yml, so sessions cannot reach a model; run `just dev-use-profile` once.' >&2; \
     fi
@@ -69,7 +71,7 @@ dev-use-profile profile="web":
 
 # Rebuild a plugin on every source change (pairs with `just dev`)
 watch plugin:
-    pnpm --filter ./plugins/{{plugin}} exec tsc -p tsconfig.build.json --watch
+    pnpm --filter ./plugins/{{plugin}} run watch
 
 # Build the Nix packages, which also runs every plugin's tests in the sandbox
 nix-check:

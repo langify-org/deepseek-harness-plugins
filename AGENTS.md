@@ -13,7 +13,7 @@ plugins/<name>/        one published DSH bundle per directory: @langify-org/dsh-
 e2e/<name>/run.mjs     end-to-end check of that plugin against a real dsh
 nix/                   flake builders (plugins.nix, with-dsh.nix)
 docs/upstream/         drafts of proposals to deepseek-ai/deepseek-harness
-dev/                   `just dev` configs: <name>.patch.yml per plugin, local.patch.yml (yours)
+dev/                   `just dev` configs: <name>.patch.yml and <name>.playground/ per plugin, local.patch.yml (yours)
 scripts/i18n.mjs       keeps the README translations in step
 ```
 
@@ -23,14 +23,15 @@ scripts/i18n.mjs       keeps the README translations in step
 2. **Relative entry.** The bundle patch names the plugin as `./lib/index.js`. DSH resolves `./` and `../` names in any patch beside that patch file, so the same file works for `dsh plugin add`, for `--patch` on a checkout, and for the Nix build. Never use the package name or an absolute path there.
 3. **Prefixed ids.** Row ids and Cordis plugin names start with `langify-` (for example `langify-session-hooks`). A patch that overrides a built-in row must say so in the plugin's README.
 4. **Neutral defaults.** The bundle patch carries only defaults that suit everyone, usually `config: {}`. Personal settings belong in the user's own layer. A later layer replaces a row's whole `config`, so the schema must hold every default.
-5. **Runtime imports are DSH peers only.** Import only Node built-ins and `@deepseek-ai/*` packages at runtime. List those in `peerDependencies` with the supported range (`^0.2.0-rc.2` while DSH is 0.2) and in `devDependencies` as `catalog:`. DSH checks `@deepseek-ai/dsh-*` peer ranges against its own version when it installs or starts a plugin. Do not add runtime `dependencies`: the Nix build ships `lib/` without a `node_modules` of its own. Type-only imports (`import type`) need only the dev dependency.
+5. **DSH is a peer; everything else is bundled.** `@deepseek-ai/*` packages are `peerDependencies` with the supported range (`^0.2.0-rc.2` while DSH is 0.2) and `devDependencies` as `catalog:`, so the plugin shares DSH's own instances; DSH checks the `@deepseek-ai/dsh-*` ranges against its version when it installs or starts a plugin. Any other library (session-hooks uses `js-yaml`) is a `devDependency` that `build:js` bundles into `lib/index.js` with esbuild, keeping `@deepseek-ai/*` external. Never add runtime `dependencies`: the Nix build ships `lib/` without a `node_modules` of its own.
 6. **Validate config yourself.** Export a schemastery `Config` for DSH's tooling, and validate again in `apply` (see `resolveConfig` in session-hooks), with errors prefixed by the plugin name.
 7. **Make failures visible.** DSH keeps `ctx.logger` output only while it starts up. Report runtime problems to stderr with a `[langify-<name>]` prefix as well, and keep a log file under `$DSH_HOME/langify-<name>/` when users need details.
 8. **Never block or crash DSH.** Catch errors in listeners, bound every external process with a timeout, and stop running work in the plugin's `ctx.effect` disposer.
 
 ## TypeScript and tests
 
-- Source and tests use erasable TypeScript only (`erasableSyntaxOnly`): no enums, namespaces, or constructor parameter properties. Node runs the tests directly from `.ts` files, and relative imports use the `.ts` extension; `tsc` rewrites them to `.js` for `lib/`.
+- Source and tests use erasable TypeScript only (`erasableSyntaxOnly`): no enums, namespaces, or constructor parameter properties. Node runs the tests directly from `.ts` files, and relative imports use the `.ts` extension.
+- `build` emits declarations with `tsc` (`build:types`) and the single `lib/index.js` with esbuild (`build:js`). The repository uses `esbuild-wasm`, which has no platform-specific binary, so the Nix dependency hash is the same on every system.
 - `pnpm --filter ./plugins/<name> run test` runs `node --test`. Cover pure logic with unit tests and the plugin on a real `new Context()` from `@deepseek-ai/cordis` by emitting the DSH events it listens to (see `test/plugin.test.ts`).
 - `e2e/<name>/run.mjs` runs the plugin in a real `dsh`. Use a throwaway `DSH_HOME`, a free port, and an environment without inherited `DSH_*` variables, plus `DSH_TELEMETRY_DISABLED=1`. Support the three bundle sources (checkout, `DSH_E2E_PLUGIN_PATCH`, `DSH_E2E_TARBALL`). A model request is allowed only behind an opt-in variable such as `DSH_E2E_PROVIDER_PATCH`.
 - Before a pull request, run `just check`. Also run `just e2e <name>` and `just nix-check` when behavior, packaging, or dependencies changed.
@@ -50,11 +51,12 @@ Development and tests never use the running DSH (port 3080 by default) and never
 
 - `just dev <plugin> [port]` starts a separate Web UI on port 3091 and opens it in the browser. It has its own home (`.dsh-dev/home`), and its default workspace is a throwaway git repository under `.dsh-dev/documents/` (it sets the workspace controller's `documentsDirectory`), so hooks never touch this checkout or your own DSH workspace.
 - It loads `dev/<plugin>.patch.yml`, the plugin's committed dev config, then `dev/local.patch.yml`. The latter is personal and git-ignored; `just dev-use-profile` makes it a read-only link to the user's own profile patch so the dev UI reaches their model provider.
+- Files in `dev/<plugin>.playground/` are copied into the playground once (for example a project `.dsh/hooks.yml`).
 - `just dev` exports `LANGIFY_DEV_ROOT` (this checkout) and `DSH_WORKTREES_DIR` (`.dsh-dev/worktrees`); dev configs use them instead of absolute paths.
 
 ## Working in parallel
 
-- Work on one plugin per branch, ideally in its own `git worktree`. A task's write scope is `plugins/<name>/`, `e2e/<name>/`, and `dev/<name>.patch.yml`.
+- Work on one plugin per branch, ideally in its own `git worktree`. A task's write scope is `plugins/<name>/`, `e2e/<name>/`, `dev/<name>.patch.yml`, and `dev/<name>.playground/`.
 - Files shared by every plugin are edited by one task at a time: `pnpm-workspace.yaml` (catalog), `pnpm-lock.yaml`, `nix/plugins.nix` (dependency hash), `flake.lock`, root `package.json`, CI workflows, and this file.
 - Give each parallel `just dev` its own port: `just dev session-hooks 3092`.
 

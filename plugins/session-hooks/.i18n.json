@@ -3,9 +3,9 @@
   "sections": [
     {
       "section": "@langify-org/dsh-session-hooks",
-      "en": "e8942cb9fe12ea82",
-      "ja": "2b9921e04bebc969",
-      "zh": "ac86eb0d46528b82"
+      "en": "d3499719a1daab95",
+      "ja": "b9e9793529ee72a9",
+      "zh": "772a9fdbc0ba0d74"
     },
     {
       "section": "Status",
@@ -21,21 +21,27 @@
     },
     {
       "section": "Configure",
-      "en": "9b7d8d621cb6dc90",
-      "ja": "59ee5782724c93d2",
-      "zh": "63ec81f59faac2fe"
+      "en": "bb52977906294ae0",
+      "ja": "a3caec15686adc4c",
+      "zh": "0c37826f7d54d3de"
+    },
+    {
+      "section": "Project hooks",
+      "en": "60a849c90bf60f8a",
+      "ja": "bc65c654811f3feb",
+      "zh": "a20217c91354aa7c"
     },
     {
       "section": "What a command receives",
-      "en": "29297800c54de425",
-      "ja": "381ebc58881a30e7",
-      "zh": "b79f041ce2d2e33e"
+      "en": "917e1c80c25b106f",
+      "ja": "5e4ab6d74c444264",
+      "zh": "61f3f92e0ccf1263"
     },
     {
       "section": "Pointing a session at another directory",
-      "en": "cba6e3fc099d07cd",
-      "ja": "13e6fe3c480d7854",
-      "zh": "e36e871c79c963aa"
+      "en": "0e83194d9180eecb",
+      "ja": "27ed8cc42e56ed9b",
+      "zh": "06a8fe8ebbf9f0ac"
     },
     {
       "section": "Example: one git worktree per session",
@@ -51,9 +57,9 @@
     },
     {
       "section": "Security",
-      "en": "601fa9b1b0f71513",
-      "ja": "6fb9ec7819c53580",
-      "zh": "a7d20c29cf7ec709"
+      "en": "8a75964df8a24910",
+      "ja": "695fd11c00e84be3",
+      "zh": "251dc8d9c92ab061"
     },
     {
       "section": "How it works",

@@ -50,7 +50,11 @@
     "node": ">=22.18"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "clean": "node -e \"require('node:fs').rmSync('lib', { recursive: true, force: true })\"",
+    "build": "pnpm run clean && pnpm run build:types && pnpm run build:js",
+    "build:types": "tsc -p tsconfig.build.json --emitDeclarationOnly",
+    "build:js": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --external:@deepseek-ai/* --outfile=lib/index.js --log-level=warning",
+    "watch": "pnpm run build:js --watch=forever",
     "typecheck": "tsc -p tsconfig.json",
     "test": "node --test \"test/**/*.test.ts\"",
     "prepack": "pnpm run build"
@@ -77,6 +81,8 @@
     "@deepseek-ai/dsh-workspace": "catalog:",
     "@deepseek-ai/schemastery": "catalog:",
     "@types/node": "catalog:",
+    "esbuild-wasm": "catalog:",
+    "js-yaml": "catalog:",
     "typescript": "catalog:"
   }
 }

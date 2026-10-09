@@ -6,7 +6,7 @@
 
 | プラグイン | できること |
 |---|---|
-| [`@langify-org/dsh-session-hooks`](plugins/session-hooks/README.ja.md) | セッションの開始時・アーカイブ時・アーカイブ解除時に、指定した shell コマンドを実行します。たとえば、セッションごとに専用の git worktree を用意できます。 |
+| [`@langify-org/dsh-session-hooks`](plugins/session-hooks/README.ja.md) | セッションの開始時・アーカイブ時・アーカイブ解除時に、設定または信頼したプロジェクトの `.dsh/hooks.yml` に書いた shell コマンドを実行します。たとえば、セッションごとに専用の git worktree を用意できます。 |
 
 どのプラグインも、通常の DSH の **bundle** です。`package.json` で `dsh.bundle` を宣言した npm パッケージで、同梱の `cordis.patch.yml` がプラグインを追加します。patch はプラグインを自分自身からの相対パス（`./lib/index.js`）で指定しているので、DSH のどの読み込み方でも同じパッケージがそのまま動きます。
 

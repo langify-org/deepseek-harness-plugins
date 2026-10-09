@@ -56,7 +56,7 @@ let
     version = "0";
     inherit src pnpm;
     fetcherVersion = 4;
-    hash = "sha256-+/9Il2CvE0za1uhofn0RTjVGCDXbPocFyMwbSIEmFf8=";
+    hash = "sha256-T8H8bt5REuf/oa5Iy/l9vReGS06JFiiOlkz6ELUZ8+E=";
   };
 
   mkPlugin =

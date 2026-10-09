@@ -1,0 +1,11 @@
+# Project hooks of the `just dev` playground, copied in from
+# dev/session-hooks.playground/ the first time. They run because the dev
+# config trusts this checkout (projectHooks.trustedDirs). Edit this file in
+# the playground and the next session picks up the change.
+sessionStart:
+  - |
+    echo "playground project hook ran in $(pwd) for $DSH_SESSION_ID" >&2
+    echo '{"context": "This playground repository has its own .dsh/hooks.yml (project hooks). Mention it if the user asks which hooks ran."}'
+sessionArchive:
+  - |
+    echo "playground project hook: session $DSH_SESSION_ID archived" >&2

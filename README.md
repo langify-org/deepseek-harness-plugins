@@ -6,7 +6,7 @@ Plugins for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 
 
 | Plugin | What it does |
 |---|---|
-| [`@langify-org/dsh-session-hooks`](plugins/session-hooks) | Runs your shell commands when a session starts, is archived, or is restored. For example, it can give every session its own git worktree. |
+| [`@langify-org/dsh-session-hooks`](plugins/session-hooks) | Runs shell commands from your config, or from a trusted project's `.dsh/hooks.yml`, when a session starts, is archived, or is restored. For example, it can give every session its own git worktree. |
 
 Every plugin is an ordinary DSH **bundle**: an npm package whose `package.json` declares `dsh.bundle` and whose `cordis.patch.yml` inserts the plugin. The patch names the plugin by a path relative to itself (`./lib/index.js`), so the same package works with every way DSH can load it.
 

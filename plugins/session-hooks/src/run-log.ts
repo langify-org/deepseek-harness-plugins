@@ -15,11 +15,15 @@ const TAIL_CHARS = 4000
 
 export type RunStatus = 'ok' | 'failed' | 'timed-out' | 'cancelled' | 'not-started'
 
+/** Where a command came from: the plugin config, or a project's hooks file. */
+export type HookOrigin = 'config' | 'project'
+
 export interface RunLogEntry {
   readonly time: string
   readonly event: HookEventName
   readonly sessionId: string
-  /** 1-based position of the command in the event's list. */
+  readonly hooks: HookOrigin
+  /** 1-based position of the command in its list. */
   readonly command: number
   readonly status: RunStatus
   readonly exitCode: number | null
@@ -37,11 +41,12 @@ export function runStatus(result: RunResult): RunStatus {
   return result.exitCode === 0 ? 'ok' : 'failed'
 }
 
-export function logEntry(event: HookEventName, sessionId: string, command: number, result: RunResult): RunLogEntry {
+export function logEntry(event: HookEventName, sessionId: string, hooks: HookOrigin, command: number, result: RunResult): RunLogEntry {
   return {
     time: new Date().toISOString(),
     event,
     sessionId,
+    hooks,
     command,
     status: runStatus(result),
     exitCode: result.exitCode,

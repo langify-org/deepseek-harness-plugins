@@ -8,7 +8,8 @@
  *   1. compose  — the plugin row composes, with its entry resolved to the bundle.
  *   2. archive  — a Web profile on a free port, with ./driver.mjs creating,
  *                 archiving, and restoring a session through DSH's own APIs; the
- *                 bundle's worktree examples run as the hooks.
+ *                 bundle's worktree examples run as the configured hooks, and the
+ *                 project's own .dsh/hooks.yml (trusted) runs after them.
  *   3. context  — only with DSH_E2E_PROVIDER_PATCH: a headless run asks the model
  *                 for the workdir the start hook announced (one model request).
  *
@@ -82,6 +83,21 @@ function setup() {
   writeFileSync(join(project, 'README.md'), '# e2e\n')
   git('add', 'README.md')
   git('-c', 'user.name=e2e', '-c', 'user.email=e2e@example.invalid', 'commit', '-q', '-m', 'init')
+  // The project's own hooks file, with inline scripts; trusted below through projectHooks.trustedDirs.
+  const projectRecord = (event, suffix) => `${sh(join(records, `project-${event}-`))}"$DSH_SESSION_ID".${suffix}`
+  mkdirSync(join(project, '.dsh'), { recursive: true })
+  writeFileSync(
+    join(project, '.dsh', 'hooks.yml'),
+    [
+      'sessionStart:',
+      '  - |',
+      `    cat > ${projectRecord('start', 'json')}`,
+      `    pwd > ${projectRecord('start', 'pwd')}`,
+      'sessionArchive:',
+      `  - cat > ${projectRecord('archive', 'json')}`,
+      '',
+    ].join('\n'),
+  )
 
   const examples = join(bundle.dir, 'examples')
   const env = `DSH_WORKTREES_DIR=${sh(worktrees)}`
@@ -96,6 +112,7 @@ function setup() {
         id: 'langify-session-hooks',
         config: {
           stateDir: state,
+          projectHooks: { trustedDirs: [root] },
           sessionStart: [hook('start', 'worktree-start.sh')],
           sessionArchive: [hook('archive', 'worktree-archive.sh')],
           sessionUnarchive: [hook('unarchive', 'worktree-unarchive.sh')],
@@ -164,8 +181,12 @@ async function archive() {
     check(restored.hook_event_name === 'SessionUnarchive' && restored.workdir === worktree, 'unarchive hook got the recorded workdir')
     check(existsSync(join(worktree, 'README.md')), 'the worktree exists again after unarchive')
     check(git('branch', '--list', `dsh/${id}`) !== '', `branch dsh/${id} was kept`)
+    const projectStart = readJson(join(records, `project-start-${id}.json`))
+    check(projectStart.workdir === worktree, 'the project hooks file ran after the configured hook, with its workdir')
+    check(readFileSync(join(records, `project-start-${id}.pwd`), 'utf8').trim() === project, 'project hooks run in the project root')
+    check(readJson(join(records, `project-archive-${id}.json`)).hook_event_name === 'SessionArchive', 'the project archive hook ran')
     const runs = readFileSync(join(state, 'hooks.log'), 'utf8').trim().split('\n').map((line) => JSON.parse(line))
-    const runOf = (event) => runs.find((entry) => entry.event === event && entry.sessionId === id)
+    const runOf = (event) => runs.find((entry) => entry.event === event && entry.sessionId === id && entry.hooks === 'config')
     check(runs.every((entry) => entry.status === 'ok'), 'every hook run succeeded (hooks.log)')
     check(runOf('SessionArchive')?.stderr.includes(`removed worktree ${worktree}`), 'archive example removed the clean worktree')
     check(runOf('SessionUnarchive')?.stderr.includes(`restored worktree ${worktree}`), 'unarchive example restored it')

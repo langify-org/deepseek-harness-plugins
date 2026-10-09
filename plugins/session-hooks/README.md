@@ -2,7 +2,7 @@
 
 English | [日本語](https://github.com/langify-org/deepseek-harness-plugins/blob/main/plugins/session-hooks/README.ja.md) | [简体中文](https://github.com/langify-org/deepseek-harness-plugins/blob/main/plugins/session-hooks/README.zh.md)
 
-Run your own shell commands when a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) session starts, is archived, or is restored. Typical uses: give every session its own git worktree, prepare or clean up resources, or keep an external tracker in sync.
+Run your own shell commands when a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) session starts, is archived, or is restored. Typical uses: give every session its own git worktree, prepare or clean up resources, or keep an external tracker in sync. Commands come from your DSH config, or from a trusted project's own `.dsh/hooks.yml`.
 
 | Event | When it runs | What the command can do |
 |---|---|---|
@@ -65,11 +65,45 @@ In the default `web` profile, saving the profile's `cordis.patch.yml` applies th
 | `includeSubagents` | `false` | Also run hooks for subagent and teammate sessions. |
 | `defaultTimeoutMs` | `60000` | Timeout for a command that sets none. |
 | `shell` | `bash` | Commands run as `<shell> -c <command>`. |
+| `projectHooks.trustedDirs` | `[]` | Directories whose projects may run their own hooks file (`~/` allowed). Empty: project hooks are off. |
+| `projectHooks.file` | `.dsh/hooks.yml` | The project hooks file, relative to the project root. |
 | `stateDir` | `$DSH_HOME/langify-session-hooks` | Where per-session records and `hooks.log` live. |
+
+## Project hooks
+
+A project can define its own hooks in `.dsh/hooks.yml` at its root, next to the scripts they run. Write scripts inline, as in a GitHub Actions workflow:
+
+```yaml
+sessionStart:
+  - |
+    pnpm install --frozen-lockfile >&2
+    echo '{"context": "Dependencies are installed; use pnpm."}'
+sessionArchive:
+  - ./scripts/cleanup.sh
+  - command: ./scripts/backup.sh
+    timeoutMs: 300000
+```
+
+- The file takes the same three lists as the plugin config, and its commands receive and print the same things as configured ones (see the next sections).
+- The project root is the git working tree the session's directory belongs to, or the session's directory outside git. Project commands run there, so relative paths such as `./scripts/cleanup.sh` resolve from the root.
+- Project commands run after the configured ones and see the `workdir` those chose.
+- The file is read again for every event, so changes apply without a restart.
+
+Project hooks run only for projects you trust. List those directories in the plugin config; a project runs its file only when its root is inside one of them:
+
+```yaml
+- id: langify-session-hooks
+  config:
+    projectHooks:
+      trustedDirs:
+        - ~/Projects/my-org
+```
+
+A session in an untrusted project runs nothing from its hooks file, and DSH's stderr says once that the file was skipped.
 
 ## What a command receives
 
-Each command runs in the session's directory (or DSH's own directory if that no longer exists), with one line of JSON on stdin:
+Each configured command runs in the session's directory (or DSH's own directory if that no longer exists), and each project command in the project root. Both get one line of JSON on stdin:
 
 ```json
 {"hook_event_name":"SessionStart","session_id":"session-…","cwd":"/home/me/project","workdir":null,"source":"startup"}
@@ -97,7 +131,7 @@ DSH fixes a session's directory when the session is created; a hook cannot chang
 - `workdir` must be an existing directory. The plugin tells the model to work there (to run commands in it and edit files under it), and passes it to later start commands and to the session's archive and unarchive commands.
 - `context` is extra text for the model.
 
-The plugin adds this as one note before the session's first model request. The Web UI's file panel and the session's place in the sidebar still follow the original directory.
+The plugin adds this as one note before the session's first model request, and records it. When a session starts again without running start commands (by default: resumed after a DSH restart, cleared, or compacted) and its history no longer holds the note, the plugin sends the recorded note again. The Web UI's file panel and the session's place in the sidebar still follow the original directory.
 
 ## Example: one git worktree per session
 
@@ -130,7 +164,7 @@ After `dsh plugin add`, the scripts are in `$DSH_HOME/profiles/<profile>/node_mo
 
 ## Security
 
-Commands run with the DSH process's own permissions, outside the agent sandbox, like Claude Code hooks. They come only from your patch layers: the plugin never reads hook configuration from a project directory, so opening a session in a cloned repository does not run that repository's code.
+Commands run with the DSH process's own permissions, outside the agent sandbox, like Claude Code hooks. They come from your patch layers, and from a project's `.dsh/hooks.yml` only when the project is inside a directory listed in `projectHooks.trustedDirs`. Opening a session in a repository cloned from elsewhere runs none of its code unless it sits under a trusted directory, so trust only directories whose contents you control.
 
 ## How it works
 

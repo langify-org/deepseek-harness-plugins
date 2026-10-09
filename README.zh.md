@@ -6,7 +6,7 @@
 
 | 插件 | 功能 |
 |---|---|
-| [`@langify-org/dsh-session-hooks`](plugins/session-hooks/README.zh.md) | 在会话开始、归档或取消归档时运行你指定的 shell 命令。例如，可以为每个会话准备独立的 git worktree。 |
+| [`@langify-org/dsh-session-hooks`](plugins/session-hooks/README.zh.md) | 在会话开始、归档或取消归档时，运行你在配置中或受信任项目的 `.dsh/hooks.yml` 中写下的 shell 命令。例如，可以为每个会话准备独立的 git worktree。 |
 
 每个插件都是普通的 DSH **组合包**（bundle）：在 `package.json` 中声明 `dsh.bundle` 的 npm 包，由随包附带的 `cordis.patch.yml` 插入插件。patch 以相对于自身的路径（`./lib/index.js`）指定插件，因此无论 DSH 以哪种方式加载，同一个包都能直接使用。
 

@@ -1,6 +1,7 @@
 /**
  * Per-session records, so archive hooks still know the `workdir` a start hook
- * chose after DSH restarts. One small JSON file per session.
+ * chose after DSH restarts, and a resumed session can still be told about it.
+ * One small JSON file per session.
  */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -10,6 +11,8 @@ export interface SessionRecord {
   readonly sessionId: string
   readonly cwd: string | null
   readonly workdir: string | null
+  /** The `context` texts start commands returned, in order. */
+  readonly contexts: readonly string[]
   /** ISO timestamp of the start hook run that wrote this record. */
   readonly startedAt: string
 }
@@ -55,6 +58,7 @@ export class SessionStateStore {
       sessionId,
       cwd: typeof value.cwd === 'string' ? value.cwd : null,
       workdir: typeof value.workdir === 'string' ? value.workdir : null,
+      contexts: Array.isArray(value.contexts) ? value.contexts.filter((text): text is string => typeof text === 'string') : [],
       startedAt: typeof value.startedAt === 'string' ? value.startedAt : '',
     }
   }

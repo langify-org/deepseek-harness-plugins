@@ -2,7 +2,7 @@
 
 [English](https://github.com/langify-org/deepseek-harness-plugins/blob/main/plugins/session-hooks/README.md) | 日本語 | [简体中文](https://github.com/langify-org/deepseek-harness-plugins/blob/main/plugins/session-hooks/README.zh.md)
 
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）のセッションが開始したとき、アーカイブされたとき、アーカイブから戻されたときに、あなたの shell コマンドを実行します。主な使い道は、セッションごとに専用の git worktree を用意すること、リソースの準備や後片付け、外部のタスク管理ツールとの同期などです。
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）のセッションが開始したとき、アーカイブされたとき、アーカイブから戻されたときに、あなたの shell コマンドを実行します。主な使い道は、セッションごとに専用の git worktree を用意すること、リソースの準備や後片付け、外部のタスク管理ツールとの同期などです。実行するコマンドは、DSH の設定に書くか、信頼したプロジェクトの `.dsh/hooks.yml` に書きます。
 
 | イベント | 実行されるタイミング | コマンドでできること |
 |---|---|---|
@@ -65,11 +65,45 @@ dsh web --patch /path/to/dsh-session-hooks/cordis.patch.yml --patch ./my-hooks.p
 | `includeSubagents` | `false` | サブエージェントやチームメイトのセッションでもフックを実行します。 |
 | `defaultTimeoutMs` | `60000` | `timeoutMs` を指定しないコマンドのタイムアウト（ミリ秒）。 |
 | `shell` | `bash` | コマンドは `<shell> -c <command>` として実行されます。 |
+| `projectHooks.trustedDirs` | `[]` | 自前のフックファイルの実行を許可するプロジェクトがあるディレクトリ（`~/` も使えます）。空ならプロジェクトのフックは無効です。 |
+| `projectHooks.file` | `.dsh/hooks.yml` | プロジェクトのフックファイルの場所（プロジェクトのルートからの相対パス）。 |
 | `stateDir` | `$DSH_HOME/langify-session-hooks` | セッションごとの記録と `hooks.log` の保存先。 |
+
+## プロジェクトのフック
+
+プロジェクトは、ルートの `.dsh/hooks.yml` に自分用のフックを書けます。実行するスクリプトと同じリポジトリで管理でき、GitHub Actions のワークフローのようにスクリプトを直接書けます。
+
+```yaml
+sessionStart:
+  - |
+    pnpm install --frozen-lockfile >&2
+    echo '{"context": "Dependencies are installed; use pnpm."}'
+sessionArchive:
+  - ./scripts/cleanup.sh
+  - command: ./scripts/backup.sh
+    timeoutMs: 300000
+```
+
+- 書けるのはプラグインの設定と同じ3つの一覧です。コマンドが受け取る情報と出力できる内容も、設定に書いたコマンドと同じです（次の節以降を参照）。
+- プロジェクトのルートは、セッションのディレクトリが属する git の作業ツリーです。git の外なら、セッションのディレクトリそのものです。プロジェクトのコマンドはそこで実行されるので、`./scripts/cleanup.sh` のような相対パスはルートから解決されます。
+- プロジェクトのコマンドは、設定に書いたコマンドの後に実行され、そちらが決めた `workdir` を受け取ります。
+- ファイルはイベントのたびに読み直すので、変更は再起動なしで反映されます。
+
+プロジェクトのフックは、信頼したプロジェクトでしか実行されません。プラグインの設定に信頼するディレクトリを書いておくと、ルートがその中にあるプロジェクトだけがファイルを実行できます。
+
+```yaml
+- id: langify-session-hooks
+  config:
+    projectHooks:
+      trustedDirs:
+        - ~/Projects/my-org
+```
+
+信頼していないプロジェクトでは、フックファイルの内容は何も実行されません。ファイルを読み飛ばしたことは、DSH の stderr に一度だけ表示されます。
 
 ## コマンドが受け取る情報
 
-各コマンドはセッションのディレクトリで実行されます（そのディレクトリがもう存在しない場合は DSH 自身のディレクトリ）。stdin には1行の JSON が渡されます。
+設定に書いたコマンドはセッションのディレクトリで（そのディレクトリがもう存在しない場合は DSH 自身のディレクトリで）、プロジェクトのコマンドはプロジェクトのルートで実行されます。どちらも stdin に1行の JSON を受け取ります。
 
 ```json
 {"hook_event_name":"SessionStart","session_id":"session-…","cwd":"/home/me/project","workdir":null,"source":"startup"}
@@ -97,7 +131,7 @@ DSH はセッションのディレクトリを作成時に固定するため、�
 - `workdir` は存在するディレクトリでなければなりません。プラグインはモデルに、そこで作業する（コマンドをそのディレクトリで実行し、その下のファイルを編集する）よう伝えます。また、後続の開始時コマンドと、そのセッションのアーカイブ時・解除時のコマンドに渡します。
 - `context` はモデルに伝える追加のテキストです。
 
-これらは、セッションの最初のモデルへのリクエストの前に、1つのメモとして追加されます。Web UI のファイルパネルと、サイドバー上でのセッションの所属は、元のディレクトリのままです。
+これらは、セッションの最初のモデルへのリクエストの前に1つのメモとして追加され、記録もされます。開始時のコマンドを実行せずにセッションが再び始まったとき（既定では、DSH の再起動後の再開、クリア、圧縮のとき）に、履歴にそのメモが残っていなければ、記録しておいたメモをもう一度送ります。Web UI のファイルパネルと、サイドバー上でのセッションの所属は、元のディレクトリのままです。
 
 ## 例：セッションごとに git worktree を用意する
 
@@ -130,7 +164,7 @@ DSH はセッションのディレクトリを作成時に固定するため、�
 
 ## セキュリティ
 
-コマンドは DSH プロセスと同じ権限で、エージェントのサンドボックスの外で実行されます（Claude Code のフックと同様です）。コマンドはあなたの patch レイヤーからしか読み込みません。プロジェクトのディレクトリからフックの設定を読むことはないので、clone したリポジトリでセッションを開いても、そのリポジトリのコードが実行されることはありません。
+コマンドは DSH プロセスと同じ権限で、エージェントのサンドボックスの外で実行されます（Claude Code のフックと同様です）。コマンドはあなたの patch レイヤーから読み込みます。プロジェクトの `.dsh/hooks.yml` を読むのは、そのプロジェクトが `projectHooks.trustedDirs` に書いたディレクトリの中にあるときだけです。よそから clone したリポジトリでセッションを開いても、信頼したディレクトリの外にあればそのコードは実行されません。信頼するのは、中身を自分で管理しているディレクトリだけにしてください。
 
 ## 仕組み
 

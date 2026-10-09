@@ -1,0 +1,12 @@
+node_modules/
+plugins/*/lib/
+*.tsbuildinfo
+*.tgz
+
+# Nix build links
+result
+result-*
+
+# Local development DSH home, generated overlays and personal patches
+.dsh-dev/
+dev/local.patch.yml

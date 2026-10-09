@@ -1,0 +1,24 @@
+# Copy to dev/local.patch.yml (git-ignored) for `just dev`.
+#
+# `just dev` uses its own DSH home (.dsh-dev/home), so it needs your model
+# provider rows. Copy the `llm-pi-ai` and `agent-default-model` rows from your
+# own profile ($DSH_HOME/profiles/web/cordis.patch.yml), then add the config of
+# the plugin you are working on. Hook commands run in the session's directory,
+# so use absolute paths.
+
+# - id: llm-pi-ai
+#   name: "@deepseek-ai/dsh-llm-pi-ai"
+#   config:
+#     providers: { ... }
+# - id: agent-default-model
+#   name: "@deepseek-ai/dsh-agent-default-model"
+#   config: { provider: ..., model: ... }
+
+- id: langify-session-hooks
+  config:
+    sessionStart:
+      - bash /absolute/path/to/deepseek-harness-plugins/plugins/session-hooks/examples/worktree-start.sh
+    sessionArchive:
+      - bash /absolute/path/to/deepseek-harness-plugins/plugins/session-hooks/examples/worktree-archive.sh
+    sessionUnarchive:
+      - bash /absolute/path/to/deepseek-harness-plugins/plugins/session-hooks/examples/worktree-unarchive.sh

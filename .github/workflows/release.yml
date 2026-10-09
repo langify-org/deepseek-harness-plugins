@@ -1,0 +1,37 @@
+name: Release
+
+# Pending changesets open a "Version packages" pull request; merging it
+# publishes the bumped plugins to npm with provenance, through npm trusted
+# publishing (no token). See AGENTS.md, "Releasing".
+on:
+  push:
+    branches: [main]
+
+concurrency: release-${{ github.ref }}
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run check
+      - uses: changesets/action@v2
+        with:
+          version: pnpm changeset version
+          publish: pnpm run release
+          title: Version packages
+          commit: Version packages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

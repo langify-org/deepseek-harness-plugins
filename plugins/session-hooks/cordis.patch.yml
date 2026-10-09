@@ -1,0 +1,12 @@
+# Bundle layer of @langify/dsh-session-hooks.
+#
+# The plugin path is relative to this file, so the same file works both as an
+# installed bundle (`dsh plugin add`) and as a `--patch` overlay.
+#
+# Nothing runs until you configure hooks in your own layer (the profile's
+# cordis.patch.yml or a later --patch). That layer replaces this row's whole
+# `config`, so restate every key you use. See README.md.
+- insert:
+    - id: langify-session-hooks
+      name: ./lib/index.js
+      config: {}

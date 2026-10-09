@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Type check, test, build
+        run: pnpm run check
+      # The DSH version the catalog in pnpm-workspace.yaml targets.
+      - name: Install dsh
+        run: npm install --global @deepseek-ai/dsh@0.2.0-rc.2
+      - name: End-to-end (bundle loaded with --patch)
+        run: for dir in e2e/*/; do node "$dir/run.mjs"; done
+      - name: End-to-end (packed tarball installed with dsh plugin add)
+        run: |
+          for dir in e2e/*/; do
+            plugin=$(basename "$dir")
+            rm -rf .dsh-dev/pack && mkdir -p .dsh-dev/pack
+            pnpm --filter "./plugins/$plugin" pack --pack-destination .dsh-dev/pack
+            DSH_E2E_TARBALL="$(ls .dsh-dev/pack/*.tgz)" node "$dir/run.mjs"
+          done
+
+  nix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - name: Build every plugin (runs its tests in the sandbox)
+        run: nix flake check -L

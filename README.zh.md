@@ -64,12 +64,14 @@ in
 pnpm install
 just check
 just e2e session-hooks
+just dev-use-profile
 just dev session-hooks
 ```
 
 - `just check`：先检查 README 各语言版本是否同步，再运行类型检查、单元测试与集成测试以及构建。
 - `just e2e session-hooks`：在一次性的 DSH home 中，用真实的 `dsh` 运行该插件。
-- `just dev session-hooks`：在 3091 端口启动装有该插件的开发用 DSH Web UI。
+- `just dev-use-profile`：只需运行一次。它把 `dev/local.patch.yml` 链接到你自己 DSH profile 的 patch（只读），让开发用 UI 连接同样的模型提供方。
+- `just dev session-hooks`：在 3091 端口启动装有该插件及示例钩子的开发用 DSH Web UI，并在浏览器中打开。它使用独立的 DSH home 和供会话使用的一次性 git 仓库，因此不会影响你平时的 DSH 和本仓库。
 
 添加插件、测试、发布以及升级 DSH 的约定见 [AGENTS.md](AGENTS.md)（英文）。人和编程智能体遵循同一套约定。所有 README 都以英文、日文和简体中文三种语言维护。
 

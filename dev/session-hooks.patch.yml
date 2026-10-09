@@ -1,0 +1,12 @@
+# Hook config that `just dev session-hooks` loads: the plugin's own git
+# worktree examples. `just dev` exports LANGIFY_DEV_ROOT (this checkout) and
+# DSH_WORKTREES_DIR (.dsh-dev/worktrees), so nothing here is machine-specific.
+# Sessions open in the dev default workspace, a throwaway git repository.
+- id: langify-session-hooks
+  config:
+    sessionStart:
+      - bash "$LANGIFY_DEV_ROOT/plugins/session-hooks/examples/worktree-start.sh"
+    sessionArchive:
+      - bash "$LANGIFY_DEV_ROOT/plugins/session-hooks/examples/worktree-archive.sh"
+    sessionUnarchive:
+      - bash "$LANGIFY_DEV_ROOT/plugins/session-hooks/examples/worktree-unarchive.sh"

@@ -13,7 +13,7 @@ plugins/<name>/        one published DSH bundle per directory: @langify-org/dsh-
 e2e/<name>/run.mjs     end-to-end check of that plugin against a real dsh
 nix/                   flake builders (plugins.nix, with-dsh.nix)
 docs/upstream/         drafts of proposals to deepseek-ai/deepseek-harness
-dev/                   examples for local development patches
+dev/                   `just dev` configs: <name>.patch.yml per plugin, local.patch.yml (yours)
 scripts/i18n.mjs       keeps the README translations in step
 ```
 
@@ -46,11 +46,15 @@ scripts/i18n.mjs       keeps the README translations in step
 
 ## Never touch the user's own DSH
 
-Development and tests never use the running DSH (port 3080 by default), `~/.dsh`, or its profiles. `just dev <plugin> [port]` starts a separate Web UI with `.dsh-dev/home` as its home on port 3091. Personal patches go in `dev/local.patch.yml`, which git ignores.
+Development and tests never use the running DSH (port 3080 by default) and never write to `~/.dsh` or its profiles.
+
+- `just dev <plugin> [port]` starts a separate Web UI on port 3091 and opens it in the browser. It has its own home (`.dsh-dev/home`), and its default workspace is a throwaway git repository under `.dsh-dev/documents/` (it sets the workspace controller's `documentsDirectory`), so hooks never touch this checkout or your own DSH workspace.
+- It loads `dev/<plugin>.patch.yml`, the plugin's committed dev config, then `dev/local.patch.yml`. The latter is personal and git-ignored; `just dev-use-profile` makes it a read-only link to the user's own profile patch so the dev UI reaches their model provider.
+- `just dev` exports `LANGIFY_DEV_ROOT` (this checkout) and `DSH_WORKTREES_DIR` (`.dsh-dev/worktrees`); dev configs use them instead of absolute paths.
 
 ## Working in parallel
 
-- Work on one plugin per branch, ideally in its own `git worktree`. A task's write scope is `plugins/<name>/` plus `e2e/<name>/`.
+- Work on one plugin per branch, ideally in its own `git worktree`. A task's write scope is `plugins/<name>/`, `e2e/<name>/`, and `dev/<name>.patch.yml`.
 - Files shared by every plugin are edited by one task at a time: `pnpm-workspace.yaml` (catalog), `pnpm-lock.yaml`, `nix/plugins.nix` (dependency hash), `flake.lock`, root `package.json`, CI workflows, and this file.
 - Give each parallel `just dev` its own port: `just dev session-hooks 3092`.
 
@@ -58,7 +62,7 @@ Development and tests never use the running DSH (port 3080 by default), `~/.dsh`
 
 1. Copy the shape of `plugins/session-hooks`: `package.json` (name `@langify-org/dsh-<name>`, `files`, `dsh.bundle`, peers, `publishConfig`), `cordis.patch.yml`, both tsconfig files, `src/index.ts` exporting `name`, `Config`, and `apply`, tests, `README.md` with its Japanese and Chinese translations, and `LICENSE`.
 2. Run `pnpm install`, then update the Nix dependency hash (below).
-3. Add `e2e/<name>/run.mjs` when the plugin reacts to DSH behavior that unit tests can only imitate.
+3. Add `e2e/<name>/run.mjs` when the plugin reacts to DSH behavior that unit tests can only imitate, and `dev/<name>.patch.yml` with a config that shows the plugin working in `just dev`.
 4. Add a row to the plugin table in all three root READMEs, run `pnpm run docs:record`, and add a changeset.
 
 The Nix flake and CI pick the new directory up on their own.

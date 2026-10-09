@@ -64,12 +64,14 @@ in
 pnpm install
 just check
 just e2e session-hooks
+just dev-use-profile
 just dev session-hooks
 ```
 
 - `just check`：README の翻訳がそろっているかを確認してから、型チェック、単体テストと結合テスト、ビルドを実行します。
 - `just e2e session-hooks`：使い捨ての DSH ホームで、本物の `dsh` を使ってプラグインを動かします。
-- `just dev session-hooks`：このプラグインを入れた開発用の DSH Web UI を、3091 番ポートで起動します。
+- `just dev-use-profile`：最初に1回だけ実行します。`dev/local.patch.yml` から自分の DSH プロファイルの patch へリンクを張り（読み取りのみ）、開発用の UI がいつもと同じモデルに接続できるようにします。
+- `just dev session-hooks`：このプラグインと例のフックを入れた開発用の DSH Web UI を 3091 番ポートで起動し、ブラウザで開きます。専用の DSH ホームと、セッション用の使い捨て git リポジトリを使うので、普段の DSH やこのリポジトリには影響しません。
 
 プラグインの追加、テスト、リリース、DSH の版上げの規約は [AGENTS.md](AGENTS.md)（英語）にまとめています。人もコーディングエージェントも同じ規約に従います。README はすべて英語・日本語・簡体字中国語の3言語で管理しています。
 

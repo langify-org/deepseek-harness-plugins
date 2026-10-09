@@ -64,12 +64,14 @@ Requirements: Node.js 24, pnpm 11, and `dsh` 0.2. `nix develop` provides Node.js
 pnpm install
 just check
 just e2e session-hooks
+just dev-use-profile
 just dev session-hooks
 ```
 
 - `just check`: checks that the README translations are in step, then runs the type check, unit and integration tests, and the build.
 - `just e2e session-hooks`: runs the plugin in a real `dsh`, with a throwaway DSH home.
-- `just dev session-hooks`: starts a development DSH Web UI with this plugin, on port 3091.
+- `just dev-use-profile`: run once. It links `dev/local.patch.yml` to your own DSH profile's patch (read only), so the development UI reaches the same model provider.
+- `just dev session-hooks`: starts a development DSH Web UI with this plugin and its example hooks on port 3091, and opens it in your browser. It uses its own DSH home and a throwaway git repository for sessions, so your own DSH and this checkout are not touched.
 
 [AGENTS.md](AGENTS.md) holds the conventions for adding a plugin, testing, releasing, and upgrading DSH. Humans and coding agents follow the same rules. Every README is kept in English, Japanese, and Simplified Chinese.
 

@@ -29,9 +29,7 @@ jobs:
       - run: pnpm run check
       - uses: changesets/action@v2
         with:
-          version: pnpm changeset version
-          publish: pnpm run release
-          title: Version packages
-          commit: Version packages
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          version-script: pnpm changeset version
+          publish-script: pnpm run release
+          pr-title: Version packages
+          commit-message: Version packages

@@ -39,8 +39,7 @@
     "url": "https://github.com/langify-org/deepseek-harness-plugins/issues"
   },
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   },
   "dsh": {
     "bundle": {

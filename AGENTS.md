@@ -77,5 +77,6 @@ The Nix flake and CI pick the new directory up on their own.
 ## Releasing
 
 - Each pull request that changes a plugin's behavior adds a changeset (`just changeset`). The release workflow opens a "Version packages" pull request, and merging it publishes to npm with provenance.
-- The workflow publishes through npm trusted publishing (OIDC, no token). npm configures a trusted publisher per package, and only for a package that already exists, so publish each new plugin's first version by hand: `npm login`, then `pnpm --filter ./plugins/<name> publish --access public`. After that, add the trusted publisher on npmjs.com (repository `langify-org/deepseek-harness-plugins`, workflow `release.yml`).
+- The workflow publishes through npm trusted publishing (OIDC, no token). pnpm then adds provenance by itself, because the repository is public, so do not set `publishConfig.provenance`: outside CI it makes `pnpm publish` fail.
+- npm configures a trusted publisher per package, and only for a package that already exists, so publish each new plugin's first version by hand: `npm login`, then `pnpm --filter ./plugins/<name> publish --access public`. Then add the trusted publisher from the CLI: `npm trust github @langify-org/dsh-<name> --file release.yml --repo langify-org/deepseek-harness-plugins --allow-publish` (try it with `--dry-run` first).
 - The `@langify-org` npm organization owns the packages.

@@ -1,0 +1,47 @@
+{
+  "note": "Written by scripts/i18n.mjs --write. Do not edit by hand.",
+  "sections": [
+    {
+      "section": "DeepSeek Harness plugins by langify",
+      "en": "c0f20948889d28ae",
+      "ja": "d4750ef9c2046435",
+      "zh": "b03aa20220acc93b"
+    },
+    {
+      "section": "Install",
+      "en": "e3b0c44298fc1c14",
+      "ja": "e3b0c44298fc1c14",
+      "zh": "e3b0c44298fc1c14"
+    },
+    {
+      "section": "npm (recommended)",
+      "en": "97553b197b882ac5",
+      "ja": "38ef4070f3ae6691",
+      "zh": "9abc0f8bad2c9b4b"
+    },
+    {
+      "section": "Tarball or checkout",
+      "en": "3c36366477386be6",
+      "ja": "26db44c222d39ec6",
+      "zh": "9a73d9448348a1bd"
+    },
+    {
+      "section": "Nix",
+      "en": "2957ee7d4b30aca0",
+      "ja": "665b851325f33b68",
+      "zh": "a6a85093506cc02f"
+    },
+    {
+      "section": "Develop",
+      "en": "71989f72b21c0d2c",
+      "ja": "b03ffec0551c7377",
+      "zh": "3b9a3dc5ee85111d"
+    },
+    {
+      "section": "License",
+      "en": "e5dcffe836b6ec8a",
+      "ja": "e5dcffe836b6ec8a",
+      "zh": "e5dcffe836b6ec8a"
+    }
+  ]
+}

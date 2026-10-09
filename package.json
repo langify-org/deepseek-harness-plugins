@@ -12,7 +12,9 @@
     "build": "pnpm -r --filter \"./plugins/*\" run build",
     "typecheck": "pnpm -r --filter \"./plugins/*\" run typecheck",
     "test": "pnpm -r --filter \"./plugins/*\" run test",
-    "check": "pnpm run typecheck && pnpm run test && pnpm run build",
+    "check": "pnpm run docs:check && pnpm run typecheck && pnpm run test && pnpm run build",
+    "docs:check": "node scripts/i18n.mjs",
+    "docs:record": "node scripts/i18n.mjs --write",
     "e2e": "node e2e/session-hooks/run.mjs",
     "changeset": "changeset",
     "release": "pnpm run build && changeset publish"

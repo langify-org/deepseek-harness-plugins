@@ -9,11 +9,12 @@ plugins/<name>/        one published DSH bundle per directory: @langify/dsh-<nam
   package.json         declares dsh.bundle; peers on @deepseek-ai/*
   cordis.patch.yml     inserts the plugin row with a relative entry (./lib/index.js)
   src/  test/          TypeScript source and node:test tests
-  examples/ README.md  shipped with the package
+  examples/ README*.md shipped with the package (README in en, ja, zh)
 e2e/<name>/run.mjs     end-to-end check of that plugin against a real dsh
 nix/                   flake builders (plugins.nix, with-dsh.nix)
 docs/upstream/         drafts of proposals to deepseek-ai/deepseek-harness
 dev/                   examples for local development patches
+scripts/i18n.mjs       keeps the README translations in step
 ```
 
 ## Rules for a plugin
@@ -34,6 +35,15 @@ dev/                   examples for local development patches
 - `e2e/<name>/run.mjs` runs the plugin in a real `dsh`. Use a throwaway `DSH_HOME`, a free port, and an environment without inherited `DSH_*` variables, plus `DSH_TELEMETRY_DISABLED=1`. Support the three bundle sources (checkout, `DSH_E2E_PLUGIN_PATCH`, `DSH_E2E_TARBALL`). A model request is allowed only behind an opt-in variable such as `DSH_E2E_PROVIDER_PATCH`.
 - Before a pull request, run `just check`. Also run `just e2e <name>` and `just nix-check` when behavior, packaging, or dependencies changed.
 
+## Documentation in three languages
+
+- Every README, in the repository root and in each `plugins/<name>/`, exists in English (`README.md`), Japanese (`README.ja.md`), and Simplified Chinese (`README.zh.md`). English is the source; the translations say the same thing, section by section.
+- The three files have the same headings at the same levels, and identical code blocks. Keep explanations in prose rather than in code comments, so code never needs translating.
+- The first line under the title links the other languages. A plugin README is also shown on npm, so its links (language links included) are absolute GitHub URLs.
+- `pnpm run docs:check` (part of `just check`) compares each section with the hashes in `.i18n.json` beside it and fails when one language changed without the others. After updating all three, run `pnpm run docs:record`. Never record without translating.
+- Use DSH's own terms: in Chinese, 会话 (session), 归档 (archive), 组合包 (bundle), 插件 (plugin), 钩子 (hook), and the **插件** page; in Japanese, セッション, アーカイブ, プラグイン, フック, and the **Plugins** page (the DSH UI has no Japanese locale).
+- AGENTS.md, `docs/upstream/`, and `.changeset/` stay in English.
+
 ## Never touch the user's own DSH
 
 Development and tests never use the running DSH (port 3080 by default), `~/.dsh`, or its profiles. `just dev <plugin> [port]` starts a separate Web UI with `.dsh-dev/home` as its home on port 3091. Personal patches go in `dev/local.patch.yml`, which git ignores.
@@ -46,10 +56,10 @@ Development and tests never use the running DSH (port 3080 by default), `~/.dsh`
 
 ## Adding a plugin
 
-1. Copy the shape of `plugins/session-hooks`: `package.json` (name `@langify/dsh-<name>`, `files`, `dsh.bundle`, peers, `publishConfig`), `cordis.patch.yml`, both tsconfig files, `src/index.ts` exporting `name`, `Config`, and `apply`, tests, `README.md`, and `LICENSE`.
+1. Copy the shape of `plugins/session-hooks`: `package.json` (name `@langify/dsh-<name>`, `files`, `dsh.bundle`, peers, `publishConfig`), `cordis.patch.yml`, both tsconfig files, `src/index.ts` exporting `name`, `Config`, and `apply`, tests, `README.md` with its Japanese and Chinese translations, and `LICENSE`.
 2. Run `pnpm install`, then update the Nix dependency hash (below).
 3. Add `e2e/<name>/run.mjs` when the plugin reacts to DSH behavior that unit tests can only imitate.
-4. Add a row to the plugin table in the root README, and a changeset.
+4. Add a row to the plugin table in all three root READMEs, run `pnpm run docs:record`, and add a changeset.
 
 The Nix flake and CI pick the new directory up on their own.
 

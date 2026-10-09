@@ -1,5 +1,7 @@
 # DeepSeek Harness plugins by langify
 
+English | [日本語](README.ja.md) | [简体中文](README.zh.md)
+
 Plugins for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH), published on npm under `@langify/dsh-*`.
 
 | Plugin | What it does |
@@ -21,22 +23,26 @@ You can also install it by name from the Web UI's **Plugins** page. Then configu
 ### Tarball or checkout
 
 ```sh
-dsh plugin --profile web add ./langify-dsh-session-hooks-0.1.0.tgz   # from `pnpm pack`
-dsh web --patch /path/to/plugins/session-hooks/cordis.patch.yml      # a built checkout, without installing
+dsh plugin --profile web add ./langify-dsh-session-hooks-0.1.0.tgz
+dsh web --patch /path/to/plugins/session-hooks/cordis.patch.yml
 ```
+
+The first line installs a tarball made with `pnpm pack`. The second loads a built checkout directly, without installing it.
 
 ### Nix
 
-The flake builds each plugin from source, runs its tests, and wires it to your DSH installation's own modules:
+The flake builds each plugin from source, runs its tests, and wires it to your DSH installation's own modules. Add the input to your flake:
 
 ```nix
-# flake inputs
 inputs.dsh-plugins = {
   url = "github:langify-org/deepseek-harness-plugins";
   inputs.nixpkgs.follows = "nixpkgs";
 };
+```
 
-# where you build the dsh command line
+Then pass the plugin's patch where you build the `dsh` command line:
+
+```nix
 let
   dshPlugins = inputs.dsh-plugins.lib.mkPlugins {
     inherit pkgs;
@@ -57,12 +63,16 @@ Requirements: Node.js 24, pnpm 11, and `dsh` 0.2. `nix develop` provides Node.js
 
 ```sh
 pnpm install
-just check            # type check, unit and integration tests, build
-just e2e session-hooks  # the plugin against a real dsh, in a throwaway DSH home
-just dev session-hooks  # a development DSH Web UI with this plugin, on port 3091
+just check
+just e2e session-hooks
+just dev session-hooks
 ```
 
-[AGENTS.md](AGENTS.md) holds the conventions for adding a plugin, testing, releasing, and upgrading DSH. Humans and coding agents follow the same rules.
+- `just check`: checks that the README translations are in step, then runs the type check, unit and integration tests, and the build.
+- `just e2e session-hooks`: runs the plugin in a real `dsh`, with a throwaway DSH home.
+- `just dev session-hooks`: starts a development DSH Web UI with this plugin, on port 3091.
+
+[AGENTS.md](AGENTS.md) holds the conventions for adding a plugin, testing, releasing, and upgrading DSH. Humans and coding agents follow the same rules. Every README is kept in English, Japanese, and Simplified Chinese.
 
 ## License
 

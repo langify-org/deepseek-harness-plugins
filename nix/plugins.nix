@@ -26,6 +26,8 @@ let
       "tsconfig.json"
       "tsconfig.build.json"
       "README.md"
+      "README.ja.md"
+      "README.zh.md"
       "CHANGELOG.md"
       "LICENSE"
       "src"
@@ -93,7 +95,7 @@ let
         runHook preInstall
         dest="$out/lib/dsh-plugins/${dir}"
         mkdir -p "$dest"
-        for entry in package.json cordis.patch.yml lib README.md CHANGELOG.md LICENSE examples; do
+        for entry in package.json cordis.patch.yml lib README.md README.ja.md README.zh.md CHANGELOG.md LICENSE examples; do
           if [ -e "plugins/${dir}/$entry" ]; then cp -r "plugins/${dir}/$entry" "$dest/"; fi
         done
         runHook postInstall

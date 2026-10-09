@@ -1,5 +1,7 @@
 # @langify/dsh-session-hooks
 
+English | [日本語](https://github.com/langify-org/deepseek-harness-plugins/blob/main/plugins/session-hooks/README.ja.md) | [简体中文](https://github.com/langify-org/deepseek-harness-plugins/blob/main/plugins/session-hooks/README.zh.md)
+
 Run your own shell commands when a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) session starts, is archived, or is restored. Typical uses: give every session its own git worktree, prepare or clean up resources, or keep an external tracker in sync.
 
 | Event | When it runs | What the command can do |

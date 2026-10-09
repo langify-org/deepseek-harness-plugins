@@ -1,4 +1,4 @@
-# @langify/dsh-session-hooks
+# @langify-org/dsh-session-hooks
 
 [English](https://github.com/langify-org/deepseek-harness-plugins/blob/main/plugins/session-hooks/README.md) | 日本語 | [简体中文](https://github.com/langify-org/deepseek-harness-plugins/blob/main/plugins/session-hooks/README.zh.md)
 
@@ -17,7 +17,7 @@ DSH `0.2.x` と POSIX シェル（Linux または macOS）が必要です。
 **npm から**（どの DSH 環境でも使えます）：
 
 ```sh
-dsh plugin --profile web add @langify/dsh-session-hooks
+dsh plugin --profile web add @langify-org/dsh-session-hooks
 ```
 
 Web UI の **Plugins** ページから、パッケージ名を指定してインストールすることもできます。インストール中に pnpm が `Issues with peer dependencies found` という警告を出しますが、問題ありません。`@deepseek-ai/*` の peer 依存は DSH 本体が提供します。
@@ -110,7 +110,7 @@ DSH はセッションのディレクトリを作成時に固定するため、�
       - bash /path/to/dsh-session-hooks/examples/worktree-unarchive.sh
 ```
 
-`dsh plugin add` でインストールした場合、スクリプトは `$DSH_HOME/profiles/<profile>/node_modules/@langify/dsh-session-hooks/examples/` にあります。パッケージマネージャーは実行権限を保持しないので、上の例のように `bash` で実行するか、自分の場所にコピーして書き換えて使ってください。worktree は `$DSH_WORKTREES_DIR`（既定は `~/.local/share/dsh-worktrees`）に作られます。リポジトリの E2E テストは、これらのスクリプトをそのまま本物の DSH で実行しています。
+`dsh plugin add` でインストールした場合、スクリプトは `$DSH_HOME/profiles/<profile>/node_modules/@langify-org/dsh-session-hooks/examples/` にあります。パッケージマネージャーは実行権限を保持しないので、上の例のように `bash` で実行するか、自分の場所にコピーして書き換えて使ってください。worktree は `$DSH_WORKTREES_DIR`（既定は `~/.local/share/dsh-worktrees`）に作られます。リポジトリの E2E テストは、これらのスクリプトをそのまま本物の DSH で実行しています。
 
 ## 失敗とログ
 

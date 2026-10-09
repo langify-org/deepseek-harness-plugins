@@ -1,5 +1,5 @@
 {
-  "name": "@langify/dsh-session-hooks",
+  "name": "@langify-org/dsh-session-hooks",
   "version": "0.1.0",
   "description": "DeepSeek Harness plugin that runs your shell commands when a session starts, is archived, or is unarchived",
   "license": "MIT",

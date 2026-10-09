@@ -2,11 +2,11 @@
 
 English | [日本語](README.ja.md) | [简体中文](README.zh.md)
 
-Plugins for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH), published on npm under `@langify/dsh-*`.
+Plugins for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH), published on npm under `@langify-org/dsh-*`.
 
 | Plugin | What it does |
 |---|---|
-| [`@langify/dsh-session-hooks`](plugins/session-hooks) | Runs your shell commands when a session starts, is archived, or is restored. For example, it can give every session its own git worktree. |
+| [`@langify-org/dsh-session-hooks`](plugins/session-hooks) | Runs your shell commands when a session starts, is archived, or is restored. For example, it can give every session its own git worktree. |
 
 Every plugin is an ordinary DSH **bundle**: an npm package whose `package.json` declares `dsh.bundle` and whose `cordis.patch.yml` inserts the plugin. The patch names the plugin by a path relative to itself (`./lib/index.js`), so the same package works with every way DSH can load it.
 
@@ -15,7 +15,7 @@ Every plugin is an ordinary DSH **bundle**: an npm package whose `package.json` 
 ### npm (recommended)
 
 ```sh
-dsh plugin --profile web add @langify/dsh-session-hooks
+dsh plugin --profile web add @langify-org/dsh-session-hooks
 ```
 
 You can also install it by name from the Web UI's **Plugins** page. Then configure the plugin as its README describes.
@@ -23,7 +23,7 @@ You can also install it by name from the Web UI's **Plugins** page. Then configu
 ### Tarball or checkout
 
 ```sh
-dsh plugin --profile web add ./langify-dsh-session-hooks-0.1.0.tgz
+dsh plugin --profile web add ./langify-org-dsh-session-hooks-0.1.0.tgz
 dsh web --patch /path/to/plugins/session-hooks/cordis.patch.yml
 ```
 

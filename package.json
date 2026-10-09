@@ -2,7 +2,7 @@
   "name": "langify-dsh-plugins",
   "private": true,
   "type": "module",
-  "description": "DeepSeek Harness plugins published under the @langify npm scope",
+  "description": "DeepSeek Harness plugins published under the @langify-org npm scope",
   "license": "MIT",
   "packageManager": "pnpm@11.27.0",
   "engines": {

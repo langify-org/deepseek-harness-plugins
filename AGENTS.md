@@ -5,7 +5,7 @@ Conventions for everyone who changes this repository, people and coding agents a
 ## Layout
 
 ```
-plugins/<name>/        one published DSH bundle per directory: @langify/dsh-<name>
+plugins/<name>/        one published DSH bundle per directory: @langify-org/dsh-<name>
   package.json         declares dsh.bundle; peers on @deepseek-ai/*
   cordis.patch.yml     inserts the plugin row with a relative entry (./lib/index.js)
   src/  test/          TypeScript source and node:test tests
@@ -56,7 +56,7 @@ Development and tests never use the running DSH (port 3080 by default), `~/.dsh`
 
 ## Adding a plugin
 
-1. Copy the shape of `plugins/session-hooks`: `package.json` (name `@langify/dsh-<name>`, `files`, `dsh.bundle`, peers, `publishConfig`), `cordis.patch.yml`, both tsconfig files, `src/index.ts` exporting `name`, `Config`, and `apply`, tests, `README.md` with its Japanese and Chinese translations, and `LICENSE`.
+1. Copy the shape of `plugins/session-hooks`: `package.json` (name `@langify-org/dsh-<name>`, `files`, `dsh.bundle`, peers, `publishConfig`), `cordis.patch.yml`, both tsconfig files, `src/index.ts` exporting `name`, `Config`, and `apply`, tests, `README.md` with its Japanese and Chinese translations, and `LICENSE`.
 2. Run `pnpm install`, then update the Nix dependency hash (below).
 3. Add `e2e/<name>/run.mjs` when the plugin reacts to DSH behavior that unit tests can only imitate.
 4. Add a row to the plugin table in all three root READMEs, run `pnpm run docs:record`, and add a changeset.
@@ -78,4 +78,4 @@ The Nix flake and CI pick the new directory up on their own.
 
 - Each pull request that changes a plugin's behavior adds a changeset (`just changeset`). The release workflow opens a "Version packages" pull request, and merging it publishes to npm with provenance.
 - The workflow publishes through npm trusted publishing (OIDC, no token). npm configures a trusted publisher per package, and only for a package that already exists, so publish each new plugin's first version by hand: `npm login`, then `pnpm --filter ./plugins/<name> publish --access public`. After that, add the trusted publisher on npmjs.com (repository `langify-org/deepseek-harness-plugins`, workflow `release.yml`).
-- The `@langify` npm organization owns the packages.
+- The `@langify-org` npm organization owns the packages.

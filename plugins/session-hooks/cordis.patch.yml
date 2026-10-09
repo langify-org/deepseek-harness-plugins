@@ -1,4 +1,4 @@
-# Bundle layer of @langify/dsh-session-hooks.
+# Bundle layer of @langify-org/dsh-session-hooks.
 #
 # The plugin path is relative to this file, so the same file works both as an
 # installed bundle (`dsh plugin add`) and as a `--patch` overlay.

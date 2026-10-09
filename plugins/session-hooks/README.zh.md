@@ -1,4 +1,4 @@
-# @langify/dsh-session-hooks
+# @langify-org/dsh-session-hooks
 
 [English](https://github.com/langify-org/deepseek-harness-plugins/blob/main/plugins/session-hooks/README.md) | [日本語](https://github.com/langify-org/deepseek-harness-plugins/blob/main/plugins/session-hooks/README.ja.md) | 简体中文
 
@@ -17,7 +17,7 @@
 **通过 npm**（适用于任何 DSH 安装）：
 
 ```sh
-dsh plugin --profile web add @langify/dsh-session-hooks
+dsh plugin --profile web add @langify-org/dsh-session-hooks
 ```
 
 也可以在 Web UI 侧边栏的**插件**页中按包名安装。安装过程中 pnpm 会提示 `Issues with peer dependencies found`，这是正常的：`@deepseek-ai/*` 这些 peer 依赖由 DSH 自身提供。
@@ -110,7 +110,7 @@ DSH 在创建会话时就固定了它的目录，钩子无法修改。作为替�
       - bash /path/to/dsh-session-hooks/examples/worktree-unarchive.sh
 ```
 
-通过 `dsh plugin add` 安装后，脚本位于 `$DSH_HOME/profiles/<profile>/node_modules/@langify/dsh-session-hooks/examples/`。包管理器不会保留它们的可执行权限，所以请像上面那样用 `bash` 运行，或者复制到你自己的位置再修改使用。worktree 创建在 `$DSH_WORKTREES_DIR`（默认 `~/.local/share/dsh-worktrees`）中。本仓库的端到端测试正是用真实的 DSH 运行这几个脚本。
+通过 `dsh plugin add` 安装后，脚本位于 `$DSH_HOME/profiles/<profile>/node_modules/@langify-org/dsh-session-hooks/examples/`。包管理器不会保留它们的可执行权限，所以请像上面那样用 `bash` 运行，或者复制到你自己的位置再修改使用。worktree 创建在 `$DSH_WORKTREES_DIR`（默认 `~/.local/share/dsh-worktrees`）中。本仓库的端到端测试正是用真实的 DSH 运行这几个脚本。
 
 ## 失败与日志
 

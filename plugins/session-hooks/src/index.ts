@@ -1,5 +1,5 @@
 /**
- * @langify/dsh-session-hooks — run shell commands on session lifecycle events.
+ * @langify-org/dsh-session-hooks — run shell commands on session lifecycle events.
  *
  * - `sessionStart`: when DSH creates a session (`agent/created`), before its
  *   first model request. A command may print `{"workdir": ..., "context": ...}`;

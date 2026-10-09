@@ -1,4 +1,4 @@
-# @langify/dsh-session-hooks
+# @langify-org/dsh-session-hooks
 
 English | [日本語](https://github.com/langify-org/deepseek-harness-plugins/blob/main/plugins/session-hooks/README.ja.md) | [简体中文](https://github.com/langify-org/deepseek-harness-plugins/blob/main/plugins/session-hooks/README.zh.md)
 
@@ -17,7 +17,7 @@ Requires DSH `0.2.x` and a POSIX shell (Linux or macOS).
 **From npm** (any DSH installation):
 
 ```sh
-dsh plugin --profile web add @langify/dsh-session-hooks
+dsh plugin --profile web add @langify-org/dsh-session-hooks
 ```
 
 Or install it by name from the Web UI's **Plugins** page. pnpm's `Issues with peer dependencies found` warning during installation is expected: DSH supplies the `@deepseek-ai/*` peers itself.
@@ -110,7 +110,7 @@ The plugin adds this as one note before the session's first model request. The W
       - bash /path/to/dsh-session-hooks/examples/worktree-unarchive.sh
 ```
 
-After `dsh plugin add`, the scripts are in `$DSH_HOME/profiles/<profile>/node_modules/@langify/dsh-session-hooks/examples/`. Run them with `bash` as shown, because package managers do not keep their executable bit, or copy them somewhere of your own and adapt them. Worktrees go to `$DSH_WORKTREES_DIR` (default `~/.local/share/dsh-worktrees`). The repository's end-to-end test runs exactly these scripts against a real DSH.
+After `dsh plugin add`, the scripts are in `$DSH_HOME/profiles/<profile>/node_modules/@langify-org/dsh-session-hooks/examples/`. Run them with `bash` as shown, because package managers do not keep their executable bit, or copy them somewhere of your own and adapt them. Worktrees go to `$DSH_WORKTREES_DIR` (default `~/.local/share/dsh-worktrees`). The repository's end-to-end test runs exactly these scripts against a real DSH.
 
 ## Failures and logs
 

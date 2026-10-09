@@ -2,7 +2,7 @@
   "note": "Written by scripts/i18n.mjs --write. Do not edit by hand.",
   "sections": [
     {
-      "section": "@langify/dsh-session-hooks",
+      "section": "@langify-org/dsh-session-hooks",
       "en": "e8942cb9fe12ea82",
       "ja": "2b9921e04bebc969",
       "zh": "ac86eb0d46528b82"
@@ -33,9 +33,9 @@
     },
     {
       "section": "Example: one git worktree per session",
-      "en": "c41f7feb1d0c97aa",
-      "ja": "e65fc4607c742824",
-      "zh": "1c1d98200ca9038b"
+      "en": "a7169ea6dd034432",
+      "ja": "8336e8ae7a21ae71",
+      "zh": "0773ce66cfb9b653"
     },
     {
       "section": "Failures and logs",

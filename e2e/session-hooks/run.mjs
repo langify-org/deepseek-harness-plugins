@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * End-to-end check of @langify/dsh-session-hooks against a real `dsh`.
+ * End-to-end check of @langify-org/dsh-session-hooks against a real `dsh`.
  *
  * Everything runs in a throwaway DSH home and a throwaway git repository; your
  * own profiles, sessions, and running DSH are never touched.
@@ -28,7 +28,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-const PACKAGE = '@langify/dsh-session-hooks'
+const PACKAGE = '@langify-org/dsh-session-hooks'
 const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(here, '..', '..')
 const dsh = process.env.DSH_BIN ?? 'dsh'

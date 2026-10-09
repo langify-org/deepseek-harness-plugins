@@ -1,5 +1,5 @@
 {
-  description = "DeepSeek Harness plugins published as @langify/dsh-*";
+  description = "DeepSeek Harness plugins published as @langify-org/dsh-*";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 

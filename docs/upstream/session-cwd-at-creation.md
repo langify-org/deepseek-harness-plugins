@@ -12,7 +12,7 @@ A common setup gives every agent session its own directory, usually a git worktr
 
 A DSH plugin cannot do this today. A session's `cwd` is part of its header: `session.create` takes a `workspaceId` or a `cwd`, the API session controller passes it to `agents.create({ meta: { cwd } })`, and the session boundary validates and freezes it before any plugin code runs. The first plugin hook, `agent/created`, sees an already fixed directory. There is no waterfall before creation (in 0.2.0-rc.2, the only lifecycle waterfalls are `agent/pre-step`, `agent/request`, `agent/request-error`, and `workspace/session-activity`).
 
-The workaround in [`@langify/dsh-session-hooks`](https://github.com/langify-org/deepseek-harness-plugins/tree/main/plugins/session-hooks) creates the worktree in `agent/created` and injects a notice that tells the model to work there. The model follows it, but everything else still uses the original directory: the bash tool's default working directory, the sandbox workspace root, the file panel, `@` file references, and the session's place in the sidebar.
+The workaround in [`@langify-org/dsh-session-hooks`](https://github.com/langify-org/deepseek-harness-plugins/tree/main/plugins/session-hooks) creates the worktree in `agent/created` and injects a notice that tells the model to work there. The model follows it, but everything else still uses the original directory: the bash tool's default working directory, the sandbox workspace root, the file panel, `@` file references, and the session's place in the sidebar.
 
 ### Proposal
 

@@ -2,11 +2,11 @@
 
 [English](README.md) | [日本語](README.ja.md) | 简体中文
 
-面向 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）的插件集，以 `@langify/dsh-*` 发布在 npm 上。
+面向 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）的插件集，以 `@langify-org/dsh-*` 发布在 npm 上。
 
 | 插件 | 功能 |
 |---|---|
-| [`@langify/dsh-session-hooks`](plugins/session-hooks/README.zh.md) | 在会话开始、归档或取消归档时运行你指定的 shell 命令。例如，可以为每个会话准备独立的 git worktree。 |
+| [`@langify-org/dsh-session-hooks`](plugins/session-hooks/README.zh.md) | 在会话开始、归档或取消归档时运行你指定的 shell 命令。例如，可以为每个会话准备独立的 git worktree。 |
 
 每个插件都是普通的 DSH **组合包**（bundle）：在 `package.json` 中声明 `dsh.bundle` 的 npm 包，由随包附带的 `cordis.patch.yml` 插入插件。patch 以相对于自身的路径（`./lib/index.js`）指定插件，因此无论 DSH 以哪种方式加载，同一个包都能直接使用。
 
@@ -15,7 +15,7 @@
 ### npm（推荐）
 
 ```sh
-dsh plugin --profile web add @langify/dsh-session-hooks
+dsh plugin --profile web add @langify-org/dsh-session-hooks
 ```
 
 也可以在 Web UI 侧边栏的**插件**页中按包名安装。安装后，请按各插件的 README 进行配置。
@@ -23,7 +23,7 @@ dsh plugin --profile web add @langify/dsh-session-hooks
 ### 从 tarball 或源码检出安装
 
 ```sh
-dsh plugin --profile web add ./langify-dsh-session-hooks-0.1.0.tgz
+dsh plugin --profile web add ./langify-org-dsh-session-hooks-0.1.0.tgz
 dsh web --patch /path/to/plugins/session-hooks/cordis.patch.yml
 ```
 

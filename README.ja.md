@@ -2,11 +2,11 @@
 
 [English](README.md) | 日本語 | [简体中文](README.zh.md)
 
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）用のプラグイン集です。npm の `@langify/dsh-*` として公開しています。
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）用のプラグイン集です。npm の `@langify-org/dsh-*` として公開しています。
 
 | プラグイン | できること |
 |---|---|
-| [`@langify/dsh-session-hooks`](plugins/session-hooks/README.ja.md) | セッションの開始時・アーカイブ時・アーカイブ解除時に、指定した shell コマンドを実行します。たとえば、セッションごとに専用の git worktree を用意できます。 |
+| [`@langify-org/dsh-session-hooks`](plugins/session-hooks/README.ja.md) | セッションの開始時・アーカイブ時・アーカイブ解除時に、指定した shell コマンドを実行します。たとえば、セッションごとに専用の git worktree を用意できます。 |
 
 どのプラグインも、通常の DSH の **bundle** です。`package.json` で `dsh.bundle` を宣言した npm パッケージで、同梱の `cordis.patch.yml` がプラグインを追加します。patch はプラグインを自分自身からの相対パス（`./lib/index.js`）で指定しているので、DSH のどの読み込み方でも同じパッケージがそのまま動きます。
 
@@ -15,7 +15,7 @@
 ### npm（おすすめ）
 
 ```sh
-dsh plugin --profile web add @langify/dsh-session-hooks
+dsh plugin --profile web add @langify-org/dsh-session-hooks
 ```
 
 Web UI の **Plugins** ページから、パッケージ名を指定してインストールすることもできます。インストール後は、各プラグインの README に従って設定してください。
@@ -23,7 +23,7 @@ Web UI の **Plugins** ページから、パッケージ名を指定してイン
 ### tarball またはチェックアウトから
 
 ```sh
-dsh plugin --profile web add ./langify-dsh-session-hooks-0.1.0.tgz
+dsh plugin --profile web add ./langify-org-dsh-session-hooks-0.1.0.tgz
 dsh web --patch /path/to/plugins/session-hooks/cordis.patch.yml
 ```
 

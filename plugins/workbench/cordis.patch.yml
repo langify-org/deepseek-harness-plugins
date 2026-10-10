@@ -1,0 +1,9 @@
+# Bundle layer of @langify-org/dsh-workbench.
+#
+# The plugin path is relative to this file, so the same file works both as an
+# installed bundle (`dsh plugin add`) and as a `--patch` overlay. The browser
+# half (lib/client.js) is found through package.json's dsh.client.
+- insert:
+    - id: langify-workbench
+      name: ./lib/index.js
+      config: {}

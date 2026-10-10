@@ -1,0 +1,23 @@
+{
+  "note": "Written by scripts/i18n.mjs --write. Do not edit by hand.",
+  "sections": [
+    {
+      "section": "@langify-org/dsh-workbench",
+      "en": "a98ba7b9eb9a26b9",
+      "ja": "5d5e55874e410653",
+      "zh": "7be053f57cd02a4e"
+    },
+    {
+      "section": "Status",
+      "en": "8611cce33822085a",
+      "ja": "fdc0eeefafc5f816",
+      "zh": "1370ef537bb310b1"
+    },
+    {
+      "section": "Try it",
+      "en": "adceeb4fa7f68c1e",
+      "ja": "6d281e498e81f799",
+      "zh": "1bbb921bc1f072e5"
+    }
+  ]
+}

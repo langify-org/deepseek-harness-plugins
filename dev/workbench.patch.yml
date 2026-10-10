@@ -1,0 +1,6 @@
+# Config that `just dev workbench` loads. Workbenches go under .dsh-dev/ so
+# trying the plugin never touches ~/.local/share. LANGIFY_DEV_ROOT is this
+# checkout (exported by `just dev`).
+- id: langify-workbench
+  config:
+    root: !!js 'process.env.LANGIFY_DEV_ROOT + "/.dsh-dev/workbenches"'

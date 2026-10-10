@@ -12,6 +12,7 @@
   fetchPnpmDeps,
   pnpmConfigHook,
   bash,
+  git,
 }:
 let
   # A plugin is a directory with a package.json; one that only holds a design note is not one yet.
@@ -36,6 +37,7 @@ let
       "src"
       "test"
       "examples"
+      "scripts"
     ];
 
   # Only sources; never node_modules or build output from a local checkout.
@@ -59,7 +61,7 @@ let
     version = "0";
     inherit src pnpm;
     fetcherVersion = 4;
-    hash = "sha256-T8H8bt5REuf/oa5Iy/l9vReGS06JFiiOlkz6ELUZ8+E=";
+    hash = "sha256-4KwT+SdBlKMXzGVviHOYzTIpntm/OMEubfxOiKZ0TjM=";
   };
 
   mkPlugin =
@@ -77,8 +79,11 @@ let
         pnpm
         pnpmConfigHook
       ];
-      # The tests run real hook commands through bash.
-      nativeCheckInputs = [ bash ];
+      # The tests run real hook commands through bash, and workbench tests use real git repositories.
+      nativeCheckInputs = [
+        bash
+        git
+      ];
 
       buildPhase = ''
         runHook preBuild

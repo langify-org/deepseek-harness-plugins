@@ -10,6 +10,7 @@ plugins/<name>/        one published DSH bundle per directory: @langify-org/dsh-
   cordis.patch.yml     inserts the plugin row with a relative entry (./lib/index.js)
   src/  test/          TypeScript source and node:test tests
   examples/ README*.md shipped with the package (README in en, ja, zh)
+  DESIGN.md            design note, kept in the repository (not published)
 e2e/<name>/run.mjs     end-to-end check of that plugin against a real dsh
 nix/                   flake builders (plugins.nix, with-dsh.nix)
 docs/upstream/         drafts of proposals to deepseek-ai/deepseek-harness
@@ -43,7 +44,7 @@ scripts/i18n.mjs       keeps the README translations in step
 - The first line under the title links the other languages. A plugin README is also shown on npm, so its links (language links included) are absolute GitHub URLs.
 - `pnpm run docs:check` (part of `just check`) compares each section with the hashes in `.i18n.json` beside it and fails when one language changed without the others. After updating all three, run `pnpm run docs:record`. Never record without translating.
 - Use DSH's own terms: in Chinese, 会话 (session), 归档 (archive), 组合包 (bundle), 插件 (plugin), 钩子 (hook), and the **插件** page; in Japanese, セッション, アーカイブ, プラグイン, フック, and the **Plugins** page (the DSH UI has no Japanese locale).
-- AGENTS.md, `docs/upstream/`, and `.changeset/` stay in English.
+- AGENTS.md, design notes (`plugins/<name>/DESIGN.md`), `docs/upstream/`, and `.changeset/` stay in English.
 
 ## Never touch the user's own DSH
 
@@ -62,7 +63,7 @@ Development and tests never use the running DSH (port 3080 by default) and never
 
 ## Adding a plugin
 
-1. Copy the shape of `plugins/session-hooks`: `package.json` (name `@langify-org/dsh-<name>`, `files`, `dsh.bundle`, peers, `publishConfig`), `cordis.patch.yml`, both tsconfig files, `src/index.ts` exporting `name`, `Config`, and `apply`, tests, `README.md` with its Japanese and Chinese translations, and `LICENSE`.
+1. Start with a `DESIGN.md` in `plugins/<name>/` (English; see `plugins/workbench/DESIGN.md`). Until the directory has a `package.json`, the build, the Nix flake, and the README check skip it. Then copy the shape of `plugins/session-hooks`: `package.json` (name `@langify-org/dsh-<name>`, `files`, `dsh.bundle`, peers, `publishConfig`), `cordis.patch.yml`, both tsconfig files, `src/index.ts` exporting `name`, `Config`, and `apply`, tests, `README.md` with its Japanese and Chinese translations, and `LICENSE`.
 2. Run `pnpm install`, then update the Nix dependency hash (below).
 3. Add `e2e/<name>/run.mjs` when the plugin reacts to DSH behavior that unit tests can only imitate, and `dev/<name>.patch.yml` with a config that shows the plugin working in `just dev`.
 4. Add a row to the plugin table in all three root READMEs, run `pnpm run docs:record`, and add a changeset.

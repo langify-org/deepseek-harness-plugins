@@ -14,8 +14,11 @@
   bash,
 }:
 let
+  # A plugin is a directory with a package.json; one that only holds a design note is not one yet.
   pluginDirs = lib.attrNames (
-    lib.filterAttrs (_: type: type == "directory") (builtins.readDir ../plugins)
+    lib.filterAttrs (
+      name: type: type == "directory" && builtins.pathExists (../plugins + "/${name}/package.json")
+    ) (builtins.readDir ../plugins)
   );
 
   pluginFiles =

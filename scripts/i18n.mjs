@@ -29,8 +29,9 @@ const write = process.argv.includes('--write')
 function docDirs() {
   const plugins = join(root, 'plugins')
   const dirs = [root]
+  // A plugin is a directory with a package.json; one that only holds a design note is not one yet.
   for (const entry of readdirSync(plugins, { withFileTypes: true })) {
-    if (entry.isDirectory()) dirs.push(join(plugins, entry.name))
+    if (entry.isDirectory() && existsSync(join(plugins, entry.name, 'package.json'))) dirs.push(join(plugins, entry.name))
   }
   return dirs
 }

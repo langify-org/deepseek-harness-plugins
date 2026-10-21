@@ -120,14 +120,18 @@ of streamed.
 ## Security
 
 - No remote-debugging port is opened. The connector controls only the tabs it opened, and
-  passes on only the CDP commands and events dsh-chrome uses: cookie stores and network
-  traffic, which carries cookies and credentials, stay out of its reach.
+  passes on only the CDP commands, parameters and events dsh-chrome uses. Through it, the
+  plugin reaches no further than the page's own scripts: cookie stores, network traffic
+  (which carries cookies and credentials), other extensions' code on the page (your
+  password manager's), and local files stay out of its reach.
 - Chrome starts the connector's relay only for the connector's extension id. The relay
   reaches DSH over a Unix socket that only your OS user can open; other processes of your
   user are trusted, as they already can read your browser profile.
 - The sidebar connects over DSH's own authenticated channel; it opens no new port.
-- The agent may not open DSH's own web UI through Chrome, nor operate a page that shows it:
-  in a profile signed in to DSH, it could otherwise approve its own actions.
+- The agent may not open DSH's own web UI through Chrome, nor operate a page that shows it,
+  in a frame included: in a profile signed in to DSH, it could otherwise approve its own
+  actions. DSH is recognized by the addresses it serves; one behind a proxy on another local
+  port is not.
 - Pages are web content: snapshots, page text and screenshots reach the agent marked as
   untrusted, and titles are quoted and shortened. The agent is told never to type
   passwords, codes or card numbers, and to ask you instead; the plugin cannot enforce what

@@ -138,7 +138,10 @@ export class ChromeService extends Service {
       readonly openedBy: PageOpener;
     },
   ): Promise<ChromePage> {
-    const browser = await this.browserForOpening(options.profile ?? this.config.defaultProfile);
+    const browser = await this.browserForOpening(
+      options.profile ?? this.config.defaultProfile,
+      options.signal,
+    );
     const snapshot = await browser.openPage(
       url,
       { key: sessionId, title: groupTitle(sessionId) },
@@ -156,10 +159,13 @@ export class ChromeService extends Service {
     return this.pages.ofSession(sessionId);
   }
 
-  private async browserForOpening(profile: ProfileName): Promise<ConnectedBrowser> {
+  private async browserForOpening(
+    profile: ProfileName,
+    signal: AbortSignal | undefined,
+  ): Promise<ConnectedBrowser> {
     const connected = this.browserFor(profile);
     if (connected !== undefined) return connected;
-    if (profile === DEDICATED_PROFILE) return this.startDedicated();
+    if (profile === DEDICATED_PROFILE) return this.startDedicated(signal);
     if (!this.config.dailyProfile.enabled) {
       throw new NoBrowserError(
         profile,
@@ -179,7 +185,7 @@ export class ChromeService extends Service {
    * connector is awaited. A Chrome whose connector does not connect in time is closed, so
    * that the next attempt starts afresh rather than handing off to it.
    */
-  private async startDedicated(): Promise<ConnectedBrowser> {
+  private async startDedicated(signal: AbortSignal | undefined): Promise<ConnectedBrowser> {
     if (!this.config.dedicatedProfile.enabled) {
       throw new NoBrowserError(
         DEDICATED_PROFILE,
@@ -191,9 +197,10 @@ export class ChromeService extends Service {
       throw new NoBrowserError(DEDICATED_PROFILE, 'dsh-chrome is still starting');
     }
     // Listening first: the connector may connect before Chrome's start is reported.
-    const connected = this.nextBrowser(DEDICATED_PROFILE, DEDICATED_CONNECT_TIMEOUT_MS);
+    const connected = this.nextBrowser(DEDICATED_PROFILE, DEDICATED_CONNECT_TIMEOUT_MS, signal);
+    const starting = this.dedicatedChromeFor(extensionDir);
     try {
-      await this.dedicatedChromeFor(extensionDir);
+      await starting;
     } catch (error) {
       connected.cancel();
       throw error;
@@ -201,7 +208,8 @@ export class ChromeService extends Service {
     try {
       return await connected.browser;
     } catch (error) {
-      await this.closeDedicated();
+      // A stopped caller leaves Chrome to the others; a connector that never came does not.
+      if (!(signal?.aborted ?? false)) await this.closeDedicated(starting);
       throw error;
     }
   }
@@ -232,10 +240,15 @@ export class ChromeService extends Service {
     return starting;
   }
 
-  private async closeDedicated(): Promise<void> {
+  /**
+   * Closes the dedicated Chrome, or, given a start, only the Chrome of that start: a caller
+   * that waited for one Chrome must not close a later one.
+   */
+  private async closeDedicated(start?: Promise<DedicatedChrome>): Promise<void> {
     const starting = this.dedicatedChrome;
+    if (starting === undefined || (start !== undefined && start !== starting)) return;
     this.dedicatedChrome = undefined;
-    const chrome = await starting?.catch(() => undefined);
+    const chrome = await starting.catch(() => undefined);
     await chrome?.close();
   }
 
@@ -243,6 +256,7 @@ export class ChromeService extends Service {
   private nextBrowser(
     profile: string,
     timeoutMs: number,
+    signal: AbortSignal | undefined,
   ): { readonly browser: Promise<ConnectedBrowser>; cancel(): void } {
     let cancel = () => {};
     const browser = new Promise<ConnectedBrowser>((resolve, reject) => {
@@ -255,12 +269,22 @@ export class ChromeService extends Service {
         cancel();
         reject(new NoBrowserError(profile, `the ${profile} Chrome did not connect in time`));
       }, timeoutMs);
+      const abort = () => {
+        cancel();
+        reject(signal?.reason);
+      };
       cancel = () => {
         clearTimeout(timer);
         this.browserListeners.delete(listener);
+        signal?.removeEventListener('abort', abort);
       };
       this.browserListeners.add(listener);
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) abort();
     });
+    // It may fail while its caller still waits for Chrome to start; DSH ends on an
+    // unhandled rejection.
+    browser.catch(() => {});
     return { browser, cancel: () => cancel() };
   }
 

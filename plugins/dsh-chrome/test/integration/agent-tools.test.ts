@@ -82,6 +82,8 @@ let host: DshHost | undefined;
 let chrome: ChromeService | undefined;
 let tools: RecordingTools | undefined;
 let attachments: RecordingAttachments | undefined;
+const FRAMING_PATH = '/framing';
+
 /** The test page, served apart from DSH: the tools refuse DSH's own pages. */
 let pageServer: Server | undefined;
 let pageUrl = '';
@@ -116,8 +118,13 @@ before(async () => {
   // The services registered above, under the names DSH declares for its own.
   tools = root.get('tools') as unknown as RecordingTools;
   attachments = root.get('attachments') as unknown as RecordingAttachments;
-  const server = createServer((_request, response) => {
-    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(TALL_PAGE_HTML);
+  const server = createServer((request, response) => {
+    // A page of the same site as DSH, framing it.
+    const body =
+      request.url === FRAMING_PATH
+        ? `<!doctype html><title>Framing</title><iframe src="${host?.origin}/"></iframe>`
+        : TALL_PAGE_HTML;
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(body);
   });
   pageServer = server;
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -257,6 +264,22 @@ test('the agent may not open DSH itself, nor operate a page that shows it', { sk
   await assert.rejects(run('chrome_snapshot', { page: shown.id }), { message: /DSH itself/ });
   await run('chrome_close', { page: shown.id });
   assert.equal(requireChrome().page(shown.id), undefined);
+
+  // Nor in a frame of another page.
+  const framing = await run('chrome_open', { url: new URL(FRAMING_PATH, pageUrl).href });
+  const framingId = (framing.value as { page: { id: string } }).page.id;
+  await waitFor(
+    async () => {
+      const refused = await run('chrome_screenshot', { page: framingId }).then(
+        () => false,
+        (error: unknown) => error instanceof Error && /DSH itself/.test(error.message),
+      );
+      return refused;
+    },
+    10_000,
+    'the framed DSH to be refused',
+  );
+  await run('chrome_close', { page: framingId });
 });
 
 test('closing a page removes it from the session', { skip }, async () => {

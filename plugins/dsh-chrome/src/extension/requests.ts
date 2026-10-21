@@ -1,6 +1,7 @@
 import {
   type AnyRequestMessage,
   type ConnectorErrorCode,
+  cdpParametersRefusal,
   isConnectorCdpMethod,
   type ResponseMessage,
 } from '../protocol/connector.ts';
@@ -32,6 +33,8 @@ export async function answerRequest(
         if (!isConnectorCdpMethod(method)) {
           return failWith(id, 'method-denied', `the connector does not allow ${method}`);
         }
+        const refusal = cdpParametersRefusal(method, params);
+        if (refusal !== undefined) return failWith(id, 'method-denied', `${method}: ${refusal}`);
         const result = await chrome.debugger.sendCommand({ tabId }, method, params);
         return succeed(id, result ?? {});
       }

@@ -1,5 +1,5 @@
 import type { ChromePage } from '../runtime/pages.ts';
-import { evaluateInIsolatedWorld } from './isolated-world.ts';
+import { evaluateInPage } from './page-script.ts';
 
 /**
  * What the page's viewport shows, as a JPEG with one image pixel per CSS pixel.
@@ -10,10 +10,9 @@ import { evaluateInIsolatedWorld } from './isolated-world.ts';
  * coordinates.
  */
 export async function captureViewport(page: ChromePage, quality = 80): Promise<Uint8Array> {
-  const { frameTree } = await page.send('Page.getFrameTree');
   const [{ cssVisualViewport }, density] = await Promise.all([
     page.send('Page.getLayoutMetrics'),
-    evaluateInIsolatedWorld(page, frameTree.frame.id, 'devicePixelRatio'),
+    evaluateInPage(page, 'devicePixelRatio'),
   ]);
   const { data } = await page.send('Page.captureScreenshot', {
     format: 'jpeg',

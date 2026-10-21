@@ -1,0 +1,18 @@
+import type { ChromePage } from '../runtime/pages.ts';
+
+/**
+ * Evaluates an expression in the page's main world, where its own scripts run: the
+ * connector allows no other world, since another could be an extension's. The page's
+ * scripts can therefore influence what the expression reads (by overriding a getter, say),
+ * which the callers accept for what they read: the page's text and its pixel density.
+ * @returns the expression's value, as JSON.
+ * @throws when the expression throws.
+ */
+export async function evaluateInPage(page: ChromePage, expression: string): Promise<unknown> {
+  const { result, exceptionDetails } = await page.send('Runtime.evaluate', {
+    expression,
+    returnByValue: true,
+  });
+  if (exceptionDetails !== undefined) throw new Error(exceptionDetails.text);
+  return result.value;
+}

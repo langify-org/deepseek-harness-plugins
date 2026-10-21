@@ -1,6 +1,6 @@
 import type { ChromePage } from '../runtime/pages.ts';
 import { clipText } from './clip-text.ts';
-import { evaluateInIsolatedWorld } from './isolated-world.ts';
+import { evaluateInPage } from './page-script.ts';
 
 export interface PageText {
   readonly title: string;
@@ -10,16 +10,15 @@ export interface PageText {
 }
 
 /**
- * The page's visible text, as the user would copy it: `document.body.innerText`,
- * read in an isolated world.
+ * The page's visible text, as the user would copy it: `document.body.innerText`. The page
+ * shapes what it shows anyway, so its scripts shaping what this reads changes little.
  */
 export async function readPageText(page: ChromePage, maxChars: number): Promise<PageText> {
   const { frameTree } = await page.send('Page.getFrameTree');
   let value: { title?: unknown; text?: unknown } | undefined;
   try {
-    value = (await evaluateInIsolatedWorld(
+    value = (await evaluateInPage(
       page,
-      frameTree.frame.id,
       '({ title: document.title, text: document.body ? document.body.innerText : "" })',
     )) as typeof value;
   } catch (error) {

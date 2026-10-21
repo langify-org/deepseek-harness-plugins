@@ -1,3 +1,4 @@
+import { ConnectorRequestError } from '../runtime/connected-browser.ts';
 import type { ChromePage } from '../runtime/pages.ts';
 import { ElementRefError, type PageElement } from './element-refs.ts';
 import { type KeyPress, parseKeyCombo, typedText } from './keys.ts';
@@ -19,11 +20,18 @@ async function elementCentre(
     if (quad === undefined) throw new ElementRefError(`element ${ref} is not visible`);
     return quadCentre(quad);
   } catch (error) {
-    if (error instanceof ElementRefError) throw error;
-    throw new ElementRefError(
-      `element ${ref} is not on the page anymore (${String(error)}); take a new snapshot`,
-    );
+    throw elementError(error, `element ${ref} is not on the page anymore`);
   }
+}
+
+/**
+ * The error to report when Chrome could not act on an element. Chrome refusing the node
+ * means the element is gone; anything else (the call was stopped, the browser left) keeps
+ * its own meaning.
+ */
+function elementError(error: unknown, gone: string): unknown {
+  if (!(error instanceof ConnectorRequestError) || error.code !== 'chrome-error') return error;
+  return new ElementRefError(`${gone} (${error.message}); take a new snapshot`);
 }
 
 export async function click(
@@ -74,9 +82,7 @@ export async function type(page: ChromePage, text: string, options: TypeOptions)
     await page
       .send('DOM.focus', { backendNodeId: element.backendNodeId })
       .catch((error: unknown) => {
-        throw new ElementRefError(
-          `cannot focus element ${element.ref} (${String(error)}); take a new snapshot`,
-        );
+        throw elementError(error, `cannot focus element ${element.ref}`);
       });
   }
   if (options.replace) {

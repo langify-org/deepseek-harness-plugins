@@ -41,8 +41,8 @@ const LAYOUT_CAPTURE_MS = 300;
 const STALLED_CAPTURE_MS = 1000;
 /** After input, a capture follows this soon unless a screencast frame comes first. */
 const INPUT_CAPTURE_MS = 80;
-/** The largest layout, in CSS pixels each way: larger surfaces would exhaust the renderer. */
-const MAX_LAYOUT_SIZE = 8192;
+/** The largest render surface, in device pixels each way: larger ones exhaust the renderer. */
+const MAX_SURFACE_SIZE = 8192;
 /** Frames may differ from the layout by rounding; a larger difference means a lost layout. */
 const SIZE_TOLERANCE = 1.5;
 /**
@@ -149,12 +149,18 @@ export class PageScreen {
   /** The viewer's surface changed size; if it owns the viewport, the page follows. */
   viewportChanged(viewer: ScreenViewer): void {
     if (this.#owner !== viewer) return;
-    const { width, height, deviceScaleFactor } = viewer.viewport;
-    const layout: Layout = {
-      width: Math.min(Math.round(width), MAX_LAYOUT_SIZE),
-      height: Math.min(Math.round(height), MAX_LAYOUT_SIZE),
-      deviceScaleFactor: Math.min(deviceScaleFactor, this.#options.maxDeviceScaleFactor),
-    };
+    const { width, height } = viewer.viewport;
+    const deviceScaleFactor = Math.min(
+      viewer.viewport.deviceScaleFactor,
+      this.#options.maxDeviceScaleFactor,
+    );
+    // At least a pixel: a zero size would turn the override off.
+    const size = (cssPixels: number) =>
+      Math.max(
+        1,
+        Math.min(Math.round(cssPixels), Math.floor(MAX_SURFACE_SIZE / deviceScaleFactor)),
+      );
+    const layout: Layout = { width: size(width), height: size(height), deviceScaleFactor };
     const current = this.#layout;
     if (
       current !== undefined &&

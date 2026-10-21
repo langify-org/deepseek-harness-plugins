@@ -38,8 +38,10 @@ export class ElementRefs {
       const before = await documentOf(page);
       const snapshot = await readSnapshot(page, maxChars);
       if ((await documentOf(page)) === before) {
-        if (!this.#documents.has(page.id)) page.onEnded(() => this.#documents.delete(page.id));
+        const watched = this.#documents.has(page.id);
         this.#documents.set(page.id, before);
+        // Runs at once for a page that has ended already.
+        if (!watched) page.onEnded(() => this.#documents.delete(page.id));
         return snapshot;
       }
       if (attempt === SNAPSHOT_ATTEMPTS) {

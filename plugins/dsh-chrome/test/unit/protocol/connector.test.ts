@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  cdpParametersRefusal,
   isConnectorCdpEvent,
   isConnectorCdpMethod,
   parseExtensionMessage,
@@ -317,4 +318,48 @@ test('passes on the page events the plugin listens to and no network events', ()
   assert.equal(isConnectorCdpEvent('Network.requestWillBeSentExtraInfo'), false);
   assert.equal(isConnectorCdpEvent('Network.responseReceivedExtraInfo'), false);
   assert.equal(isConnectorCdpEvent('Page.lifecycleEvent'), false);
+});
+
+test('evaluates only in the page main world, with nothing page script could not do', () => {
+  assert.equal(
+    cdpParametersRefusal('Runtime.evaluate', { expression: '1', returnByValue: true }),
+    undefined,
+  );
+  for (const extra of [
+    { contextId: 2 },
+    { uniqueContextId: 'x' },
+    { includeCommandLineAPI: true },
+  ]) {
+    assert.match(
+      cdpParametersRefusal('Runtime.evaluate', { expression: '1', ...extra }) ?? '',
+      /does not allow/,
+      JSON.stringify(extra),
+    );
+  }
+});
+
+test('navigates only to web addresses, and reloads without injected scripts', () => {
+  assert.equal(cdpParametersRefusal('Page.navigate', { url: 'https://example.com/' }), undefined);
+  assert.equal(cdpParametersRefusal('Page.navigate', { url: 'about:blank' }), undefined);
+  for (const url of ['file:///etc/passwd', 'javascript:alert(1)', 'chrome://settings', 'data:,x']) {
+    assert.match(cdpParametersRefusal('Page.navigate', { url }) ?? '', /web addresses/, url);
+  }
+  assert.match(
+    cdpParametersRefusal('Page.navigate', { url: 'https://example.com/', frameId: 'f' }) ?? '',
+    /frameId/,
+  );
+  assert.equal(cdpParametersRefusal('Page.reload', { ignoreCache: true }), undefined);
+  assert.match(
+    cdpParametersRefusal('Page.reload', { scriptToEvaluateOnLoad: 'x' }) ?? '',
+    /scriptToEvaluateOnLoad/,
+  );
+});
+
+test('reads and focuses only the main frame and the page own nodes', () => {
+  assert.match(
+    cdpParametersRefusal('Accessibility.getFullAXTree', { frameId: 'f' }) ?? '',
+    /frameId/,
+  );
+  assert.equal(cdpParametersRefusal('DOM.focus', { backendNodeId: 4 }), undefined);
+  assert.match(cdpParametersRefusal('DOM.focus', { objectId: 'o' }) ?? '', /objectId/);
 });

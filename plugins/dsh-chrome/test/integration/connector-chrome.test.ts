@@ -29,6 +29,7 @@ import { PLUGIN_VERSION } from '../../src/host/runtime/package-files.ts';
 import { type ChromePage, type PageEnding, PageRegistry } from '../../src/host/runtime/pages.ts';
 import { PageInput } from '../../src/host/view/page-input.ts';
 import { PageScreen, type ScreenFrame } from '../../src/host/view/page-screen.ts';
+import { LASTING_CONNECTION_MS } from '../../src/protocol/connector.ts';
 import { chromeExecutable, distDir, missingRequirements } from '../support/environment.ts';
 import { TEST_PAGE_HTML, TEST_PAGE_TITLE } from '../support/test-page.ts';
 import { waitFor, withTimeout } from '../support/wait.ts';
@@ -43,6 +44,8 @@ let socketPath = '';
 const pages = new PageRegistry();
 /** Who waits for the next browser to connect. */
 const connectionWaiters: ((browser: ConnectedBrowser) => void)[] = [];
+/** When the latest browser connected. */
+let connectedAt = 0;
 
 const missing = await missingRequirements({ chrome: true });
 
@@ -219,6 +222,20 @@ test('the connector refuses CDP methods outside what the plugin uses', {
       method,
     );
   }
+  // Allowed methods, with parameters that would reach past the page's own scripts: another
+  // world on the page (an extension's), a local file, a script injected into every frame.
+  const refusedCalls: [CdpCommand, object][] = [
+    ['Runtime.evaluate', { expression: 'chrome.runtime.id', contextId: 2 }],
+    ['Page.navigate', { url: 'file:///etc/hostname' }],
+    ['Page.reload', { scriptToEvaluateOnLoad: 'document.title = "injected"' }],
+  ];
+  for (const [method, params] of refusedCalls) {
+    await assert.rejects(
+      browser.sendCdp(page.tabId, method, params),
+      { code: 'method-denied' },
+      method,
+    );
+  }
   await page.close();
 });
 
@@ -286,6 +303,9 @@ test('a page keeps its id when the host restarts while Chrome keeps running', {
 }, async () => {
   const page = await openTestPage('session-h');
   const ended = new Promise<PageEnding>((resolve) => page.onEnded(resolve));
+  // The connector waits for a host's restart only once its connection has lasted.
+  const lasting = connectedAt + LASTING_CONNECTION_MS + 500 - Date.now();
+  if (lasting > 0) await new Promise((resolve) => setTimeout(resolve, lasting));
   await connectorServer?.close();
   assert.equal(await withTimeout(ended, 5000, 'the page outlived its host'), 'disconnected');
 
@@ -312,6 +332,7 @@ function listen(registry: PageRegistry): Promise<ConnectorServer> {
     connectorVersion: PLUGIN_VERSION,
     log: silentLog,
     onBrowser: (connected) => {
+      connectedAt = Date.now();
       registry.track(connected);
       connectionWaiters.shift()?.(connected);
     },

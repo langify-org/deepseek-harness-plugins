@@ -9,6 +9,7 @@
  * browser APIs.
  */
 import type { ProtocolMapping } from 'devtools-protocol/types/protocol-mapping.js';
+import { normalizeAddress } from './address.ts';
 
 /** Incremented when either side would misread the other's messages. */
 export const CONNECTOR_PROTOCOL = 1;
@@ -19,16 +20,26 @@ export const CONNECTOR_PROTOCOL = 1;
  */
 export const NATIVE_HOST_NAME = 'io.github.langify_org.dsh_chrome';
 
+/**
+ * How long a connection must last for the connector to count it as having reached a
+ * working host, whose restart it then waits for by retrying. A host that answers and drops
+ * the connection at once (a protocol mismatch, say) must not start the retries again, or
+ * the connector would reconnect every half second for good.
+ */
+export const LASTING_CONNECTION_MS = 3000;
+
 /** Chrome drops the connection when a message to the extension exceeds 1 MiB. */
 export const MAX_HOST_TO_EXTENSION_BYTES = 1024 * 1024;
 
 /**
  * The CDP methods the connector lets the host send to its pages, and the events it passes
- * back: what dsh-chrome's view, page actions and tools use, and nothing more. The host
- * cannot read cookie stores or watch network traffic, which carries cookies and
- * credentials in its headers, so neither a compromised host nor a process posing as DSH
- * can lift the user's sessions through the connector. The host's CDP types are narrowed to
- * these lists, so its code cannot ask for anything else.
+ * back: what dsh-chrome's view, page actions and tools use, and nothing more. With them,
+ * the host reaches no further than the page's own scripts: it cannot read cookie stores,
+ * watch network traffic (which carries cookies and credentials in its headers), run code
+ * in another extension's world on the page (a password manager's, say), or load anything
+ * but web addresses. So neither a compromised host nor a process posing as DSH can lift
+ * the user's sessions or secrets through the connector. The host's CDP types are narrowed
+ * to these lists, and {@link cdpParametersRefusal} checks what each method is sent.
  */
 export const CONNECTOR_CDP_METHODS = [
   'Accessibility.getFullAXTree',
@@ -41,7 +52,6 @@ export const CONNECTOR_CDP_METHODS = [
   'Input.dispatchMouseEvent',
   'Input.insertText',
   'Page.captureScreenshot',
-  'Page.createIsolatedWorld',
   'Page.enable',
   'Page.getFrameTree',
   'Page.getLayoutMetrics',
@@ -75,6 +85,61 @@ export function isConnectorCdpMethod(method: string): method is ConnectorCdpMeth
 
 export function isConnectorCdpEvent(event: string): event is ConnectorCdpEvent {
   return PASSED_EVENTS.has(event);
+}
+
+/** Why a method's parameters are refused, or `undefined` when they are allowed. */
+type ParameterRule = (params: JsonObject) => string | undefined;
+
+/** Allows exactly the named parameters, with any values. */
+function only(...names: readonly string[]): ParameterRule {
+  return (params) => {
+    const other = Object.keys(params).find((name) => !names.includes(name));
+    return other === undefined ? undefined : `the connector does not allow its ${other} parameter`;
+  };
+}
+
+/**
+ * What each method may be sent. Parameters that would reach past the page's own scripts
+ * are left out: an execution context (another extension's world), a frame, scripts to
+ * inject on reload, and node handles other than the page's own node ids.
+ */
+const PARAMETER_RULES: { readonly [M in ConnectorCdpMethod]: ParameterRule } = {
+  'Accessibility.getFullAXTree': only('depth'),
+  'DOM.focus': only('backendNodeId'),
+  'DOM.getContentQuads': only('backendNodeId'),
+  'DOM.scrollIntoViewIfNeeded': only('backendNodeId', 'rect'),
+  'Emulation.clearDeviceMetricsOverride': only(),
+  'Emulation.setDeviceMetricsOverride': only('width', 'height', 'deviceScaleFactor', 'mobile'),
+  // Input goes to the page, as the user's own would.
+  'Input.dispatchKeyEvent': () => undefined,
+  'Input.dispatchMouseEvent': () => undefined,
+  'Input.insertText': only('text'),
+  'Page.captureScreenshot': only('format', 'quality', 'clip', 'optimizeForSpeed'),
+  'Page.enable': only(),
+  'Page.getFrameTree': only(),
+  'Page.getLayoutMetrics': only(),
+  'Page.getNavigationHistory': only(),
+  'Page.navigate': (params) =>
+    only('url')(params) ??
+    (typeof params['url'] === 'string' && normalizeAddress(params['url']) !== undefined
+      ? undefined
+      : 'the connector navigates only to web addresses'),
+  'Page.navigateToHistoryEntry': only('entryId'),
+  'Page.reload': only('ignoreCache'),
+  'Page.screencastFrameAck': only('sessionId'),
+  'Page.startScreencast': only('format', 'quality', 'maxWidth', 'maxHeight', 'everyNthFrame'),
+  'Page.stopScreencast': only(),
+  // In the page's main world only: no context id, which could name another extension's
+  // world, and nothing the page's scripts could not do themselves.
+  'Runtime.evaluate': only('expression', 'returnByValue', 'awaitPromise'),
+};
+
+/** Why the connector refuses to send these parameters with the method, if it does. */
+export function cdpParametersRefusal(
+  method: ConnectorCdpMethod,
+  params: JsonObject,
+): string | undefined {
+  return PARAMETER_RULES[method](params);
 }
 
 /** A Chrome tab id. It stays valid while that Chrome process runs. */

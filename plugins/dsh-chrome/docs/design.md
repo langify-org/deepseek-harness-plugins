@@ -91,8 +91,10 @@ they no longer resolve, and the agent takes a new snapshot.
 
 Snapshots, page text and screenshots reach the model marked untrusted; titles are quoted and
 shortened wherever they appear. Sensitive input is the user's: the agent asks with
-`chrome_ask_user` and waits. The tools refuse DSH's own web UI, by the addresses DSH
-serves: in a profile signed in to DSH, the agent could otherwise approve its own actions.
+`chrome_ask_user` and waits. The tools refuse pages that show DSH's own web UI in any frame,
+by the addresses DSH serves: in a profile signed in to DSH, the agent could otherwise approve
+its own actions, and DSH's cookie reaches frames of the same site. DSH would close this off
+for every page by forbidding framing (`frame-ancestors 'self'`), which it does not yet.
 
 The reading at the start of a turn lists the session's pages and the one the user is
 looking at, only when that changed and only for a turn that has something to do, so cached
@@ -103,9 +105,13 @@ agent asked for and may need.
 ## Trust boundaries
 
 * The connector refuses tabs it did not open, and passes on only the CDP methods and events
-  dsh-chrome uses (`CONNECTOR_CDP_METHODS`, `CONNECTOR_CDP_EVENTS`); the host's CDP types are
-  narrowed to the same lists. Cookie stores and network traffic, which carries cookies and
-  credentials, stay out of reach, of a compromised host and of a process posing as DSH.
+  dsh-chrome uses (`CONNECTOR_CDP_METHODS`, `CONNECTOR_CDP_EVENTS`), with only the parameters
+  it uses (`cdpParametersRefusal`); the host's CDP types are narrowed to the same lists. The
+  host thus reaches no further than the page's own scripts: not cookie stores, not network
+  traffic (which carries cookies and credentials), not the worlds where other extensions run
+  on the page (a password manager's), not local files. That holds for a compromised host and
+  for a process posing as DSH. Scripts therefore run in the page's main world, where its own
+  scripts can shape what they read; dsh-chrome reads only text and the pixel density there.
 * Chrome limits host-to-extension messages to 1 MiB and closes the port on a larger one, so
   every request's size is checked before it is sent.
 * Each side parses the other's connector and viewer messages into fresh values with the

@@ -107,13 +107,14 @@ function lastSocket(viewer: FakeViewer): FakeSocket {
   return socket;
 }
 
-function page(id: string): PageState {
+function page(id: string, openedBy: PageState['openedBy'] = 'agent'): PageState {
   return {
     id,
     url: `https://example.com/${id}`,
     title: `Page ${id}`,
     loading: false,
     browserLabel: 'Chrome',
+    openedBy,
   };
 }
 
@@ -129,6 +130,20 @@ async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
 }
+
+test('does not switch to a page the user opened elsewhere', () => {
+  const viewer = startViewer(undefined);
+  const socket = lastSocket(viewer);
+  socket.fireOpen();
+  socket.fireEvent({ type: 'pages', pages: [pageA] });
+  socket.fireEvent({ type: 'attached', page: pageA });
+  const attachesBefore = attachCount(socket);
+
+  const fromAnotherTab = page('page-d', 'user');
+  socket.fireEvent({ type: 'pages', pages: [fromAnotherTab, pageA] });
+  assert.equal(attachCount(socket), attachesBefore);
+  assert.deepEqual(viewer.session.getSnapshot().page, pageA);
+});
 
 test('sends watch first and then attaches the remembered page when the socket opens', () => {
   const viewer = startViewer('page-a');

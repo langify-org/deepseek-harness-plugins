@@ -8,6 +8,7 @@
 import {
   CONNECTOR_PROTOCOL,
   type HelloMessage,
+  isConnectorCdpEvent,
   NATIVE_HOST_NAME,
   parseHostMessage,
   requestIdOf,
@@ -20,6 +21,8 @@ const BROWSER_ID_KEY = 'browserId';
 const LABEL_KEY = 'label';
 /** The version a host asked this connector to reload to: one attempt per version. */
 const RELOAD_ATTEMPT_KEY = 'reloadAttempt';
+/** Wakes a worker that Chrome stopped while DSH was away, so that it connects again. */
+const RECONNECT_ALARM = 'reconnect';
 
 const pages = new OwnedPages({
   onChanged: (page) => port.send({ type: 'page-changed', page }),
@@ -51,12 +54,17 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
   // Out-of-process frames arrive as child sessions with a sessionId; the plugin drives
   // the top-level page only.
   if (source.tabId === undefined || source.sessionId !== undefined) return;
-  if (pages.owns(source.tabId)) {
+  if (pages.owns(source.tabId) && isConnectorCdpEvent(method)) {
     port.send({ type: 'cdp-event', tabId: source.tabId, method, params: params ?? {} });
   }
 });
 
 void restored.then(() => port.open());
+
+void chrome.alarms.create(RECONNECT_ALARM, { periodInMinutes: 1 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === RECONNECT_ALARM) void restored.then(() => port.open());
+});
 
 async function hello(): Promise<HelloMessage> {
   const stored = await chrome.storage.local.get([BROWSER_ID_KEY, LABEL_KEY]);

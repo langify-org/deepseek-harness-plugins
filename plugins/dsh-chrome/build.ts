@@ -50,7 +50,7 @@ async function buildConnectorExtension(outdir: string): Promise<void> {
     version: packageJson.version,
     key: CONNECTOR_EXTENSION_KEY,
     minimum_chrome_version: '120',
-    permissions: ['debugger', 'nativeMessaging', 'storage', 'tabs', 'tabGroups'],
+    permissions: ['alarms', 'debugger', 'nativeMessaging', 'storage', 'tabs', 'tabGroups'],
     background: { service_worker: 'service-worker.js', type: 'module' },
   };
   await writeFile(join(outdir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);

@@ -1,32 +1,17 @@
 import type { ChromePage } from '../runtime/pages.ts';
+import { ElementRefError, type PageElement } from './element-refs.ts';
 import { type KeyPress, parseKeyCombo, typedText } from './keys.ts';
 
 /**
  * What the agent does to a page, as trusted input events: the same events a person's
- * mouse and keyboard produce, sent through CDP. Elements are named by snapshot refs.
+ * mouse and keyboard produce, sent through CDP.
  */
 
-export class ElementRefError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ElementRefError';
-  }
-}
-
-/** The backend DOM node id a snapshot ref names. */
-export function backendNodeIdOf(ref: string): number {
-  const match = /^e(\d+)$/.exec(ref.trim());
-  if (match?.[1] === undefined) {
-    throw new ElementRefError(
-      `"${ref}" is not an element ref; refs look like e42 and come from a snapshot`,
-    );
-  }
-  return Number(match[1]);
-}
-
 /** Scrolls the element into view and returns its centre, in viewport CSS pixels. */
-async function elementCentre(page: ChromePage, ref: string): Promise<{ x: number; y: number }> {
-  const backendNodeId = backendNodeIdOf(ref);
+async function elementCentre(
+  page: ChromePage,
+  { backendNodeId, ref }: PageElement,
+): Promise<{ x: number; y: number }> {
   try {
     await page.send('DOM.scrollIntoViewIfNeeded', { backendNodeId });
     const { quads } = await page.send('DOM.getContentQuads', { backendNodeId });
@@ -41,8 +26,12 @@ async function elementCentre(page: ChromePage, ref: string): Promise<{ x: number
   }
 }
 
-export async function click(page: ChromePage, ref: string, clickCount: 1 | 2): Promise<void> {
-  const { x, y } = await elementCentre(page, ref);
+export async function click(
+  page: ChromePage,
+  element: PageElement,
+  clickCount: 1 | 2,
+): Promise<void> {
+  const { x, y } = await elementCentre(page, element);
   await page.send('Input.dispatchMouseEvent', {
     type: 'mouseMoved',
     x,
@@ -72,7 +61,7 @@ export async function click(page: ChromePage, ref: string, clickCount: 1 | 2): P
 
 export interface TypeOptions {
   /** The field to type into; without it, text goes to the focused element. */
-  readonly ref?: string | undefined;
+  readonly element?: PageElement | undefined;
   /** Replace the field's current text instead of adding to it. */
   readonly replace: boolean;
   /** Press Enter afterwards. */
@@ -80,13 +69,15 @@ export interface TypeOptions {
 }
 
 export async function type(page: ChromePage, text: string, options: TypeOptions): Promise<void> {
-  if (options.ref !== undefined) {
-    const backendNodeId = backendNodeIdOf(options.ref);
-    await page.send('DOM.focus', { backendNodeId }).catch((error: unknown) => {
-      throw new ElementRefError(
-        `cannot focus element ${options.ref} (${String(error)}); take a new snapshot`,
-      );
-    });
+  const { element } = options;
+  if (element !== undefined) {
+    await page
+      .send('DOM.focus', { backendNodeId: element.backendNodeId })
+      .catch((error: unknown) => {
+        throw new ElementRefError(
+          `cannot focus element ${element.ref} (${String(error)}); take a new snapshot`,
+        );
+      });
   }
   if (options.replace) {
     // The editing command selects all text in the focused field, whatever the platform.
@@ -130,14 +121,14 @@ export async function press(page: ChromePage, keyPress: KeyPress): Promise<void>
 
 export interface ScrollOptions {
   /** Scroll until this element is in view. */
-  readonly ref?: string | undefined;
+  readonly element?: PageElement | undefined;
   /** Pixels to scroll down (negative: up); defaults to most of a screen. */
   readonly deltaY?: number | undefined;
 }
 
 export async function scroll(page: ChromePage, options: ScrollOptions): Promise<void> {
-  if (options.ref !== undefined) {
-    await elementCentre(page, options.ref);
+  if (options.element !== undefined) {
+    await elementCentre(page, options.element);
     return;
   }
   const { cssLayoutViewport } = await page.send('Page.getLayoutMetrics');
@@ -160,13 +151,19 @@ const LOAD_WAIT_MS = 15_000;
 /**
  * Navigates and waits for the new document to load, or for {@link LOAD_WAIT_MS}: a slow
  * page is still usable, and the agent can look at it.
+ * @param signal - ends the wait for the load early, with its reason.
  * @returns whether the page finished loading in time.
  */
-export async function navigate(page: ChromePage, target: NavigationTarget): Promise<boolean> {
+export async function navigate(
+  page: ChromePage,
+  target: NavigationTarget,
+  signal?: AbortSignal,
+): Promise<boolean> {
   if (page.ending !== undefined) throw new Error('the page is closed');
+  signal?.throwIfAborted();
   await page.send('Page.enable');
   const { frameTree } = await page.send('Page.getFrameTree');
-  const load = waitForLoad(page, frameTree.frame.id);
+  const load = waitForLoad(page, frameTree.frame.id, signal);
   try {
     if ('url' in target) {
       const { errorText } = await page.send('Page.navigate', { url: target.url });
@@ -195,19 +192,26 @@ export async function navigate(page: ChromePage, target: NavigationTarget): Prom
 function waitForLoad(
   page: ChromePage,
   mainFrameId: string,
+  signal: AbortSignal | undefined,
 ): { readonly loaded: Promise<boolean>; cancel(): void } {
   let finish: (loaded: boolean) => void = () => {};
-  const loaded = new Promise<boolean>((resolve) => {
+  const loaded = new Promise<boolean>((resolve, reject) => {
     const subscriptions: (() => void)[] = [];
     let settled = false;
-    finish = (result) => {
+    const settle = (settleWith: () => void) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       for (const unsubscribe of subscriptions) unsubscribe();
-      resolve(result);
+      settleWith();
     };
+    finish = (result) => settle(() => resolve(result));
     const timer = setTimeout(() => finish(false), LOAD_WAIT_MS);
+    if (signal !== undefined) {
+      const abort = () => settle(() => reject(signal.reason));
+      signal.addEventListener('abort', abort, { once: true });
+      subscriptions.push(() => signal.removeEventListener('abort', abort));
+    }
     subscriptions.push(
       page.on('Page.loadEventFired', () => finish(true)),
       page.on('Page.frameNavigated', ({ frame, type }) => {
@@ -219,6 +223,9 @@ function waitForLoad(
       page.onEnded(() => finish(false)),
     );
   });
+  // A navigation that fails first never awaits the wait; its abort must not go unhandled,
+  // since DSH ends on an unhandled rejection.
+  loaded.catch(() => {});
   return { loaded, cancel: () => finish(false) };
 }
 

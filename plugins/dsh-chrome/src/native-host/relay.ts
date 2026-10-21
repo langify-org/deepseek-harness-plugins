@@ -12,6 +12,8 @@ import { connect } from 'node:net';
 import { CONNECTOR_PROTOCOL, type RelayHelloMessage } from '../protocol/connector.ts';
 
 const SOCKET_ENV = 'DSH_CHROME_CONNECTOR_SOCKET';
+/** How long the relay waits for Chrome to take its last output before exiting anyway. */
+const FLUSH_WAIT_MS = 2000;
 const PROFILE_ENV = 'DSH_CHROME_PROFILE';
 
 function fail(message: string, exitCode: number): never {
@@ -40,5 +42,10 @@ socket.once('connect', () => {
 // The connector reconnects with backoff, so exiting is the right answer to a host
 // that is not running.
 socket.once('error', (error) => fail(error.message, 1));
-socket.once('close', () => process.exit(0));
+socket.once('close', () => {
+  // What the host sent last must still reach Chrome: on some platforms stdout is written
+  // asynchronously, and exiting at once would drop it.
+  process.stdout.end(() => process.exit(0));
+  setTimeout(() => process.exit(0), FLUSH_WAIT_MS).unref();
+});
 process.stdin.once('end', () => socket.end());

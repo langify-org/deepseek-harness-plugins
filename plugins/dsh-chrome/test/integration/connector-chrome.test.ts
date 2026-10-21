@@ -13,9 +13,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { click, navigate, press, type } from '../../src/host/page/actions.ts';
+import { ElementRefError, ElementRefs } from '../../src/host/page/element-refs.ts';
 import { parseKeyCombo } from '../../src/host/page/keys.ts';
-import { readSnapshot } from '../../src/host/page/snapshot.ts';
 import { readPageText } from '../../src/host/page/text.ts';
+import type { CdpCommand } from '../../src/host/runtime/cdp.ts';
 import type { ConnectedBrowser } from '../../src/host/runtime/connected-browser.ts';
 import { installConnector } from '../../src/host/runtime/connector-install.ts';
 import { ConnectorServer } from '../../src/host/runtime/connector-server.ts';
@@ -193,16 +194,31 @@ test('a page hidden behind another tab keeps sending frames by capture', {
 test('a tab closed on the Chrome side ends its page', { skip: missing }, async () => {
   const page = await openTestPage('session-d');
   const ending = new Promise((resolve) => page.onEnded(resolve));
-  // The page closes its own tab, as if the user closed it in Chrome. The command may get
-  // no answer: the tab is gone before Chrome replies.
-  await page.send('Page.close').catch(() => {});
+  // The page closes its own tab, as if the user closed it in Chrome: a tab with one history
+  // entry may close itself. The command may get no answer once the tab is gone.
+  await page.send('Runtime.evaluate', { expression: 'window.close()' }).catch(() => {});
   assert.equal(await withTimeout(ending, 5000, 'the page did not end'), 'closed');
   assert.equal(pages.get(page.id), undefined);
 });
 
-test('the connector refuses CDP methods that read cookies', { skip: missing }, async () => {
+test('the connector refuses CDP methods outside what the plugin uses', {
+  skip: missing,
+}, async () => {
   const page = await openTestPage('session-e');
-  await assert.rejects(page.send('Network.getCookies'), { code: 'method-denied' });
+  assert.ok(browser);
+  // The host's types would not let its code ask for these; a process posing as DSH could.
+  for (const method of [
+    'Network.getCookies',
+    'Network.enable',
+    'Storage.getCookies',
+    'Fetch.enable',
+  ]) {
+    await assert.rejects(
+      browser.sendCdp(page.tabId, method as CdpCommand, {}),
+      { code: 'method-denied' },
+      method,
+    );
+  }
   await page.close();
 });
 
@@ -211,23 +227,44 @@ test('the agent finds elements in a snapshot and operates them by ref', {
 }, async () => {
   const page = await openTestPage('session-f');
   await waitFor(async () => (await evaluate<string>(page, 'document.readyState')) === 'complete');
-  const snapshot = await readSnapshot(page, 20_000);
+  const refs = new ElementRefs();
+  const snapshot = await refs.snapshot(page, 20_000);
   const fieldRef = /textbox "Field" \[ref=(e\d+)\]/.exec(snapshot.text)?.[1];
   const buttonRef = /button "Go" \[ref=(e\d+)\]/.exec(snapshot.text)?.[1];
   assert.ok(fieldRef !== undefined && buttonRef !== undefined, snapshot.text);
+  const field = await refs.resolve(page, fieldRef);
 
-  await type(page, 'hello', { ref: fieldRef, replace: true, submit: false });
+  await type(page, 'hello', { element: field, replace: true, submit: false });
   assert.equal(await evaluate<string>(page, "document.getElementById('field').value"), 'hello');
-  await type(page, 'world', { ref: fieldRef, replace: true, submit: false });
+  await type(page, 'world', { element: field, replace: true, submit: false });
   assert.equal(await evaluate<string>(page, "document.getElementById('field').value"), 'world');
   await press(page, parseKeyCombo('Backspace'));
   assert.equal(await evaluate<string>(page, "document.getElementById('field').value"), 'worl');
 
-  await click(page, buttonRef, 1);
+  await click(page, await refs.resolve(page, buttonRef), 1);
   await waitFor(
     async () =>
       (await evaluate<string>(page, "document.getElementById('go').textContent")) === 'Clicked',
   );
+  await page.close();
+});
+
+test('an element ref stops resolving once the page shows another document', {
+  skip: missing,
+}, async () => {
+  const page = await openTestPage('session-i');
+  await waitFor(async () => (await evaluate<string>(page, 'document.readyState')) === 'complete');
+  const refs = new ElementRefs();
+  const snapshot = await refs.snapshot(page, 20_000);
+  const buttonRef = /button "Go" \[ref=(e\d+)\]/.exec(snapshot.text)?.[1];
+  assert.ok(buttonRef !== undefined, snapshot.text);
+  await refs.resolve(page, buttonRef);
+
+  // A same-document navigation keeps the refs; a new document does not.
+  await evaluate(page, "history.pushState(null, '', '?route')");
+  await refs.resolve(page, buttonRef);
+  assert.equal(await navigate(page, { url: `${pageUrl}?other` }), true);
+  await assert.rejects(refs.resolve(page, buttonRef), ElementRefError);
   await page.close();
 });
 

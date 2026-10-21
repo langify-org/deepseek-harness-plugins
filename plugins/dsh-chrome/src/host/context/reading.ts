@@ -1,3 +1,5 @@
+import { quotedTitle } from '../page/quoted-title.ts';
+
 /** A page as the agent's context reading lists it. */
 export interface PageReadingEntry {
   readonly id: string;
@@ -7,7 +9,6 @@ export interface PageReadingEntry {
   readonly shown: boolean;
 }
 
-const MAX_TITLE_CHARS = 120;
 const MAX_PAGES = 10;
 
 /**
@@ -20,7 +21,7 @@ const MAX_PAGES = 10;
 export function renderPagesReading(pages: readonly PageReadingEntry[]): string | undefined {
   if (pages.length === 0) return undefined;
   const listed = pages.slice(0, MAX_PAGES).map((page) => {
-    const title = JSON.stringify(clip(page.title.replace(/\s+/g, ' ').trim(), MAX_TITLE_CHARS));
+    const title = quotedTitle(page.title);
     const looking = page.shown ? ' — the user is looking at it' : '';
     return `- ${page.id}: ${title} ${withoutQuery(page.url)}${looking}`;
   });
@@ -47,8 +48,4 @@ function withoutQuery(url: string): string {
   } catch {
     return url;
   }
-}
-
-function clip(text: string, maxChars: number): string {
-  return text.length <= maxChars ? text : `${text.slice(0, maxChars - 1)}…`;
 }

@@ -74,3 +74,14 @@ test('throws SyntaxError when a frame body is not JSON', () => {
   const decoder = new FrameDecoder(1024);
   assert.throws(() => decoder.push(Buffer.concat([header, body])), SyntaxError);
 });
+
+test('reassembles a large frame from many chunks, followed by a small one', () => {
+  const large = { data: 'x'.repeat(1_000_000) };
+  const bytes = Buffer.concat([encodeFrame(large), encodeFrame({ after: true })]);
+  const decoder = new FrameDecoder(2_000_000);
+  const messages: unknown[] = [];
+  for (let offset = 0; offset < bytes.length; offset += 4096) {
+    messages.push(...decoder.push(bytes.subarray(offset, offset + 4096)));
+  }
+  assert.deepEqual(messages, [large, { after: true }]);
+});

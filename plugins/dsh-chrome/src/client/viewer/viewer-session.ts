@@ -53,8 +53,8 @@ const PAGE_TEXT_TIMEOUT_MS = 30_000;
  * and what the user asks for. React renders its snapshot; the surface draws its frames.
  *
  * A tab with no page of its own shows the session's most recently used page, and a tab
- * switches to a page that newly appears in the session (the agent opened it), so the user
- * sees what the agent is working on. When the socket drops (a sleeping laptop, a phone
+ * switches to a page the agent newly opened, so the user sees what the agent is working
+ * on. Pages the user opens elsewhere leave the tab as it is. When the socket drops (a sleeping laptop, a phone
  * changing networks) the session reconnects with a growing delay and shows the same page
  * again.
  */
@@ -244,7 +244,9 @@ export class ViewerSession {
         this.#knownPageIds = new Set(event.pages.map((page) => page.id));
         this.#update({ pages: event.pages });
         const opened =
-          known === undefined ? undefined : event.pages.find((page) => !known.has(page.id));
+          known === undefined
+            ? undefined
+            : event.pages.find((page) => page.openedBy === 'agent' && !known.has(page.id));
         if (opened !== undefined && opened.id !== this.#pageId && this.#pendingUrl === undefined) {
           this.show(opened.id);
           return;

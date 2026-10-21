@@ -8,6 +8,8 @@
  */
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -34,7 +36,6 @@ import { waitFor } from '../support/wait.ts';
 
 const SESSION_ID = 'agent-session';
 const OTHER_SESSION_ID = 'other-session';
-const TEST_PAGE_PATH = '/tool-test-page';
 /** The shared test page, made tall enough to scroll. */
 const TALL_PAGE_HTML = TEST_PAGE_HTML.replace(
   '</body>',
@@ -81,6 +82,8 @@ let host: DshHost | undefined;
 let chrome: ChromeService | undefined;
 let tools: RecordingTools | undefined;
 let attachments: RecordingAttachments | undefined;
+/** The test page, served apart from DSH: the tools refuse DSH's own pages. */
+let pageServer: Server | undefined;
 let pageUrl = '';
 
 before(async () => {
@@ -113,18 +116,19 @@ before(async () => {
   // The services registered above, under the names DSH declares for its own.
   tools = root.get('tools') as unknown as RecordingTools;
   attachments = root.get('attachments') as unknown as RecordingAttachments;
-  root.webServer.register({
-    kind: 'exact',
-    path: TEST_PAGE_PATH,
-    handler: (_request, response) => {
-      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(TALL_PAGE_HTML);
-    },
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(TALL_PAGE_HTML);
   });
-  pageUrl = `${host.origin}${TEST_PAGE_PATH}`;
+  pageServer = server;
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  pageUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
 });
 
 after(async () => {
   await host?.dispose();
+  await new Promise<void>((resolve) =>
+    pageServer ? pageServer.close(() => resolve()) : resolve(),
+  );
   if (workDir !== '') await rm(workDir, { recursive: true, force: true });
 });
 
@@ -173,17 +177,29 @@ test('the agent opens a page, reads it, and operates it by ref', { skip }, async
 });
 
 test('a screenshot is stored as an attachment at the page’s CSS size', { skip }, async () => {
-  const shot = await run('chrome_screenshot', {});
-  const saved = attachments?.saved.at(-1);
-  assert.ok(saved, 'no image was stored');
-  assert.equal(saved.mediaType, 'image/jpeg');
   // The visible part of the page, scrollbars aside, at its CSS size: the test Chrome's
   // display has a pixel density of its own, so the rendering is larger.
   assert.notEqual(await evaluate<number>('devicePixelRatio'), 1);
+  const viewportNow = () =>
+    evaluate<{ width: number; height: number }>(
+      '({ width: visualViewport.width, height: visualViewport.height })',
+    );
+  // Chrome's debugging bar may still be sliding in and resizing the window: measure a
+  // screenshot taken while the viewport held still.
+  let shot: Awaited<ReturnType<typeof run>> | undefined;
+  let viewport: { width: number; height: number } | undefined;
+  for (let attempt = 0; attempt < 5 && viewport === undefined; attempt += 1) {
+    const before = await viewportNow();
+    shot = await run('chrome_screenshot', {});
+    const after = await viewportNow();
+    if (before.width === after.width && before.height === after.height) viewport = after;
+    else await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  assert.ok(shot !== undefined && viewport !== undefined, 'the viewport did not hold still');
+  const saved = attachments?.saved.at(-1);
+  assert.ok(saved, 'no image was stored');
+  assert.equal(saved.mediaType, 'image/jpeg');
   const size = jpegSize(saved.data);
-  const viewport = await evaluate<{ width: number; height: number }>(
-    '({ width: visualViewport.width, height: visualViewport.height })',
-  );
   assert.ok(
     size !== undefined &&
       Math.abs(size.width - viewport.width) <= 1 &&
@@ -216,7 +232,7 @@ test('the agent asks the user for help and hears the answer', { skip }, async ()
 });
 
 test("a session's tools cannot reach another session's pages", { skip }, async () => {
-  const theirs = await requireChrome().openPage(OTHER_SESSION_ID, pageUrl);
+  const theirs = await requireChrome().openPage(OTHER_SESSION_ID, pageUrl, { openedBy: 'user' });
   await assert.rejects(run('chrome_snapshot', { page: theirs.id }), {
     message: new RegExp(`there is no page ${theirs.id} in this session`),
   });
@@ -226,6 +242,21 @@ test("a session's tools cannot reach another session's pages", { skip }, async (
     false,
   );
   await theirs.close();
+});
+
+test('the agent may not open DSH itself, nor operate a page that shows it', { skip }, async () => {
+  const dsh = requireHost().origin;
+  const port = new URL(dsh).port;
+  for (const address of [`${dsh}/`, `http://localhost:${port}/settings`]) {
+    await assert.rejects(run('chrome_open', { url: address }), { message: /DSH itself/ }, address);
+  }
+  await assert.rejects(run('chrome_navigate', { url: `${dsh}/` }), { message: /DSH itself/ });
+
+  // The user may take a page there; the tools then leave it alone, except to close it.
+  const shown = await requireChrome().openPage(SESSION_ID, `${dsh}/`, { openedBy: 'user' });
+  await assert.rejects(run('chrome_snapshot', { page: shown.id }), { message: /DSH itself/ });
+  await run('chrome_close', { page: shown.id });
+  assert.equal(requireChrome().page(shown.id), undefined);
 });
 
 test('closing a page removes it from the session', { skip }, async () => {
@@ -266,6 +297,11 @@ function execFor(sessionId: string): ToolRunContext {
 
 function text(content: readonly ContentBlock[]): string {
   return content.map((block) => (block.type === 'text' ? block.text : '')).join('\n');
+}
+
+function requireHost(): DshHost {
+  assert.ok(host, 'the host did not start');
+  return host;
 }
 
 function requireChrome(): ChromeService {

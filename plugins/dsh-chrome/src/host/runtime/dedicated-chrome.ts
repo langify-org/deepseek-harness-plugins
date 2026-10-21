@@ -47,6 +47,7 @@ export async function launchDedicatedChrome(
 ): Promise<DedicatedChrome> {
   await mkdir(options.userDataDir, { recursive: true, mode: 0o700 });
   const virtualDisplay = options.display === 'virtual' ? await startVirtualDisplay() : undefined;
+  // Chrome inherits the display only from here on; until it runs, the display is ours to stop.
   const env = { ...process.env };
   const displayArgs: string[] = [];
   if (virtualDisplay !== undefined) {
@@ -68,7 +69,12 @@ export async function launchDedicatedChrome(
     ],
     { env, stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] },
   );
-  const exited = new Promise<void>((resolve) => chrome.once('exit', () => resolve()));
+  // A Chrome that could not start (not on PATH, say) has exited as well. Without a listener,
+  // the error would be thrown, and an uncaught error ends DSH.
+  const exited = new Promise<void>((resolve) => {
+    chrome.once('exit', () => resolve());
+    chrome.once('error', () => resolve());
+  });
   void exited.then(() => virtualDisplay?.stop());
 
   const pipe = new BrowserPipe(chrome);
@@ -84,7 +90,11 @@ export async function launchDedicatedChrome(
   } catch (error) {
     await stopProcess(chrome);
     await virtualDisplay?.stop();
-    throw new Error(`could not load the connector into the dedicated Chrome: ${String(error)}`);
+    throw new Error(
+      `could not start the dedicated Chrome (${options.executable}) with the connector: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
 
   return {
@@ -114,21 +124,31 @@ async function startVirtualDisplay(): Promise<VirtualDisplay> {
   );
   const reported = xvfb.stdio[3] as Readable | null;
   if (reported === null) throw new Error('Xvfb started without its display pipe');
-  const display = await new Promise<string>((resolve, reject) => {
-    let text = '';
-    reported.setEncoding('utf8');
-    reported.on('data', (chunk: string) => {
-      text += chunk;
-      if (text.includes('\n')) resolve(`:${text.trim()}`);
+  try {
+    const display = await new Promise<string>((resolve, reject) => {
+      let text = '';
+      reported.setEncoding('utf8');
+      reported.on('data', (chunk: string) => {
+        text += chunk;
+        if (text.includes('\n')) resolve(`:${text.trim()}`);
+      });
+      reported.on('error', reject);
+      xvfb.once('error', reject);
+      xvfb.once('exit', (code) => reject(new Error(`Xvfb exited with code ${code}`)));
     });
-    xvfb.once('error', reject);
-    xvfb.once('exit', (code) => reject(new Error(`Xvfb exited with code ${code}`)));
-  });
-  return { display, stop: () => stopProcess(xvfb) };
+    return { display, stop: () => stopProcess(xvfb) };
+  } catch (error) {
+    await stopProcess(xvfb);
+    throw new Error(
+      `could not start Xvfb for the dedicated Chrome's virtual display (install Xvfb, or set ` +
+        `dedicatedProfile.display to "desktop"): ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 async function stopProcess(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return;
+  // A process that never started, or has ended, has nothing to stop.
+  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
   const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
   child.kill('SIGTERM');
   const timer = setTimeout(() => child.kill('SIGKILL'), QUIT_GRACE_MS);

@@ -32,8 +32,16 @@ export function apply(ctx: Context): void {
     'agent/pre-step',
     async ({ agent, step, signal }, next) => {
       const decision = await next();
-      // Read once per turn, at its first step.
-      if (decision.kind === 'reject' || signal.aborted || step !== 1) return decision;
+      // Read once per turn, at its first step, and only for a turn that has something to do:
+      // an empty first step ends the turn, and a reading alone must not start one.
+      if (
+        decision.kind === 'reject' ||
+        signal.aborted ||
+        step !== 1 ||
+        decision.messages.length === 0
+      ) {
+        return decision;
+      }
       const sessionId = agent.id;
       const pages = chrome.pagesOf(sessionId).map((page) => ({
         id: page.id,

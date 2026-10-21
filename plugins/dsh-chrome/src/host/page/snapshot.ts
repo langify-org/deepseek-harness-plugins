@@ -1,5 +1,6 @@
 import type { Protocol } from '../runtime/cdp.ts';
 import type { ChromePage } from '../runtime/pages.ts';
+import { clipText } from './clip-text.ts';
 
 /**
  * The page as the agent reads it: the accessibility tree Chrome computes, one line per
@@ -84,7 +85,7 @@ export function formatAccessibilityTree(
     parentName: string,
   ): boolean => {
     const role = stringValue(node.role);
-    const name = clip(stringValue(node.name), MAX_NAME_CHARS);
+    const name = clipText(stringValue(node.name), MAX_NAME_CHARS);
     let childDepth = depth;
     let childParentName = parentName;
     if (!node.ignored && !(TRANSPARENT_ROLES.has(role) && name === '')) {
@@ -129,7 +130,7 @@ function describe(
   ) {
     parts.push(`[ref=e${node.backendDOMNodeId}]`);
   }
-  const value = clip(stringValue(node.value), MAX_VALUE_CHARS);
+  const value = clipText(stringValue(node.value), MAX_VALUE_CHARS);
   if (value !== '' && value !== name) parts.push(`value=${JSON.stringify(value)}`);
   for (const state of states(properties)) parts.push(`[${state}]`);
   return parts.join(' ');
@@ -159,10 +160,6 @@ function stringValue(value: Protocol.Accessibility.AXValue | undefined): string 
   return typeof raw === 'string' || typeof raw === 'number'
     ? String(raw).replace(/\s+/g, ' ').trim()
     : '';
-}
-
-function clip(text: string, maxChars: number): string {
-  return text.length <= maxChars ? text : `${text.slice(0, maxChars - 1)}…`;
 }
 
 /** Reads the page's accessibility tree from Chrome and formats it. */

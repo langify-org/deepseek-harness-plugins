@@ -118,6 +118,9 @@ const VIEWER_REQUEST_TYPES: Readonly<Record<ViewerRequestType, true>> = {
   'read-text': true,
 };
 
+/** Who opened a page: the agent with its tools, or the user from a viewer. */
+export type PageOpener = 'agent' | 'user';
+
 /** What a viewer shows about a page besides its pixels. */
 export interface PageState {
   readonly id: string;
@@ -126,6 +129,8 @@ export interface PageState {
   readonly loading: boolean;
   /** The label of the browser the page lives in. */
   readonly browserLabel: string;
+  /** `null` for a page the host adopted from a connector that outlived it. */
+  readonly openedBy: PageOpener | null;
 }
 
 /** The agent asks the user to do something on the page, and waits. */
@@ -372,13 +377,14 @@ function parseViewport(value: unknown): Viewport | undefined {
 
 function parsePageState(value: unknown): PageState | undefined {
   if (!isRecord(value)) return undefined;
-  const { id, url, title, loading, browserLabel } = value;
+  const { id, url, title, loading, browserLabel, openedBy } = value;
   return isString(id) &&
     isString(url) &&
     isString(title) &&
     typeof loading === 'boolean' &&
-    isString(browserLabel)
-    ? { id, url, title, loading, browserLabel }
+    isString(browserLabel) &&
+    (openedBy === 'agent' || openedBy === 'user' || openedBy === null)
+    ? { id, url, title, loading, browserLabel, openedBy }
     : undefined;
 }
 

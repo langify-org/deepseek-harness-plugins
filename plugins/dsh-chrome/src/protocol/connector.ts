@@ -8,6 +8,7 @@
  * This module is shared by the host plugin and the extension: it uses no Node or
  * browser APIs.
  */
+import type { ProtocolMapping } from 'devtools-protocol/types/protocol-mapping.js';
 
 /** Incremented when either side would misread the other's messages. */
 export const CONNECTOR_PROTOCOL = 1;
@@ -22,15 +23,59 @@ export const NATIVE_HOST_NAME = 'io.github.langify_org.dsh_chrome';
 export const MAX_HOST_TO_EXTENSION_BYTES = 1024 * 1024;
 
 /**
- * CDP methods the connector refuses. They read the browser's credential stores,
- * HttpOnly cookies included: no page task needs them, and they would let a
- * compromised host lift the user's sessions.
+ * The CDP methods the connector lets the host send to its pages, and the events it passes
+ * back: what dsh-chrome's view, page actions and tools use, and nothing more. The host
+ * cannot read cookie stores or watch network traffic, which carries cookies and
+ * credentials in its headers, so neither a compromised host nor a process posing as DSH
+ * can lift the user's sessions through the connector. The host's CDP types are narrowed to
+ * these lists, so its code cannot ask for anything else.
  */
-export const DENIED_CDP_METHODS: ReadonlySet<string> = new Set([
-  'Network.getCookies',
-  'Network.getAllCookies',
-  'Storage.getCookies',
-]);
+export const CONNECTOR_CDP_METHODS = [
+  'Accessibility.getFullAXTree',
+  'DOM.focus',
+  'DOM.getContentQuads',
+  'DOM.scrollIntoViewIfNeeded',
+  'Emulation.clearDeviceMetricsOverride',
+  'Emulation.setDeviceMetricsOverride',
+  'Input.dispatchKeyEvent',
+  'Input.dispatchMouseEvent',
+  'Input.insertText',
+  'Page.captureScreenshot',
+  'Page.createIsolatedWorld',
+  'Page.enable',
+  'Page.getFrameTree',
+  'Page.getLayoutMetrics',
+  'Page.getNavigationHistory',
+  'Page.navigate',
+  'Page.navigateToHistoryEntry',
+  'Page.reload',
+  'Page.screencastFrameAck',
+  'Page.startScreencast',
+  'Page.stopScreencast',
+  'Runtime.evaluate',
+] as const satisfies readonly (keyof ProtocolMapping.Commands)[];
+
+export const CONNECTOR_CDP_EVENTS = [
+  'Page.frameNavigated',
+  'Page.loadEventFired',
+  'Page.navigatedWithinDocument',
+  'Page.screencastFrame',
+  'Page.screencastVisibilityChanged',
+] as const satisfies readonly (keyof ProtocolMapping.Events)[];
+
+export type ConnectorCdpMethod = (typeof CONNECTOR_CDP_METHODS)[number];
+export type ConnectorCdpEvent = (typeof CONNECTOR_CDP_EVENTS)[number];
+
+const ALLOWED_METHODS: ReadonlySet<string> = new Set(CONNECTOR_CDP_METHODS);
+const PASSED_EVENTS: ReadonlySet<string> = new Set(CONNECTOR_CDP_EVENTS);
+
+export function isConnectorCdpMethod(method: string): method is ConnectorCdpMethod {
+  return ALLOWED_METHODS.has(method);
+}
+
+export function isConnectorCdpEvent(event: string): event is ConnectorCdpEvent {
+  return PASSED_EVENTS.has(event);
+}
 
 /** A Chrome tab id. It stays valid while that Chrome process runs. */
 export type TabId = number;

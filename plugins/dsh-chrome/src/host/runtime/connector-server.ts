@@ -1,4 +1,4 @@
-import { chmod, mkdir, stat, unlink } from 'node:fs/promises';
+import { chmod, lstat, mkdir, unlink } from 'node:fs/promises';
 import { connect, createServer, type Server, type Socket } from 'node:net';
 import { dirname } from 'node:path';
 import {
@@ -142,10 +142,15 @@ export class ConnectorServer {
   }
 }
 
-/** The socket directory must be private to this OS user. */
+/**
+ * The socket directory must be private to this OS user. It is examined itself, not what
+ * a symbolic link in its place points to: in a shared temporary directory, another user
+ * could have planted one.
+ */
 async function prepareSocketDirectory(directory: string): Promise<void> {
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  const info = await stat(directory);
+  const info = await lstat(directory);
+  if (!info.isDirectory()) throw new Error(`${directory} is not a directory`);
   if (process.getuid !== undefined && info.uid !== process.getuid()) {
     throw new Error(`${directory} belongs to another user`);
   }
@@ -154,7 +159,7 @@ async function prepareSocketDirectory(directory: string): Promise<void> {
 
 /** Removes a socket left by a host that exited; refuses to take over a live one. */
 async function removeStaleSocket(socketPath: string): Promise<void> {
-  const info = await stat(socketPath).catch(() => undefined);
+  const info = await lstat(socketPath).catch(() => undefined);
   if (info === undefined) return;
   if (!info.isSocket()) throw new Error(`${socketPath} exists and is not a socket`);
   if (await acceptsConnections(socketPath)) {

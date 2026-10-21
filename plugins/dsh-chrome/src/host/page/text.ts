@@ -1,4 +1,5 @@
 import type { ChromePage } from '../runtime/pages.ts';
+import { clipText } from './clip-text.ts';
 import { evaluateInIsolatedWorld } from './isolated-world.ts';
 
 export interface PageText {
@@ -30,7 +31,7 @@ export async function readPageText(page: ChromePage, maxChars: number): Promise<
   return {
     title,
     url: frameTree.frame.url,
-    text: truncated ? fullText.slice(0, maxChars) : fullText,
+    text: clipText(fullText, maxChars, ''),
     truncated,
   };
 }

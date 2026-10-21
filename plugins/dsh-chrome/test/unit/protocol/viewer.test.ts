@@ -15,6 +15,7 @@ const page = {
   title: 'Example',
   loading: false,
   browserLabel: 'Work Chrome',
+  openedBy: 'agent',
 };
 
 function frameWithRawHeader(headerText: string): ArrayBuffer {

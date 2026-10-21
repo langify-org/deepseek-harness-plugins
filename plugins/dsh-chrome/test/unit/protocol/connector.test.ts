@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  DENIED_CDP_METHODS,
+  isConnectorCdpEvent,
+  isConnectorCdpMethod,
   parseExtensionMessage,
   parseHostMessage,
   parsePageList,
@@ -295,9 +296,25 @@ test('returns undefined when a request id is missing or not a finite number', ()
   assert.equal(requestIdOf([]), undefined);
 });
 
-test('denies the CDP methods that read cookies', () => {
-  assert.equal(DENIED_CDP_METHODS.has('Network.getCookies'), true);
-  assert.equal(DENIED_CDP_METHODS.has('Network.getAllCookies'), true);
-  assert.equal(DENIED_CDP_METHODS.has('Storage.getCookies'), true);
-  assert.equal(DENIED_CDP_METHODS.size, 3);
+test('allows the CDP methods the plugin uses and nothing that reaches credentials', () => {
+  for (const method of ['Page.navigate', 'Input.dispatchMouseEvent', 'Runtime.evaluate']) {
+    assert.equal(isConnectorCdpMethod(method), true, method);
+  }
+  const credentialMethods = [
+    'Network.enable',
+    'Network.getCookies',
+    'Network.getAllCookies',
+    'Storage.getCookies',
+    'Fetch.enable',
+    'Target.setAutoAttach',
+  ];
+  for (const method of credentialMethods) assert.equal(isConnectorCdpMethod(method), false, method);
+});
+
+test('passes on the page events the plugin listens to and no network events', () => {
+  assert.equal(isConnectorCdpEvent('Page.screencastFrame'), true);
+  assert.equal(isConnectorCdpEvent('Page.loadEventFired'), true);
+  assert.equal(isConnectorCdpEvent('Network.requestWillBeSentExtraInfo'), false);
+  assert.equal(isConnectorCdpEvent('Network.responseReceivedExtraInfo'), false);
+  assert.equal(isConnectorCdpEvent('Page.lifecycleEvent'), false);
 });

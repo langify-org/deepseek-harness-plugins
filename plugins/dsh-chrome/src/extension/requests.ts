@@ -1,7 +1,7 @@
 import {
   type AnyRequestMessage,
   type ConnectorErrorCode,
-  DENIED_CDP_METHODS,
+  isConnectorCdpMethod,
   type ResponseMessage,
 } from '../protocol/connector.ts';
 import type { OwnedPages } from './owned-pages.ts';
@@ -29,7 +29,7 @@ export async function answerRequest(
       case 'cdp.send': {
         const { tabId, method, params } = request.params;
         if (!pages.owns(tabId)) return notOwned(id, tabId);
-        if (DENIED_CDP_METHODS.has(method)) {
+        if (!isConnectorCdpMethod(method)) {
           return failWith(id, 'method-denied', `the connector does not allow ${method}`);
         }
         const result = await chrome.debugger.sendCommand({ tabId }, method, params);

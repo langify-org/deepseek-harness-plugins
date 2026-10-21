@@ -82,18 +82,30 @@ pointer never queues behind the events that matter.
 
 ## The agent
 
-Tools act on the session's most recently used page unless they name one. The agent reads a
-page as an accessibility tree with refs (`e42`, Chrome's backend DOM node ids) and acts by
-ref with trusted input, like the user's hands. Page content reaching the model is marked
-untrusted. Sensitive input is the user's: the agent asks with `chrome_ask_user` and waits.
+Tools act on the session's most recently used page unless they name one, and their
+commands end when the tool call is stopped. The agent reads a page as an accessibility tree
+with refs (`e42`, Chrome's backend DOM node ids) and acts by ref with trusted input, like
+the user's hands. Backend node ids are unique only within a renderer process, so refs
+belong to the document their snapshot was read from: once the page shows another document,
+they no longer resolve, and the agent takes a new snapshot.
+
+Snapshots, page text and screenshots reach the model marked untrusted; titles are quoted and
+shortened wherever they appear. Sensitive input is the user's: the agent asks with
+`chrome_ask_user` and waits. The tools refuse DSH's own web UI, by the addresses DSH
+serves: in a profile signed in to DSH, the agent could otherwise approve its own actions.
 
 The reading at the start of a turn lists the session's pages and the one the user is
-looking at, only when that changed, so cached prompt prefixes stay valid. Addresses lose
-their query and fragment, which often carry tokens.
+looking at, only when that changed and only for a turn that has something to do, so cached
+prompt prefixes stay valid. Its addresses lose their query and fragment, which often carry
+tokens: the reading enters every turn unasked. Tool results keep whole addresses, which the
+agent asked for and may need.
 
 ## Trust boundaries
 
-* The connector refuses tabs it did not open and CDP methods that read cookie stores.
+* The connector refuses tabs it did not open, and passes on only the CDP methods and events
+  dsh-chrome uses (`CONNECTOR_CDP_METHODS`, `CONNECTOR_CDP_EVENTS`); the host's CDP types are
+  narrowed to the same lists. Cookie stores and network traffic, which carries cookies and
+  credentials, stay out of reach, of a compromised host and of a process posing as DSH.
 * Chrome limits host-to-extension messages to 1 MiB and closes the port on a larger one, so
   every request's size is checked before it is sent.
 * Each side parses the other's connector and viewer messages into fresh values with the
@@ -103,6 +115,13 @@ their query and fragment, which often carry tokens.
 
 * Pages open in one agent window per browser, grouped per session. Only the active tab of a
   window is rendered by Chrome, so other shown pages of that window fall back to captures.
+* Tabs that a page opens itself (sign-in popups, links with `target=_blank`) are not owned:
+  they stay out of the sidebar and the tools. Adopting a tab whose opener is owned would
+  bring them in.
+* Pages belong to the session whose agent opened them, so a subagent's pages are not shown
+  in its parent's sidebar.
+* A sidebar tab follows pages the agent opens, so every Chrome tab of a session switches to
+  the agent's new page.
 * Pages do not survive a Chrome restart. After a DSH restart, the plugin adopts the pages a
   still-running connector reports, under the session ids it recorded. A page's id is derived
   from its browser and tab, so it stays the same and the agent's earlier references hold.

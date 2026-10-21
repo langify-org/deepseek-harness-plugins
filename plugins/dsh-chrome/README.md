@@ -31,8 +31,8 @@ On every start, the plugin also registers the connector's relay with Chrome by w
 directory (`~/.config/google-chrome` by default), next to the profiles. Chrome starts that
 relay only for the connector. Nothing else in the profile is changed.
 
-Chrome connects within a few seconds and reconnects whenever DSH or Chrome restarts. After
-a plugin update, the connector reloads itself to match.
+Chrome connects within a minute of DSH starting, and within seconds when DSH restarts while
+Chrome keeps running. After a plugin update, the connector reloads itself to match.
 
 ## Use
 
@@ -110,20 +110,28 @@ window: permission prompts, extension popups (1Password's toolbar popup; its in-
 autofill menu does show), file pickers, `alert` and `confirm` dialogs, and the lists of
 `<select>` menus (use the arrow keys instead).
 
+Tabs that a page opens itself, such as a sign-in popup or a link that opens a new tab,
+stay in the Chrome window: the sidebar does not show them and the agent cannot reach them.
+Pages that a subagent opens belong to the subagent's session, not to yours.
+
 A page in a minimized or covered Chrome window is captured a few times a second instead
 of streamed.
 
 ## Security
 
 - No remote-debugging port is opened. The connector controls only the tabs it opened, and
-  refuses CDP commands that read cookies.
+  passes on only the CDP commands and events dsh-chrome uses: cookie stores and network
+  traffic, which carries cookies and credentials, stay out of its reach.
 - Chrome starts the connector's relay only for the connector's extension id. The relay
   reaches DSH over a Unix socket that only your OS user can open; other processes of your
   user are trusted, as they already can read your browser profile.
 - The sidebar connects over DSH's own authenticated channel; it opens no new port.
-- Pages are web content: what the agent reads from them is marked untrusted. The agent is
-  told never to type passwords, codes or card numbers, and to ask you instead; the plugin
-  cannot enforce what a model does with a field.
+- The agent may not open DSH's own web UI through Chrome, nor operate a page that shows it:
+  in a profile signed in to DSH, it could otherwise approve its own actions.
+- Pages are web content: snapshots, page text and screenshots reach the agent marked as
+  untrusted, and titles are quoted and shortened. The agent is told never to type
+  passwords, codes or card numbers, and to ask you instead; the plugin cannot enforce what
+  a model does with a field.
 
 ## Troubleshooting
 

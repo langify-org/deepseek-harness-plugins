@@ -1,4 +1,5 @@
 import { type Context, Service } from '@deepseek-ai/cordis';
+import type { PageOpener } from '../../protocol/viewer.ts';
 import type { ConnectedBrowser, RequestOptions } from './connected-browser.ts';
 import { type ConnectorProfile, installConnector } from './connector-install.ts';
 import { ConnectorServer } from './connector-server.ts';
@@ -67,9 +68,8 @@ export class ChromeService extends Service {
   private readonly connectedBrowsers: ConnectedBrowser[] = [];
   private readonly browserListeners = new Set<(browser: ConnectedBrowser) => void>();
   private installedExtensionDir: string | undefined;
-  /** The dedicated profile's browser, while its Chrome starts or runs. */
-  private dedicated: Promise<ConnectedBrowser> | undefined;
-  private dedicatedChrome: DedicatedChrome | undefined;
+  /** The dedicated profile's Chrome, from its start until it exits. */
+  private dedicatedChrome: Promise<DedicatedChrome> | undefined;
 
   constructor(ctx: Context, config: ChromeServiceConfig) {
     super(ctx, 'chrome');
@@ -133,7 +133,10 @@ export class ChromeService extends Service {
   async openPage(
     sessionId: string,
     url: string,
-    options: RequestOptions & { readonly profile?: ProfileName | undefined } = {},
+    options: RequestOptions & {
+      readonly profile?: ProfileName | undefined;
+      readonly openedBy: PageOpener;
+    },
   ): Promise<ChromePage> {
     const browser = await this.browserForOpening(options.profile ?? this.config.defaultProfile);
     const snapshot = await browser.openPage(
@@ -141,7 +144,7 @@ export class ChromeService extends Service {
       { key: sessionId, title: groupTitle(sessionId) },
       options,
     );
-    return this.pages.adopt(sessionId, browser, snapshot);
+    return this.pages.adopt(sessionId, browser, snapshot, options.openedBy);
   }
 
   page(id: PageId): ChromePage | undefined {
@@ -171,54 +174,68 @@ export class ChromeService extends Service {
     );
   }
 
-  /** Starts the dedicated profile's Chrome once, and waits for its connector. */
-  private startDedicated(): Promise<ConnectedBrowser> {
+  /**
+   * The dedicated profile's browser: its Chrome is started if it is not running, and its
+   * connector is awaited. A Chrome whose connector does not connect in time is closed, so
+   * that the next attempt starts afresh rather than handing off to it.
+   */
+  private async startDedicated(): Promise<ConnectedBrowser> {
     if (!this.config.dedicatedProfile.enabled) {
-      return Promise.reject(
-        new NoBrowserError(
-          DEDICATED_PROFILE,
-          'the dedicated Chrome profile is turned off in the dsh-chrome settings',
-        ),
+      throw new NoBrowserError(
+        DEDICATED_PROFILE,
+        'the dedicated Chrome profile is turned off in the dsh-chrome settings',
       );
     }
     const extensionDir = this.installedExtensionDir;
     if (extensionDir === undefined) {
-      return Promise.reject(new NoBrowserError(DEDICATED_PROFILE, 'dsh-chrome is still starting'));
+      throw new NoBrowserError(DEDICATED_PROFILE, 'dsh-chrome is still starting');
     }
-    this.dedicated ??= (async () => {
-      const { executable, display, userDataDir } = this.config.dedicatedProfile;
-      const connected = this.nextBrowser(DEDICATED_PROFILE, DEDICATED_CONNECT_TIMEOUT_MS);
-      let chrome: DedicatedChrome;
-      try {
-        chrome = await launchDedicatedChrome({
-          executable,
-          userDataDir,
-          extensionDir,
-          display,
-          log: this.log,
-        });
-      } catch (error) {
-        connected.cancel();
-        throw error;
-      }
-      void chrome.exited.then(() => {
-        if (this.dedicatedChrome === chrome) this.dedicatedChrome = undefined;
-        this.dedicated = undefined;
-        this.log.info('dsh-chrome: the dedicated Chrome exited');
-      });
-      this.dedicatedChrome = chrome;
-      return connected.browser;
-    })();
-    const starting = this.dedicated;
-    starting.catch(() => {
-      if (this.dedicated === starting) this.dedicated = undefined;
+    // Listening first: the connector may connect before Chrome's start is reported.
+    const connected = this.nextBrowser(DEDICATED_PROFILE, DEDICATED_CONNECT_TIMEOUT_MS);
+    try {
+      await this.dedicatedChromeFor(extensionDir);
+    } catch (error) {
+      connected.cancel();
+      throw error;
+    }
+    try {
+      return await connected.browser;
+    } catch (error) {
+      await this.closeDedicated();
+      throw error;
+    }
+  }
+
+  /** The running dedicated Chrome, started once however many pages wait for it. */
+  private dedicatedChromeFor(extensionDir: string): Promise<DedicatedChrome> {
+    if (this.dedicatedChrome !== undefined) return this.dedicatedChrome;
+    const { executable, display, userDataDir } = this.config.dedicatedProfile;
+    const starting = launchDedicatedChrome({
+      executable,
+      userDataDir,
+      extensionDir,
+      display,
+      log: this.log,
     });
+    this.dedicatedChrome = starting;
+    const forget = () => {
+      if (this.dedicatedChrome === starting) this.dedicatedChrome = undefined;
+    };
+    starting.then(
+      (chrome) =>
+        chrome.exited.then(() => {
+          forget();
+          this.log.info('dsh-chrome: the dedicated Chrome exited');
+        }),
+      forget,
+    );
     return starting;
   }
 
   private async closeDedicated(): Promise<void> {
-    const chrome = this.dedicatedChrome;
+    const starting = this.dedicatedChrome;
     this.dedicatedChrome = undefined;
+    const chrome = await starting?.catch(() => undefined);
     await chrome?.close();
   }
 

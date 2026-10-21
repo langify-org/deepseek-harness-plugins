@@ -16,6 +16,8 @@ export class BrowserPipe {
   >();
   #nextId = 1;
   #buffered = '';
+  /** Why the pipe no longer works, once it does not. */
+  #failure: Error | undefined;
 
   constructor(chrome: ChildProcess) {
     const input = chrome.stdio[3] as Writable | null;
@@ -26,14 +28,17 @@ export class BrowserPipe {
     this.#input = input;
     output.setEncoding('utf8');
     output.on('data', (chunk: string) => this.#receive(chunk));
-    chrome.once('exit', () => {
-      for (const pending of this.#pending.values()) pending.reject(new Error('Chrome exited'));
-      this.#pending.clear();
-    });
+    // A Chrome that exits, or never starts, breaks the pipe; callers learn it from their calls.
+    const fail = (reason: string) => this.#rejectAll(new Error(reason));
+    input.on('error', (error) => fail(`Chrome's debugging pipe failed: ${error.message}`));
+    output.on('error', (error) => fail(`Chrome's debugging pipe failed: ${error.message}`));
+    chrome.once('error', (error) => fail(`Chrome could not start: ${error.message}`));
+    chrome.once('exit', () => fail('Chrome exited'));
   }
 
   /** Sends one CDP command, to the browser or to the page of a flat session. */
   call(method: string, params: object, sessionId?: string): Promise<unknown> {
+    if (this.#failure !== undefined) return Promise.reject(this.#failure);
     const id = this.#nextId++;
     return new Promise((resolve, reject) => {
       this.#pending.set(id, { resolve, reject });
@@ -43,11 +48,25 @@ export class BrowserPipe {
     });
   }
 
+  #rejectAll(failure: Error): void {
+    this.#failure ??= failure;
+    for (const pending of this.#pending.values()) pending.reject(failure);
+    this.#pending.clear();
+  }
+
   #receive(chunk: string): void {
     this.#buffered += chunk;
     for (let end = this.#buffered.indexOf('\0'); end !== -1; end = this.#buffered.indexOf('\0')) {
-      const message: unknown = JSON.parse(this.#buffered.slice(0, end));
+      const text = this.#buffered.slice(0, end);
       this.#buffered = this.#buffered.slice(end + 1);
+      let message: unknown;
+      try {
+        message = JSON.parse(text);
+      } catch {
+        // Thrown from a stream listener, the error would end DSH; the pipe is useless anyway.
+        this.#rejectAll(new Error("Chrome's debugging pipe sent a message that is not JSON"));
+        return;
+      }
       if (typeof message !== 'object' || message === null || !('id' in message)) continue; // an event
       const pending = this.#pending.get(Number(message.id));
       if (pending === undefined) continue;

@@ -27,7 +27,11 @@ export class FrameTooLargeError extends Error {
 /** Reassembles frames from a byte stream. */
 export class FrameDecoder {
   readonly #maxBodyBytes: number;
-  #buffered: Buffer = Buffer.alloc(0);
+  /** Received bytes not yet part of a returned message, as received. */
+  #chunks: Buffer[] = [];
+  #size = 0;
+  /** The bytes the frame being received needs in all, once its header has arrived. */
+  #frameEnd: number | undefined;
 
   constructor(maxBodyBytes: number) {
     this.#maxBodyBytes = maxBodyBytes;
@@ -39,15 +43,27 @@ export class FrameDecoder {
    * @throws SyntaxError when a frame body is not JSON.
    */
   push(chunk: Buffer): unknown[] {
-    this.#buffered = this.#buffered.length === 0 ? chunk : Buffer.concat([this.#buffered, chunk]);
+    this.#chunks.push(chunk);
+    this.#size += chunk.length;
     const messages: unknown[] = [];
-    while (this.#buffered.length >= FRAME_HEADER_BYTES) {
-      const length = this.#buffered.readUInt32LE(0);
+    // A large frame arrives in many chunks; they are joined once it is complete, not on
+    // every chunk.
+    while (this.#size >= (this.#frameEnd ?? FRAME_HEADER_BYTES)) {
+      const buffered =
+        this.#chunks.length === 1 ? (this.#chunks[0] as Buffer) : Buffer.concat(this.#chunks);
+      this.#chunks = [buffered];
+      const length = buffered.readUInt32LE(0);
       if (length > this.#maxBodyBytes) throw new FrameTooLargeError(length, this.#maxBodyBytes);
       const end = FRAME_HEADER_BYTES + length;
-      if (this.#buffered.length < end) break;
-      messages.push(JSON.parse(this.#buffered.subarray(FRAME_HEADER_BYTES, end).toString('utf8')));
-      this.#buffered = this.#buffered.subarray(end);
+      if (buffered.length < end) {
+        this.#frameEnd = end;
+        break;
+      }
+      this.#frameEnd = undefined;
+      const rest = buffered.subarray(end);
+      this.#chunks = rest.length === 0 ? [] : [rest];
+      this.#size = rest.length;
+      messages.push(JSON.parse(buffered.subarray(FRAME_HEADER_BYTES, end).toString('utf8')));
     }
     return messages;
   }

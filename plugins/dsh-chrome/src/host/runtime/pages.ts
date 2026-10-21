@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { PageEndReason, PageSnapshot, TabId } from '../../protocol/connector.ts';
+import type { PageOpener } from '../../protocol/viewer.ts';
 import type { CdpArgs, CdpCommand, CdpEventName, CdpEventParams, CdpResult } from './cdp.ts';
 import type { ConnectedBrowser, RequestOptions } from './connected-browser.ts';
 
@@ -19,6 +20,8 @@ export interface ChromePage {
   readonly sessionId: string;
   readonly browser: ConnectedBrowser;
   readonly tabId: TabId;
+  /** `undefined` for a page adopted from a connector that outlived the host. */
+  readonly openedBy: PageOpener | undefined;
   readonly url: string;
   readonly title: string;
   readonly loading: boolean;
@@ -42,22 +45,120 @@ export interface ChromePage {
   close(): Promise<void>;
 }
 
+/**
+ * The page as one operation sees it: every command it sends ends when the signal aborts,
+ * as a tool call's commands end when the call is stopped. Everything else is the page's.
+ */
+export function boundToSignal(page: ChromePage, signal: AbortSignal): ChromePage {
+  return new SignalBoundPage(page, signal);
+}
+
+class SignalBoundPage implements ChromePage {
+  readonly #page: ChromePage;
+  readonly #signal: AbortSignal;
+
+  constructor(page: ChromePage, signal: AbortSignal) {
+    this.#page = page;
+    this.#signal = signal;
+  }
+
+  get id(): PageId {
+    return this.#page.id;
+  }
+
+  get sessionId(): string {
+    return this.#page.sessionId;
+  }
+
+  get browser(): ConnectedBrowser {
+    return this.#page.browser;
+  }
+
+  get tabId(): TabId {
+    return this.#page.tabId;
+  }
+
+  get openedBy(): PageOpener | undefined {
+    return this.#page.openedBy;
+  }
+
+  get url(): string {
+    return this.#page.url;
+  }
+
+  get title(): string {
+    return this.#page.title;
+  }
+
+  get loading(): boolean {
+    return this.#page.loading;
+  }
+
+  get ending(): PageEnding | undefined {
+    return this.#page.ending;
+  }
+
+  send<M extends CdpCommand>(
+    method: M,
+    ...[params, options]: CdpArgs<M, RequestOptions>
+  ): Promise<CdpResult<M>> {
+    const signal =
+      options?.signal === undefined
+        ? this.#signal
+        : AbortSignal.any([options.signal, this.#signal]);
+    // The same arguments with the signal added; TypeScript cannot follow the tuple through.
+    const args = [params, { ...options, signal }] as unknown as CdpArgs<M, RequestOptions>;
+    return this.#page.send(method, ...args);
+  }
+
+  on<E extends CdpEventName>(
+    event: E,
+    listener: (...params: CdpEventParams<E>) => void,
+  ): () => void {
+    return this.#page.on(event, listener);
+  }
+
+  onChanged(listener: (page: ChromePage) => void): () => void {
+    return this.#page.onChanged(listener);
+  }
+
+  onEnded(listener: (ending: PageEnding) => void): () => void {
+    return this.#page.onEnded(listener);
+  }
+
+  activate(): Promise<void> {
+    return this.#page.activate();
+  }
+
+  close(): Promise<void> {
+    return this.#page.close();
+  }
+}
+
 class Page implements ChromePage {
   readonly id: PageId;
   readonly sessionId: string;
   readonly browser: ConnectedBrowser;
   readonly tabId: TabId;
+  readonly openedBy: PageOpener | undefined;
   #snapshot: PageSnapshot;
   #ending: PageEnding | undefined;
   readonly #eventListeners = new Map<string, Set<(params: unknown) => void>>();
   readonly #changeListeners = new Set<(page: ChromePage) => void>();
   readonly #endListeners = new Set<(ending: PageEnding) => void>();
 
-  constructor(id: PageId, sessionId: string, browser: ConnectedBrowser, snapshot: PageSnapshot) {
+  constructor(
+    id: PageId,
+    sessionId: string,
+    browser: ConnectedBrowser,
+    snapshot: PageSnapshot,
+    openedBy: PageOpener | undefined,
+  ) {
     this.id = id;
     this.sessionId = sessionId;
     this.browser = browser;
     this.tabId = snapshot.tabId;
+    this.openedBy = openedBy;
     this.#snapshot = snapshot;
   }
 
@@ -186,12 +287,23 @@ export class PageRegistry {
   }
 
   /** Registers a page the browser reports, as owned by the session, and as its latest. */
-  adopt(sessionId: string, browser: ConnectedBrowser, snapshot: PageSnapshot): ChromePage {
+  adopt(
+    sessionId: string,
+    browser: ConnectedBrowser,
+    snapshot: PageSnapshot,
+    openedBy?: PageOpener,
+  ): ChromePage {
     const tabs = this.#byTab.get(browser);
     if (tabs === undefined) throw new Error('adopting a page of an untracked browser');
     const existing = tabs.get(snapshot.tabId);
     if (existing !== undefined) return existing;
-    const page = new Page(this.#idFor(browser, snapshot.tabId), sessionId, browser, snapshot);
+    const page = new Page(
+      this.#idFor(browser, snapshot.tabId),
+      sessionId,
+      browser,
+      snapshot,
+      openedBy,
+    );
     tabs.set(page.tabId, page);
     this.#pages.set(page.id, page);
     this.#lastUse.set(page.id, ++this.#useCount);

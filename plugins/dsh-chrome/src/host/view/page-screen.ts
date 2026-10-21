@@ -39,9 +39,16 @@ interface Layout {
 const LAYOUT_CAPTURE_MS = 300;
 /** While a visible page sends no screencast frames, it is captured this often. */
 const STALLED_CAPTURE_MS = 1000;
+/** After input, a capture follows this soon unless a screencast frame comes first. */
+const INPUT_CAPTURE_MS = 80;
+/** The largest layout, in CSS pixels each way: larger surfaces would exhaust the renderer. */
+const MAX_LAYOUT_SIZE = 8192;
 /** Frames may differ from the layout by rounding; a larger difference means a lost layout. */
 const SIZE_TOLERANCE = 1.5;
-/** How long frames of a lost layout are held back while the layout is applied again. */
+/**
+ * How long frames of a lost layout are held back while the layout is applied again, and
+ * how often it is applied again while it stays lost.
+ */
 const RELAYOUT_HOLD_MS = 1000;
 
 /**
@@ -59,7 +66,8 @@ const RELAYOUT_HOLD_MS = 1000;
  * `Page.captureScreenshot`, which Chrome renders even for a page it does not show, and an
  * unchanged capture is dropped. That covers every way the screencast falls silent: a still
  * page, a hidden page (a background tab, a minimized window), and a window the system has
- * stopped drawing (a locked screen). A page Chrome reports hidden is captured more often.
+ * stopped drawing (a locked screen). A page Chrome reports hidden is captured more often,
+ * and input is followed by a capture soon, so that the user sees what their input did.
  */
 export class PageScreen {
   readonly page: ChromePage;
@@ -71,12 +79,18 @@ export class PageScreen {
   #layout: Layout | undefined;
   /** When frames of another size than the layout started arriving. */
   #layoutLostAt: number | undefined;
-  /** Whether frames are produced: while some viewer is on screen. The screencast runs exactly then. */
+  /** When the lost layout was last applied again. */
+  #relayoutAt = 0;
+  /** Whether frames are produced: while some viewer is on screen. */
   #streaming = false;
+  /** Whether Chrome may be screencasting: from starting the screencast until stopping it. */
+  #screencastRunning = false;
   #hidden = false;
   #lastFrame: ScreenFrame | undefined;
   #lastCapture: string | undefined;
   #captureTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Whether the armed capture is the quick one that follows input. */
+  #captureFollowsInput = false;
   #commands: Promise<void> = Promise.resolve();
   #disposed = false;
 
@@ -137,8 +151,8 @@ export class PageScreen {
     if (this.#owner !== viewer) return;
     const { width, height, deviceScaleFactor } = viewer.viewport;
     const layout: Layout = {
-      width: Math.round(width),
-      height: Math.round(height),
+      width: Math.min(Math.round(width), MAX_LAYOUT_SIZE),
+      height: Math.min(Math.round(height), MAX_LAYOUT_SIZE),
       deviceScaleFactor: Math.min(deviceScaleFactor, this.#options.maxDeviceScaleFactor),
     };
     const current = this.#layout;
@@ -160,6 +174,14 @@ export class PageScreen {
     this.#syncFrameSource();
   }
 
+  /** A viewer's input reached the page; its effect is shown soon even without frames. */
+  inputDispatched(): void {
+    // Further input keeps the armed capture: moving the mouse must not postpone it.
+    if (this.#captureTimer !== undefined && this.#captureFollowsInput) return;
+    this.#scheduleCapture(INPUT_CAPTURE_MS);
+    this.#captureFollowsInput = this.#captureTimer !== undefined;
+  }
+
   /** Stops producing frames and gives the page its window's own layout back. */
   dispose(): void {
     if (this.#disposed) return;
@@ -168,7 +190,8 @@ export class PageScreen {
     this.#viewers.clear();
     this.#clearTimers();
     if (this.page.ending !== undefined) return;
-    if (this.#streaming) void this.page.send('Page.stopScreencast').catch(() => {});
+    // Commands still queued are dropped, a stop among them included.
+    if (this.#screencastRunning) void this.page.send('Page.stopScreencast').catch(() => {});
     if (this.#layout !== undefined) {
       void this.page.send('Emulation.clearDeviceMetricsOverride').catch(() => {});
     }
@@ -182,15 +205,21 @@ export class PageScreen {
       this.#enqueue(() => this.#startScreencast());
     } else if (!wanted && this.#streaming) {
       this.#streaming = false;
-      this.#enqueue(() => this.page.send('Page.stopScreencast').then(() => {}));
+      this.#enqueue(async () => {
+        await this.page.send('Page.stopScreencast');
+        this.#screencastRunning = false;
+      });
     }
     this.#scheduleCapture();
   }
 
   async #startScreencast(): Promise<void> {
+    // From here on a stop may be due, even if the screen is disposed while this runs.
+    this.#screencastRunning = true;
     await this.page.send('Page.enable');
     // A screencast left running by an earlier host would refuse a new one.
     await this.page.send('Page.stopScreencast');
+    if (this.#disposed) return;
     // No size limit: the render surface already has the layout's size and density.
     await this.page.send('Page.startScreencast', {
       format: 'jpeg',
@@ -212,7 +241,8 @@ export class PageScreen {
   /**
    * Whether a screencast frame shows the page at its layout. A frame of another size means
    * Chrome gave the surface back to the window: the layout is applied again, and frames are
-   * held back meanwhile — unless the layout stays lost, when they are better than nothing.
+   * held back meanwhile. If the layout stays lost, frames are shown as they are, since they
+   * are better than nothing, and the layout is applied again once in a while.
    */
   #acceptsFrameSize(frame: ScreenFrame): boolean {
     const layout = this.#layout;
@@ -227,14 +257,15 @@ export class PageScreen {
     const now = performance.now();
     if (this.#layoutLostAt === undefined) {
       this.#layoutLostAt = now;
+      this.#relayoutAt = now;
       this.#enqueue(() => this.#applyLayout(layout));
       return false;
     }
-    if (now - this.#layoutLostAt < RELAYOUT_HOLD_MS) return false;
-    // Try once more, and show the frames as they are until the layout holds.
-    this.#layoutLostAt = now;
-    this.#enqueue(() => this.#applyLayout(layout));
-    return true;
+    if (now - this.#relayoutAt >= RELAYOUT_HOLD_MS) {
+      this.#relayoutAt = now;
+      this.#enqueue(() => this.#applyLayout(layout));
+    }
+    return now - this.#layoutLostAt >= RELAYOUT_HOLD_MS;
   }
 
   /**
@@ -242,8 +273,7 @@ export class PageScreen {
    * usual wait for the page's state. Every published frame re-arms it.
    */
   #scheduleCapture(delay?: number): void {
-    clearTimeout(this.#captureTimer);
-    this.#captureTimer = undefined;
+    this.#clearTimers();
     if (!this.#streaming || this.#disposed) return;
     const wait = delay ?? (this.#hidden ? this.#options.hiddenFrameIntervalMs : STALLED_CAPTURE_MS);
     this.#captureTimer = setTimeout(() => {
@@ -257,25 +287,32 @@ export class PageScreen {
   async #capture(): Promise<void> {
     if (this.#disposed || this.page.ending !== undefined) return;
     try {
-      // Under emulation, Chrome captures exactly the emulated viewport.
-      const [{ data }, metrics] = await Promise.all([
+      const [{ data }, size] = await Promise.all([
         this.page.send('Page.captureScreenshot', {
           format: 'jpeg',
           quality: this.#options.jpegQuality,
           optimizeForSpeed: true,
         }),
-        this.page.send('Page.getLayoutMetrics'),
+        this.#viewportSize(),
       ]);
       if (data === this.#lastCapture) return;
       this.#lastCapture = data;
-      this.#publish({
-        image: Buffer.from(data, 'base64'),
-        width: metrics.cssLayoutViewport.clientWidth,
-        height: metrics.cssLayoutViewport.clientHeight,
-      });
+      this.#publish({ image: Buffer.from(data, 'base64'), ...size });
     } catch (error) {
       this.#warn('capture the page', error);
     }
+  }
+
+  /**
+   * The CSS size of what a capture shows: the whole viewport, scrollbars included. Under the
+   * layout's emulation that is the layout. Without one, the visual viewport stands in for
+   * the window's viewport, leaving the scrollbars out.
+   */
+  async #viewportSize(): Promise<{ width: number; height: number }> {
+    const layout = this.#layout;
+    if (layout !== undefined) return { width: layout.width, height: layout.height };
+    const { cssVisualViewport } = await this.page.send('Page.getLayoutMetrics');
+    return { width: cssVisualViewport.clientWidth, height: cssVisualViewport.clientHeight };
   }
 
   #publish(frame: ScreenFrame): void {
@@ -295,6 +332,7 @@ export class PageScreen {
   #clearTimers(): void {
     clearTimeout(this.#captureTimer);
     this.#captureTimer = undefined;
+    this.#captureFollowsInput = false;
   }
 
   #warn(action: string, error: unknown): void {
@@ -308,7 +346,10 @@ export class PageScreen {
 export class ScreenRegistry {
   readonly #options: ScreenOptions;
   readonly #log: Log;
-  readonly #screens = new Map<PageId, PageScreen>();
+  readonly #screens = new Map<
+    PageId,
+    { readonly screen: PageScreen; readonly forget: () => void }
+  >();
 
   constructor(options: ScreenOptions, log: Log) {
     this.#options = options;
@@ -317,12 +358,11 @@ export class ScreenRegistry {
 
   /** The page's screen, created on first use. */
   screenOf(page: ChromePage): PageScreen {
-    let screen = this.#screens.get(page.id);
-    if (screen === undefined) {
-      screen = new PageScreen(page, this.#options, this.#log);
-      this.#screens.set(page.id, screen);
-      page.onEnded(() => this.#drop(page.id));
-    }
+    const existing = this.#screens.get(page.id);
+    if (existing !== undefined) return existing.screen;
+    const screen = new PageScreen(page, this.#options, this.#log);
+    const forget = page.onEnded(() => this.#drop(page.id));
+    this.#screens.set(page.id, { screen, forget });
     return screen;
   }
 
@@ -336,7 +376,10 @@ export class ScreenRegistry {
   }
 
   #drop(id: PageId): void {
-    this.#screens.get(id)?.dispose();
+    const entry = this.#screens.get(id);
+    if (entry === undefined) return;
     this.#screens.delete(id);
+    entry.forget();
+    entry.screen.dispose();
   }
 }

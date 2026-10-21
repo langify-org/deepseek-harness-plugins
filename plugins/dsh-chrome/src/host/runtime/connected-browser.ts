@@ -14,6 +14,7 @@ import {
   type RequestMessage,
   type TabId,
 } from '../../protocol/connector.ts';
+import type { CdpCommand } from './cdp.ts';
 import { encodeFrame, frameBodyBytes } from './message-framing.ts';
 
 /** Who a connected browser is. */
@@ -81,6 +82,8 @@ export class ConnectedBrowser {
   readonly identity: BrowserIdentity;
   readonly #socket: Socket;
   readonly #pending = new Map<number, PendingRequest>();
+  /** Requests the host stopped waiting for, by id: what to do with a late result. */
+  readonly #lateResults = new Map<number, (result: unknown) => void>();
   readonly #eventListeners = new Set<(event: BrowserEvent) => void>();
   readonly #closeListeners = new Set<() => void>();
   #nextId = 1;
@@ -96,8 +99,17 @@ export class ConnectedBrowser {
     return this.#closed;
   }
 
+  /**
+   * Opens a page. If the host stops waiting (a timeout, an abort) before the connector
+   * answers, the tab it opens anyway is closed when the answer comes: an unknown tab would
+   * stay under the connector's control and join the session after the next reconnect.
+   */
   async openPage(url: string, group: PageGroup, options?: RequestOptions): Promise<PageSnapshot> {
-    return requireSnapshot(await this.#request('page.open', { url, group }, options));
+    const closeLateTab = (result: unknown) => {
+      const page = parsePageSnapshot(result);
+      if (page !== undefined) void this.closePage(page.tabId).catch(() => {});
+    };
+    return requireSnapshot(await this.#request('page.open', { url, group }, options, closeLateTab));
   }
 
   async closePage(tabId: TabId, options?: RequestOptions): Promise<void> {
@@ -116,7 +128,7 @@ export class ConnectedBrowser {
 
   sendCdp(
     tabId: TabId,
-    method: string,
+    method: CdpCommand,
     params: object,
     options?: RequestOptions,
   ): Promise<unknown> {
@@ -149,7 +161,13 @@ export class ConnectedBrowser {
     switch (message.type) {
       case 'response': {
         const pending = this.#pending.get(message.id);
-        if (pending === undefined) return; // timed out or cancelled
+        if (pending === undefined) {
+          // The host stopped waiting for it; some requests still have to clean up.
+          const late = this.#lateResults.get(message.id);
+          this.#lateResults.delete(message.id);
+          if (late !== undefined && message.ok) late(message.result);
+          return;
+        }
         this.#pending.delete(message.id);
         if (message.ok) pending.resolve(message.result);
         else pending.reject(new ConnectorRequestError(message.error.code, message.error.message));
@@ -171,6 +189,7 @@ export class ConnectedBrowser {
     method: M,
     params: ConnectorParams<M>,
     options: RequestOptions = {},
+    onLateResult?: (result: unknown) => void,
   ): Promise<unknown> {
     if (this.#closed) {
       return Promise.reject(new ConnectorRequestError('disconnected', 'the browser disconnected'));
@@ -193,16 +212,23 @@ export class ConnectedBrowser {
         clearTimeout(timer);
         signal?.removeEventListener('abort', onAbort);
       };
-      const onAbort = () => {
+      const giveUp = (reason: unknown) => {
         settle();
-        reject(signal?.reason);
+        if (onLateResult !== undefined) this.#lateResults.set(id, onLateResult);
+        reject(reason);
       };
-      const timer = setTimeout(() => {
-        settle();
-        reject(new ConnectorRequestError('timeout', `${method} got no answer in ${timeoutMs} ms`));
-      }, timeoutMs);
+      const onAbort = () => giveUp(signal?.reason);
+      const timer = setTimeout(
+        () =>
+          giveUp(
+            new ConnectorRequestError('timeout', `${method} got no answer in ${timeoutMs} ms`),
+          ),
+        timeoutMs,
+      );
       if (signal?.aborted) {
-        onAbort();
+        // Never sent, so no answer will come.
+        settle();
+        reject(signal.reason);
         return;
       }
       signal?.addEventListener('abort', onAbort, { once: true });
@@ -226,6 +252,7 @@ export class ConnectedBrowser {
     const failure = new ConnectorRequestError('disconnected', 'the browser disconnected');
     for (const pending of [...this.#pending.values()]) pending.reject(failure);
     this.#pending.clear();
+    this.#lateResults.clear();
     for (const listener of this.#closeListeners) listener();
     this.#closeListeners.clear();
     this.#eventListeners.clear();

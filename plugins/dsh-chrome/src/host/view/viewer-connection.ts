@@ -52,6 +52,8 @@ export class ViewerConnection implements ScreenViewer {
   #attachment: Attachment | undefined;
   /** While the viewer is visible and shows a page: the page's "shown" mark. */
   #releaseShown: (() => void) | undefined;
+  /** Set once the socket closed; requests still running must not attach anything. */
+  #closed = false;
   #frameSeq = 0;
   #frameInFlight: number | undefined;
   #waitingFrame: ScreenFrame | undefined;
@@ -122,7 +124,9 @@ export class ViewerConnection implements ScreenViewer {
       case 'open': {
         const url = requireAddress(request.url);
         this.#viewport = request.viewport;
-        this.#attach(await chrome.openPage(sessionId, url));
+        const page = await chrome.openPage(sessionId, url, { openedBy: 'user' });
+        // The page stays open for the session; only this viewer is gone.
+        if (!this.#closed) this.#attach(page);
         return;
       }
       case 'attach': {
@@ -162,6 +166,7 @@ export class ViewerConnection implements ScreenViewer {
         screen.claimOwnership(this);
         chrome.pages.touch(page.id);
         attachment.input.dispatch(request.input);
+        screen.inputDispatched();
         return;
       case 'navigate':
         await navigate(page, { url: requireAddress(request.url) });
@@ -245,6 +250,7 @@ export class ViewerConnection implements ScreenViewer {
   }
 
   #close(): void {
+    this.#closed = true;
     this.#detach();
     for (const unsubscribe of this.#subscriptions) unsubscribe();
     this.#subscriptions.length = 0;
@@ -292,6 +298,7 @@ export class ViewerConnection implements ScreenViewer {
       title: page.title,
       loading: page.loading,
       browserLabel: page.browser.identity.label,
+      openedBy: page.openedBy ?? null,
     };
   }
 

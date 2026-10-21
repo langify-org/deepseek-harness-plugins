@@ -28,13 +28,14 @@ let
   };
 
   # One store for the whole workspace: every plugin shares the lock file.
-  # Update the hash after changing dependencies: set it to lib.fakeHash and build.
+  # After changing dependencies, set the hash to "" and build; the error reports the new
+  # one. (Under the old hash, Nix keeps the old store and the build fails offline.)
   pnpmDeps = fetchPnpmDeps {
     pname = "deepseek-harness-plugins";
     version = "0";
     inherit src pnpm;
     fetcherVersion = 4;
-    hash = "sha256-okw5iBjVfuRj5UgRHl7zIv4qSdCmBgq8adp5cuU+6QQ=";
+    hash = "sha256-qLfzPvwZdu/k08UVYnBBD3PVie0A7l0pWstkuJAJukY=";
   };
 
   # Builds a plugin after the workspace-wide lint, type checks and the plugin's tests

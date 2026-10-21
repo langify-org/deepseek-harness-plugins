@@ -2,7 +2,7 @@
 
 ## Checks
 
-`pnpm check` runs what CI and the Nix build run: Biome, the type checks of every
+`pnpm check` runs what the Nix build runs: Biome, the type checks of every
 package, unit tests, the build, and each plugin's tests against DSH's own packages
 (`test:compat`). Tests that drive a real browser run separately:
 
@@ -27,6 +27,7 @@ A plugin lives in `plugins/<name>/` and is one npm package. Its parts:
 | `test/unit/` | Pure logic, run on every check. |
 | `test/compat/` | The built plugin inside DSH's real Host services, at the DSH version `engines.dsh` names. |
 | `test/integration/` | Real external software (a browser, a server), run on demand. |
+| `test/support/` | What several test files share, such as a DSH Host composition or a headless browser. |
 | `docs/` | Design notes: the concepts, the decisions, and why. |
 
 Every process boundary gets its own TypeScript project (`tsconfig.<target>.json`), so

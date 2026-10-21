@@ -99,6 +99,25 @@ export type ViewerRequest =
   /** Asks for the shown page's text, to add it to the user's message. */
   | { readonly type: 'read-text'; readonly requestId: string };
 
+export type ViewerRequestType = ViewerRequest['type'];
+
+/** Every request type, checked against {@link ViewerRequest} by the compiler. */
+const VIEWER_REQUEST_TYPES: Readonly<Record<ViewerRequestType, true>> = {
+  watch: true,
+  open: true,
+  attach: true,
+  resize: true,
+  visibility: true,
+  input: true,
+  navigate: true,
+  history: true,
+  reload: true,
+  'close-page': true,
+  'frame-drawn': true,
+  'answer-help': true,
+  'read-text': true,
+};
+
 /** What a viewer shows about a page besides its pixels. */
 export interface PageState {
   readonly id: string;
@@ -131,7 +150,18 @@ export type ViewerEvent =
       readonly url: string;
       readonly text: string;
     }
-  | { readonly type: 'failed'; readonly message: string };
+  /**
+   * The host could not carry out a request. A viewer that waits for an answer to it (an
+   * open page, a page's text) learns from `requestType` and `requestId` that none will come.
+   */
+  | {
+      readonly type: 'failed';
+      /** The failed request's type, or `null` when the host could not read the request. */
+      readonly requestType: ViewerRequestType | null;
+      /** The failed request's `requestId`, for the requests that carry one. */
+      readonly requestId: string | null;
+      readonly message: string;
+    };
 
 export interface FrameHeader {
   readonly seq: number;
@@ -274,8 +304,12 @@ export function parseViewerEvent(value: unknown): ViewerEvent | undefined {
         : undefined;
     }
     case 'failed': {
-      const { message } = value;
-      return isString(message) ? { type: 'failed', message } : undefined;
+      const { requestType, requestId, message } = value;
+      return (requestType === null || isRequestType(requestType)) &&
+        (requestId === null || isString(requestId)) &&
+        isString(message)
+        ? { type: 'failed', requestType, requestId, message }
+        : undefined;
     }
     default:
       return undefined;
@@ -370,6 +404,10 @@ function isMouseButton(value: unknown): value is MouseButton {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isRequestType(value: unknown): value is ViewerRequestType {
+  return typeof value === 'string' && Object.hasOwn(VIEWER_REQUEST_TYPES, value);
 }
 
 function isString(value: unknown): value is string {

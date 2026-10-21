@@ -58,10 +58,14 @@ match, and screencast frames show exactly that viewport. When the window lays it
 again (the debugging infobar appearing, the user resizing it), Chrome gives the surface the
 window's size back; a frame of another size reveals that, and the layout is applied again.
 
-While the page is visible in Chrome, it is screencast: a frame whenever it repaints. Chrome
-does not screencast a hidden page (a background tab, a minimized window) but still renders
-it for `Page.captureScreenshot`, so a hidden page is captured at a fixed interval. A still
-page sends no frames, so a capture follows every layout change.
+While a viewer is on screen, the page is screencast: Chrome sends a frame whenever it
+repaints. Whenever no frame has come for a while, the page is captured instead
+(`Page.captureScreenshot`, which Chrome renders even for a page it does not show), and a
+capture that repeats the last one is dropped. One rule covers every way a screencast falls
+silent: a still page; a hidden page (a background tab, a minimized window), which Chrome
+reports, so it is captured more often; and a window the system has stopped drawing, such
+as on a locked screen. After a layout change, a capture follows shortly unless a frame
+comes first.
 
 A viewer holds at most one undelivered frame: the host sends the next frame only after the
 viewer reports the last one drawn, and frames produced meanwhile replace each other. A
@@ -100,7 +104,8 @@ their query and fragment, which often carry tokens.
 * Pages open in one agent window per browser, grouped per session. Only the active tab of a
   window is rendered by Chrome, so other shown pages of that window fall back to captures.
 * Pages do not survive a Chrome restart. After a DSH restart, the plugin adopts the pages a
-  still-running connector reports, under the session ids it recorded.
+  still-running connector reports, under the session ids it recorded. A page's id is derived
+  from its browser and tab, so it stays the same and the agent's earlier references hold.
 * Chat links still open in DSH's own Browser tab; dsh-chrome does not take over the
   `browser` tab kind.
 * All tools are always declared to the model. Revealing them only when needed (a skill, or

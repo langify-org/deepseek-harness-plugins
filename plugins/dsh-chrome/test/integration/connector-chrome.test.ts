@@ -1,18 +1,17 @@
 /**
- * End-to-end through a real Chrome: the plugin's runtime and viewer pieces, the native
- * host relay, and the connector extension, in a temporary dedicated profile on a
- * virtual display. Nothing touches the user's own Chrome.
+ * The host side against a real Chrome: the runtime, the page and view pieces, the native
+ * host relay and the connector extension, in a temporary dedicated profile on a private
+ * display. Nothing touches the user's own Chrome.
  *
  * Needs a build (`pnpm build`), Google Chrome (or DSH_CHROME_TEST_EXECUTABLE) and Xvfb.
  */
 import assert from 'node:assert/strict';
-import { access, mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { fileURLToPath } from 'node:url';
 import { click, navigate, press, type } from '../../src/host/page/actions.ts';
 import { parseKeyCombo } from '../../src/host/page/keys.ts';
 import { readSnapshot } from '../../src/host/page/snapshot.ts';
@@ -26,23 +25,12 @@ import {
 } from '../../src/host/runtime/dedicated-chrome.ts';
 import { silentLog } from '../../src/host/runtime/log.ts';
 import { PLUGIN_VERSION } from '../../src/host/runtime/package-files.ts';
-import { type ChromePage, PageRegistry } from '../../src/host/runtime/pages.ts';
+import { type ChromePage, type PageEnding, PageRegistry } from '../../src/host/runtime/pages.ts';
 import { PageInput } from '../../src/host/view/page-input.ts';
 import { PageScreen, type ScreenFrame } from '../../src/host/view/page-screen.ts';
-
-const executable = process.env['DSH_CHROME_TEST_EXECUTABLE'] ?? 'google-chrome-stable';
-const distDir = fileURLToPath(new URL('../../dist', import.meta.url));
-
-const TEST_PAGE = `<!doctype html>
-<title>dsh-chrome test page</title>
-<input id="field" aria-label="Field" style="position:absolute;left:20px;top:20px;width:200px;height:30px">
-<p id="clock" style="position:absolute;left:20px;top:80px">0</p>
-<button id="go" style="position:absolute;left:20px;top:140px" onclick="this.textContent = 'Clicked'">Go</button>
-<p style="position:absolute;left:20px;top:200px">A shared page for testing.</p>
-<script>
-  let ticks = 0;
-  setInterval(() => { document.getElementById('clock').textContent = String(++ticks); }, 50);
-</script>`;
+import { chromeExecutable, distDir, missingRequirements } from '../support/environment.ts';
+import { TEST_PAGE_HTML, TEST_PAGE_TITLE } from '../support/test-page.ts';
+import { waitFor, withTimeout } from '../support/wait.ts';
 
 let workDir = '';
 let pageServer: Server | undefined;
@@ -50,20 +38,23 @@ let pageUrl = '';
 let connectorServer: ConnectorServer | undefined;
 let chrome: DedicatedChrome | undefined;
 let browser: ConnectedBrowser | undefined;
+let socketPath = '';
 const pages = new PageRegistry();
+/** Who waits for the next browser to connect. */
+const connectionWaiters: ((browser: ConnectedBrowser) => void)[] = [];
 
-const missing = await missingRequirements();
+const missing = await missingRequirements({ chrome: true });
 
 before(async () => {
-  if (missing !== undefined) return;
+  if (missing) return;
   workDir = await mkdtemp(join(tmpdir(), 'dsh-chrome-it-'));
   pageServer = createServer((_request, response) => {
-    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(TEST_PAGE);
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(TEST_PAGE_HTML);
   });
   await new Promise<void>((resolve) => pageServer?.listen(0, '127.0.0.1', resolve));
   pageUrl = `http://127.0.0.1:${(pageServer.address() as AddressInfo).port}/`;
 
-  const socketPath = join(workDir, 'connector.sock');
+  socketPath = join(workDir, 'connector.sock');
   const userDataDir = join(workDir, 'profile');
   const installed = await installConnector({
     distDir,
@@ -72,22 +63,10 @@ before(async () => {
     nodePath: process.execPath,
     profiles: [{ name: 'dedicated', userDataDir }],
   });
-  let onBrowser: (browser: ConnectedBrowser) => void = () => {};
-  const connected = new Promise<ConnectedBrowser>((resolve) => {
-    onBrowser = resolve;
-  });
-  connectorServer = await ConnectorServer.listen({
-    socketPath,
-    // The built connector's version: another version would make it reload.
-    connectorVersion: PLUGIN_VERSION,
-    log: silentLog,
-    onBrowser: (connectedBrowser) => {
-      pages.track(connectedBrowser);
-      onBrowser(connectedBrowser);
-    },
-  });
+  const connected = nextConnection();
+  connectorServer = await listen(pages);
   chrome = await launchDedicatedChrome({
-    executable,
+    executable: chromeExecutable,
     userDataDir,
     extensionDir: installed.extensionDir,
     display: 'virtual',
@@ -118,7 +97,7 @@ test('a page opens in Chrome and answers CDP commands', { skip: missing }, async
     expression: 'document.title',
     returnByValue: true,
   });
-  assert.equal(result.value, 'dsh-chrome test page');
+  assert.equal(result.value, TEST_PAGE_TITLE);
   await page.close();
 });
 
@@ -256,7 +235,7 @@ test('the agent reads page text and navigates', { skip: missing }, async () => {
   const page = await openTestPage('session-g');
   await waitFor(async () => (await evaluate<string>(page, 'document.readyState')) === 'complete');
   const text = await readPageText(page, 10_000);
-  assert.equal(text.title, 'dsh-chrome test page');
+  assert.equal(text.title, TEST_PAGE_TITLE);
   assert.match(text.text, /A shared page for testing\./);
   assert.equal(await navigate(page, { url: `${pageUrl}?second` }), true);
   assert.equal(await evaluate<string>(page, 'location.search'), '?second');
@@ -264,6 +243,47 @@ test('the agent reads page text and navigates', { skip: missing }, async () => {
   assert.equal(await evaluate<string>(page, 'location.search'), '');
   await page.close();
 });
+
+test('a page keeps its id when the host restarts while Chrome keeps running', {
+  skip: missing,
+}, async () => {
+  const page = await openTestPage('session-h');
+  const ended = new Promise<PageEnding>((resolve) => page.onEnded(resolve));
+  await connectorServer?.close();
+  assert.equal(await withTimeout(ended, 5000, 'the page outlived its host'), 'disconnected');
+
+  // The new host knows nothing; the connector reconnects and reports the pages it kept.
+  const restarted = new PageRegistry();
+  const reconnected = nextConnection();
+  connectorServer = await listen(restarted);
+  browser = await withTimeout(reconnected, 20_000, 'the connector did not reconnect');
+  const reported = (await browser.listPages()).find(
+    (snapshot) => snapshot.groupKey === 'session-h',
+  );
+  assert.ok(reported, 'the connector did not report the page');
+  const adopted = restarted.adopt(reported.groupKey, browser, reported);
+  assert.equal(adopted.id, page.id);
+  assert.equal(await evaluate<string>(adopted, 'document.title'), TEST_PAGE_TITLE);
+  await adopted.close();
+});
+
+/** A connector server that hands the browsers it accepts to the registry and the waiters. */
+function listen(registry: PageRegistry): Promise<ConnectorServer> {
+  return ConnectorServer.listen({
+    socketPath,
+    // The built connector's version: another version would make it reload.
+    connectorVersion: PLUGIN_VERSION,
+    log: silentLog,
+    onBrowser: (connected) => {
+      registry.track(connected);
+      connectionWaiters.shift()?.(connected);
+    },
+  });
+}
+
+function nextConnection(): Promise<ConnectedBrowser> {
+  return new Promise((resolve) => connectionWaiters.push(resolve));
+}
 
 async function openTestPage(sessionId: string): Promise<ChromePage> {
   assert.ok(browser, 'no browser connected');
@@ -278,56 +298,4 @@ async function evaluate<T>(page: ChromePage, expression: string): Promise<T> {
   });
   if (exceptionDetails !== undefined) throw new Error(exceptionDetails.text);
   return result.value as T;
-}
-
-async function waitFor(
-  condition: () => boolean | Promise<boolean>,
-  timeoutMs = 10_000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!(await condition())) {
-    if (Date.now() > deadline) throw new Error('timed out waiting for a condition');
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-}
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_resolve, reject) =>
-      setTimeout(() => reject(new Error(message)), timeoutMs),
-    ),
-  ]);
-}
-
-/** Why the suite cannot run here, or `undefined` when it can. */
-async function missingRequirements(): Promise<string | undefined> {
-  if (process.platform !== 'linux') return 'needs Linux (Xvfb)';
-  try {
-    await access(join(distDir, 'extension', 'manifest.json'));
-  } catch {
-    return 'needs a build: run `pnpm build` first';
-  }
-  for (const program of [executable, 'Xvfb']) {
-    if (!(await onPath(program))) return `needs ${program} on PATH`;
-  }
-  return undefined;
-}
-
-async function onPath(program: string): Promise<boolean> {
-  if (program.includes('/'))
-    return access(program).then(
-      () => true,
-      () => false,
-    );
-  for (const directory of (process.env['PATH'] ?? '').split(delimiter)) {
-    if (
-      await access(join(directory, program)).then(
-        () => true,
-        () => false,
-      )
-    )
-      return true;
-  }
-  return false;
 }

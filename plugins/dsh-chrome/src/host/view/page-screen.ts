@@ -35,8 +35,10 @@ interface Layout {
   readonly deviceScaleFactor: number;
 }
 
-/** If the page sends no screencast frame by then, capture one instead: a still page does not repaint. */
-const FIRST_FRAME_GRACE_MS = 300;
+/** After a layout change, a capture follows this soon unless a screencast frame comes first. */
+const LAYOUT_CAPTURE_MS = 300;
+/** While a visible page sends no screencast frames, it is captured this often. */
+const STALLED_CAPTURE_MS = 1000;
 /** Frames may differ from the layout by rounding; a larger difference means a lost layout. */
 const SIZE_TOLERANCE = 1.5;
 /** How long frames of a lost layout are held back while the layout is applied again. */
@@ -53,9 +55,11 @@ const RELAYOUT_HOLD_MS = 1000;
  * a frame of another size reveals that, and the layout is applied again.
  *
  * Frames. While the page is visible, Chrome screencasts it and sends a frame whenever it
- * repaints. Chrome does not screencast a hidden page (a background tab, a minimized
- * window) but still renders it for `Page.captureScreenshot`, so a hidden page is captured
- * at a fixed interval instead and unchanged captures are dropped.
+ * repaints. Whenever no frame has come for a while, the page is captured instead with
+ * `Page.captureScreenshot`, which Chrome renders even for a page it does not show, and an
+ * unchanged capture is dropped. That covers every way the screencast falls silent: a still
+ * page, a hidden page (a background tab, a minimized window), and a window the system has
+ * stopped drawing (a locked screen). A page Chrome reports hidden is captured more often.
  */
 export class PageScreen {
   readonly page: ChromePage;
@@ -67,12 +71,12 @@ export class PageScreen {
   #layout: Layout | undefined;
   /** When frames of another size than the layout started arriving. */
   #layoutLostAt: number | undefined;
-  #screencasting = false;
+  /** Whether frames are produced: while some viewer is on screen. The screencast runs exactly then. */
+  #streaming = false;
   #hidden = false;
   #lastFrame: ScreenFrame | undefined;
   #lastCapture: string | undefined;
-  #pollTimer: ReturnType<typeof setInterval> | undefined;
-  #firstFrameTimer: ReturnType<typeof setTimeout> | undefined;
+  #captureTimer: ReturnType<typeof setTimeout> | undefined;
   #commands: Promise<void> = Promise.resolve();
   #disposed = false;
 
@@ -88,11 +92,14 @@ export class PageScreen {
           width: metadata.deviceWidth,
           height: metadata.deviceHeight,
         };
-        if (this.#acceptsFrameSize(frame)) this.#publish(frame);
+        if (!this.#acceptsFrameSize(frame)) return;
+        // The screen moved on from the last capture; the next one is news even if it repeats it.
+        this.#lastCapture = undefined;
+        this.#publish(frame);
       }),
       page.on('Page.screencastVisibilityChanged', ({ visible }) => {
         this.#hidden = !visible;
-        this.#updatePolling();
+        this.#scheduleCapture();
       }),
     );
   }
@@ -161,23 +168,23 @@ export class PageScreen {
     this.#viewers.clear();
     this.#clearTimers();
     if (this.page.ending !== undefined) return;
-    if (this.#screencasting) void this.page.send('Page.stopScreencast').catch(() => {});
+    if (this.#streaming) void this.page.send('Page.stopScreencast').catch(() => {});
     if (this.#layout !== undefined) {
       void this.page.send('Emulation.clearDeviceMetricsOverride').catch(() => {});
     }
   }
 
-  /** Starts or stops the screencast as visible viewers come and go. */
+  /** Starts or stops producing frames as viewers come on and off screen. */
   #syncFrameSource(): void {
     const wanted = !this.#disposed && [...this.#viewers].some((viewer) => viewer.visible);
-    if (wanted && !this.#screencasting) {
-      this.#screencasting = true;
+    if (wanted && !this.#streaming) {
+      this.#streaming = true;
       this.#enqueue(() => this.#startScreencast());
-    } else if (!wanted && this.#screencasting) {
-      this.#screencasting = false;
+    } else if (!wanted && this.#streaming) {
+      this.#streaming = false;
       this.#enqueue(() => this.page.send('Page.stopScreencast').then(() => {}));
     }
-    this.#updatePolling();
+    this.#scheduleCapture();
   }
 
   async #startScreencast(): Promise<void> {
@@ -189,7 +196,7 @@ export class PageScreen {
       format: 'jpeg',
       quality: this.#options.jpegQuality,
     });
-    this.#expectFrame();
+    this.#scheduleCapture(LAYOUT_CAPTURE_MS);
   }
 
   async #applyLayout(layout: Layout): Promise<void> {
@@ -199,7 +206,7 @@ export class PageScreen {
       deviceScaleFactor: layout.deviceScaleFactor,
       mobile: false,
     });
-    this.#expectFrame();
+    this.#scheduleCapture(LAYOUT_CAPTURE_MS);
   }
 
   /**
@@ -230,26 +237,21 @@ export class PageScreen {
     return true;
   }
 
-  /** Makes sure viewers get a picture soon, even if the page does not repaint. */
-  #expectFrame(): void {
-    clearTimeout(this.#firstFrameTimer);
-    const before = this.#lastFrame;
-    this.#firstFrameTimer = setTimeout(() => {
-      if (this.#lastFrame === before) void this.#capture();
-    }, FIRST_FRAME_GRACE_MS);
-  }
-
-  #updatePolling(): void {
-    const shouldPoll = this.#hidden && this.#screencasting && !this.#disposed;
-    if (shouldPoll && this.#pollTimer === undefined) {
-      this.#pollTimer = setInterval(
-        () => void this.#capture(),
-        this.#options.hiddenFrameIntervalMs,
-      );
-    } else if (!shouldPoll && this.#pollTimer !== undefined) {
-      clearInterval(this.#pollTimer);
-      this.#pollTimer = undefined;
-    }
+  /**
+   * Arms the capture that runs if no frame arrives first: after `delay`, or after the
+   * usual wait for the page's state. Every published frame re-arms it.
+   */
+  #scheduleCapture(delay?: number): void {
+    clearTimeout(this.#captureTimer);
+    this.#captureTimer = undefined;
+    if (!this.#streaming || this.#disposed) return;
+    const wait = delay ?? (this.#hidden ? this.#options.hiddenFrameIntervalMs : STALLED_CAPTURE_MS);
+    this.#captureTimer = setTimeout(() => {
+      this.#captureTimer = undefined;
+      void this.#capture().finally(() => {
+        if (this.#captureTimer === undefined) this.#scheduleCapture();
+      });
+    }, wait);
   }
 
   async #capture(): Promise<void> {
@@ -280,6 +282,7 @@ export class PageScreen {
     if (this.#disposed) return;
     this.#lastFrame = frame;
     for (const viewer of this.#viewers) viewer.showFrame(frame);
+    this.#scheduleCapture();
   }
 
   /** Page commands run one at a time and in order: a later layout must win. */
@@ -290,10 +293,8 @@ export class PageScreen {
   }
 
   #clearTimers(): void {
-    clearTimeout(this.#firstFrameTimer);
-    clearInterval(this.#pollTimer);
-    this.#firstFrameTimer = undefined;
-    this.#pollTimer = undefined;
+    clearTimeout(this.#captureTimer);
+    this.#captureTimer = undefined;
   }
 
   #warn(action: string, error: unknown): void {

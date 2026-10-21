@@ -93,6 +93,8 @@ export class ViewerConnection implements ScreenViewer {
     if (request === undefined) {
       this.#send({
         type: 'failed',
+        requestType: null,
+        requestId: null,
         message: 'the viewer sent a request this protocol does not define',
       });
       return;
@@ -100,6 +102,8 @@ export class ViewerConnection implements ScreenViewer {
     void this.#handle(request).catch((error: unknown) =>
       this.#send({
         type: 'failed',
+        requestType: request.type,
+        requestId: 'requestId' in request ? request.requestId : null,
         message: error instanceof Error ? error.message : String(error),
       }),
     );

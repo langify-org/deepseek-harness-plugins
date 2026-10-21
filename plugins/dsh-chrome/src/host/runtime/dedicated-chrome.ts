@@ -1,7 +1,8 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
-import type { Readable, Writable } from 'node:stream';
+import type { Readable } from 'node:stream';
 import { CONNECTOR_EXTENSION_ID } from '../../protocol/connector-identity.ts';
+import { BrowserPipe } from './browser-pipe.ts';
 import type { Log } from './log.ts';
 
 export interface DedicatedChromeOptions {
@@ -95,59 +96,6 @@ export async function launchDedicatedChrome(
       await virtualDisplay?.stop();
     },
   };
-}
-
-/**
- * Chrome's end of `--remote-debugging-pipe`: JSON messages, each followed by a NUL byte.
- * Only the launcher uses it, for a handful of browser-level commands.
- */
-class BrowserPipe {
-  readonly #input: Writable;
-  readonly #pending = new Map<
-    number,
-    { resolve: (value: unknown) => void; reject: (error: Error) => void }
-  >();
-  #nextId = 1;
-  #buffered = '';
-
-  constructor(chrome: ChildProcess) {
-    const input = chrome.stdio[3] as Writable | null;
-    const output = chrome.stdio[4] as Readable | null;
-    if (input === null || output === null)
-      throw new Error('Chrome started without its debugging pipe');
-    this.#input = input;
-    output.setEncoding('utf8');
-    output.on('data', (chunk: string) => this.#receive(chunk));
-    chrome.once('exit', () => {
-      for (const pending of this.#pending.values()) pending.reject(new Error('Chrome exited'));
-      this.#pending.clear();
-    });
-  }
-
-  call(method: string, params: object): Promise<unknown> {
-    const id = this.#nextId++;
-    return new Promise((resolve, reject) => {
-      this.#pending.set(id, { resolve, reject });
-      this.#input.write(`${JSON.stringify({ id, method, params })}\0`);
-    });
-  }
-
-  #receive(chunk: string): void {
-    this.#buffered += chunk;
-    for (let end = this.#buffered.indexOf('\0'); end !== -1; end = this.#buffered.indexOf('\0')) {
-      const message = JSON.parse(this.#buffered.slice(0, end)) as {
-        id?: number;
-        result?: unknown;
-        error?: { message: string };
-      };
-      this.#buffered = this.#buffered.slice(end + 1);
-      const pending = message.id === undefined ? undefined : this.#pending.get(message.id);
-      if (pending === undefined || message.id === undefined) continue; // an event
-      this.#pending.delete(message.id);
-      if (message.error === undefined) pending.resolve(message.result);
-      else pending.reject(new Error(message.error.message));
-    }
-  }
 }
 
 interface VirtualDisplay {

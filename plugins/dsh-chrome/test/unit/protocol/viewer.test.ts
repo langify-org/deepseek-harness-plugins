@@ -311,13 +311,28 @@ test('decodes ended and failed events from JSON text', () => {
     type: 'ended',
     reason: 'closed',
   });
-  assert.deepEqual(
-    decodeViewerEvent(JSON.stringify({ type: 'failed', message: 'no browser connected' })),
-    {
-      type: 'failed',
-      message: 'no browser connected',
-    },
+  const openFailed = {
+    type: 'failed',
+    requestType: 'open',
+    requestId: null,
+    message: 'no browser connected',
+  };
+  assert.deepEqual(decodeViewerEvent(JSON.stringify(openFailed)), openFailed);
+  const textFailed = { type: 'failed', requestType: 'read-text', requestId: 'r2', message: 'gone' };
+  assert.deepEqual(decodeViewerEvent(JSON.stringify(textFailed)), textFailed);
+  const unreadable = { type: 'failed', requestType: null, requestId: null, message: 'unknown' };
+  assert.deepEqual(decodeViewerEvent(JSON.stringify(unreadable)), unreadable);
+});
+
+test('rejects a failure naming a request type the protocol does not define', () => {
+  const failed = { type: 'failed', requestType: 'open', requestId: null, message: 'm' };
+  assert.equal(decodeViewerEvent(JSON.stringify({ ...failed, requestType: 'launch' })), undefined);
+  assert.equal(
+    decodeViewerEvent(JSON.stringify({ ...failed, requestType: 'toString' })),
+    undefined,
   );
+  assert.equal(decodeViewerEvent(JSON.stringify({ ...failed, requestId: 7 })), undefined);
+  assert.equal(decodeViewerEvent(JSON.stringify({ type: 'failed', message: 'm' })), undefined);
 });
 
 test('decodes help requests and their withdrawal from JSON text', () => {

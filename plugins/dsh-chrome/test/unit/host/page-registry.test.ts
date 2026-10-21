@@ -89,6 +89,22 @@ function snapshot(
   };
 }
 
+test('gives a tab the same page id in a new registry, as after a restart of DSH', () => {
+  const browser = fakeBrowser() as unknown as ConnectedBrowser;
+  const before = new PageRegistry();
+  before.track(browser);
+  const after = new PageRegistry();
+  after.track(browser);
+
+  const page = before.adopt('session-1', browser, snapshot(4));
+  assert.equal(after.adopt('session-1', browser, snapshot(4)).id, page.id);
+  assert.notEqual(after.adopt('session-1', browser, snapshot(5)).id, page.id);
+
+  const other = fakeBrowser('Home Chrome') as unknown as ConnectedBrowser;
+  after.track(other);
+  assert.notEqual(after.adopt('session-1', other, snapshot(4)).id, page.id);
+});
+
 test('adopts a page with a minted short id, the session, and the tab snapshot', () => {
   const registry = new PageRegistry();
   const browser = fakeBrowser();

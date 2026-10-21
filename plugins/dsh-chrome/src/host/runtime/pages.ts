@@ -1,11 +1,12 @@
-import { randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import type { PageEndReason, PageSnapshot, TabId } from '../../protocol/connector.ts';
 import type { CdpArgs, CdpCommand, CdpEventName, CdpEventParams, CdpResult } from './cdp.ts';
 import type { ConnectedBrowser, RequestOptions } from './connected-browser.ts';
 
 /**
- * A plugin-minted page id, unique among the pages of this host. Tab ids are per browser;
- * page ids are short because the agent reads and writes them.
+ * A page's id: short, because the agent reads and writes it, and unique among the pages of
+ * this host. It is derived from the browser and the tab, so a page keeps its id when DSH
+ * restarts and adopts it again, and earlier tool results still name it.
  */
 export type PageId = string;
 
@@ -190,7 +191,7 @@ export class PageRegistry {
     if (tabs === undefined) throw new Error('adopting a page of an untracked browser');
     const existing = tabs.get(snapshot.tabId);
     if (existing !== undefined) return existing;
-    const page = new Page(this.#mintId(), sessionId, browser, snapshot);
+    const page = new Page(this.#idFor(browser, snapshot.tabId), sessionId, browser, snapshot);
     tabs.set(page.tabId, page);
     this.#pages.set(page.id, page);
     this.#lastUse.set(page.id, ++this.#useCount);
@@ -243,9 +244,13 @@ export class PageRegistry {
     return () => this.#listeners.delete(listener);
   }
 
-  #mintId(): PageId {
-    for (;;) {
-      const id = `p${randomBytes(3).toString('hex')}`;
+  /** The tab's page id; in the rare case another page holds it, the next free derivation. */
+  #idFor(browser: ConnectedBrowser, tabId: TabId): PageId {
+    for (let attempt = 0; ; attempt++) {
+      const digest = createHash('sha256')
+        .update(`${browser.identity.browserId}\0${tabId}\0${attempt}`)
+        .digest('hex');
+      const id = `p${digest.slice(0, 6)}`;
       if (!this.#pages.has(id)) return id;
     }
   }

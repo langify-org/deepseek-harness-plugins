@@ -26,6 +26,11 @@ See [docs/design.md](docs/design.md) for how it works and why.
    when the plugin starts. In Chrome, open `chrome://extensions`, turn on **Developer
    mode**, choose **Load unpacked**, and select that directory.
 
+On every start, the plugin also registers the connector's relay with Chrome by writing
+`NativeMessagingHosts/io.github.langify_org.dsh_chrome.json` into Chrome's user data
+directory (`~/.config/google-chrome` by default), next to the profiles. Chrome starts that
+relay only for the connector. Nothing else in the profile is changed.
+
 Chrome connects within a few seconds and reconnects whenever DSH or Chrome restarts. After
 a plugin update, the connector reloads itself to match.
 
@@ -132,4 +137,6 @@ of streamed.
 
 From the repository root: `pnpm install`, then in this directory `pnpm build`,
 `pnpm test` (unit), `pnpm test:compat` (against DSH's packages, after a build), and
-`pnpm test:integration` (a real Chrome in a temporary profile on Xvfb).
+`pnpm test:integration`. The integration tests start Chrome in temporary profiles: the
+connector and page actions against a Chrome on Xvfb, and the whole path from the built
+sidebar module in a headless Chrome, through DSH's web server, to the shared page.

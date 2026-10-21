@@ -279,9 +279,18 @@ export class ViewerSession {
           text: event.text,
         });
         return;
-      case 'failed':
-        this.#update({ notice: event.message });
+      case 'failed': {
+        // No page will be attached for a failed open, so the tab follows the session again.
+        if (event.requestType === 'open') this.#pendingUrl = undefined;
+        const reader =
+          event.requestType === 'read-text' && event.requestId !== null
+            ? this.#pendingTexts.get(event.requestId)
+            : undefined;
+        // Whoever asked for the text reports its failure.
+        if (reader !== undefined) reader(new Error(event.message));
+        else this.#update({ notice: event.message });
         return;
+      }
     }
   }
 

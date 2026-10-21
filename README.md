@@ -38,7 +38,7 @@ learned about writing DSH plugins.
 | Path | Contents |
 | --- | --- |
 | `plugins/<name>/` | One DSH plugin: one npm package, built into its own tarball. |
-| `tooling/dsh-plugin-build/` | Builds a plugin package into what DSH loads: host bundles, the browser module, the bundle patch. |
+| [`tooling/dsh-plugin-build/`](tooling/dsh-plugin-build/README.md) | Builds a plugin package into what DSH loads: host bundles, the browser module, the bundle patch. |
 | `nix/` | The Nix build of the workspace and its plugins. |
 | `docs/` | Guidance that applies to every plugin. |
 

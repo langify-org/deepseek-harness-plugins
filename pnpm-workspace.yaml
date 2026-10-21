@@ -1,0 +1,8 @@
+packages:
+  - plugins/*
+  - tooling/*
+
+# esbuild resolves its platform binary from an optional dependency package. Its
+# install script only verifies that binary, so it is not run.
+allowBuilds:
+  esbuild: false

@@ -1,0 +1,9 @@
+{
+  // Code that runs on Node: the host plugin, the native host relay, the build, and tests.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "resolveJsonModule": true
+  },
+  "include": ["src/protocol", "src/host", "src/native-host", "test", "build.ts"]
+}

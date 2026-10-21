@@ -1,0 +1,60 @@
+# Contributing
+
+## Checks
+
+`pnpm check` runs what CI and the Nix build run: Biome, the type checks of every
+package, unit tests, the build, and each plugin's tests against DSH's own packages
+(`test:compat`). Tests that drive a real browser run separately:
+
+```console
+pnpm build
+pnpm test:integration    # needs Chrome (or DSH_CHROME_TEST_EXECUTABLE) and Xvfb
+```
+
+`nix build .#<plugin>` runs the same checks in a sandbox before packing the tarball.
+
+## A plugin package
+
+A plugin lives in `plugins/<name>/` and is one npm package. Its parts:
+
+| Path | Role |
+| --- | --- |
+| `package.json` | The published interface: `exports`, the `dsh` field, `engines.dsh`, peer dependencies. |
+| `build.ts` | The one place that says what is built from which source, through `@langify-org/dsh-plugin-build`. |
+| `src/host/` | Cordis plugins DSH runs in its Host process (Node). |
+| `src/client/` | The browser module DSH serves to its web client (React). |
+| `src/protocol/` | Messages shared by the parts that run in different processes. Uses no Node or DOM API. |
+| `test/unit/` | Pure logic, run on every check. |
+| `test/compat/` | The built plugin inside DSH's real Host services, at the DSH version `engines.dsh` names. |
+| `test/integration/` | Real external software (a browser, a server), run on demand. |
+| `docs/` | Design notes: the concepts, the decisions, and why. |
+
+Every process boundary gets its own TypeScript project (`tsconfig.<target>.json`), so
+code cannot use an API its runtime lacks.
+
+The build tool holds `package.json` to the build declaration: exports must point at the
+build output, the bundle patch is generated from the declared host plugins, and a build
+fails when a bundle depends on something DSH would not provide at run time.
+
+## Conventions
+
+- **Names say what a thing is.** Use the domain's words, the same word for the same
+  concept everywhere, and rename instead of explaining a misleading name in a comment.
+- **Parse what crosses a process boundary.** Messages from another process are parsed into
+  fresh values with the protocol's fields only; never cast them.
+- **One definition.** Derive what can be derived (the bundle patch, the extension
+  manifest's version) instead of keeping a second copy by hand.
+- **Comments explain why**, or what a reader cannot see from the code: a platform limit,
+  a protocol rule, a decision and its reason.
+- **Tests state behavior.** A test's name is a sentence about what the code does.
+- **Formatting is Biome's.** Run `pnpm format`.
+
+Read [docs/plugin-guidelines.md](docs/plugin-guidelines.md) before writing a plugin: DSH
+has rules that are easy to miss and costly to discover.
+
+## Versions
+
+A plugin declares the DSH versions it supports in `engines.dsh`, and its compatibility
+test runs against DSH's packages of that version. Bump a plugin's `version` whenever its
+behavior changes: DSH installs from the tarball and does not notice a changed tarball
+with the same version.

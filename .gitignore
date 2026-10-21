@@ -1,0 +1,15 @@
+node_modules/
+dist/
+*.tgz
+coverage/
+*.log
+
+# Nix
+result
+result-*
+.direnv/
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/

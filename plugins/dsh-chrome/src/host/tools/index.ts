@@ -6,12 +6,13 @@
  * off and keep the shared view.
  */
 import type { Context } from '@deepseek-ai/cordis';
-import type {} from '@deepseek-ai/dsh-attachment';
+import type { AttachmentId, ImageAttachmentRef, ImageMediaType } from '@deepseek-ai/dsh-attachment';
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
 import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools';
 import { normalizeAddress } from '../../protocol/address.ts';
 import { click, navigate, press, scroll, type } from '../page/actions.ts';
 import { parseKeyCombo } from '../page/keys.ts';
+import { captureViewport } from '../page/screenshot.ts';
 import { readSnapshot } from '../page/snapshot.ts';
 import type {} from '../runtime/chrome-service.ts';
 import type { ChromePage } from '../runtime/pages.ts';
@@ -52,6 +53,14 @@ const PAGE_RESULT = {
   additionalProperties: false,
   properties: { page: { ...PAGE_VALUE, required: true } },
 } as const;
+
+/** Every image media type, checked against the attachment store's by the compiler. */
+const IMAGE_MEDIA_TYPES: Readonly<Record<ImageMediaType, true>> = {
+  'image/png': true,
+  'image/jpeg': true,
+  'image/webp': true,
+  'image/gif': true,
+};
 
 interface PageValue {
   readonly id: string;
@@ -257,20 +266,29 @@ export function apply(ctx: Context): void {
               type: 'object',
               required: true,
               additionalProperties: false,
+              // The attachment store's reference to the image, as it stored it.
               properties: {
                 attachmentId: { type: 'string', required: true },
-                mediaType: { type: 'string', required: true, enum: ['image/jpeg'] },
+                mediaType: {
+                  type: 'string',
+                  required: true,
+                  enum: Object.keys(IMAGE_MEDIA_TYPES) as ImageMediaType[],
+                },
                 bytes: { type: 'integer', required: true },
                 width: { type: 'integer', required: true },
                 height: { type: 'integer', required: true },
+                name: { type: 'string' },
               },
             },
           },
         },
         render: (_args, { page, image }): ContentBlock[] => [
           { type: 'text', text: `Screenshot of ${describePage(page)}. ${UNTRUSTED_NOTE}` },
-          // The attachment store minted this id; it only round-trips through the tool's value.
-          { type: 'image', attachment: image as ImageBlock['attachment'] },
+          // The store minted the id; it only round-trips through the tool's value.
+          {
+            type: 'image',
+            attachment: { ...image, attachmentId: image.attachmentId as AttachmentId },
+          },
         ],
       },
       isConcurrencySafe: () => true,
@@ -281,22 +299,12 @@ export function apply(ctx: Context): void {
         if (attachments === undefined || !(await acceptsImages(ctx, exec))) {
           throw new Error('this model cannot see images here; read the page with chrome_snapshot');
         }
-        const { data } = await page.send('Page.captureScreenshot', { format: 'jpeg', quality: 80 });
         const image = await attachments.saveImage({
-          data: Buffer.from(data, 'base64'),
+          data: await captureViewport(page),
           mediaType: 'image/jpeg',
           name: `chrome-${page.id}.jpg`,
         });
-        return {
-          page: pageValue(page),
-          image: {
-            attachmentId: String(image.attachmentId),
-            mediaType: 'image/jpeg' as const,
-            bytes: image.bytes,
-            width: image.width,
-            height: image.height,
-          },
-        };
+        return { page: pageValue(page), image: imageValue(image) };
       },
     }),
 
@@ -477,8 +485,6 @@ const HELP_OUTCOMES = {
   'timed-out': 'The user did not answer in time.',
 } as const;
 
-type ImageBlock = Extract<ContentBlock, { type: 'image' }>;
-
 function sessionOf(exec: ToolRunContext): string {
   const sessionId = exec.agent?.id;
   if (sessionId === undefined) throw new Error('dsh-chrome tools work inside a DSH session');
@@ -487,6 +493,18 @@ function sessionOf(exec: ToolRunContext): string {
 
 function pageValue(page: ChromePage): PageValue {
   return { id: page.id, url: page.url, title: page.title };
+}
+
+/** The stored image's reference as JSON; the store may have re-encoded the image. */
+function imageValue(ref: ImageAttachmentRef) {
+  return {
+    attachmentId: String(ref.attachmentId),
+    mediaType: ref.mediaType,
+    bytes: ref.bytes,
+    width: ref.width,
+    height: ref.height,
+    ...(ref.name === undefined ? {} : { name: ref.name }),
+  };
 }
 
 function describePage(page: PageValue): string {

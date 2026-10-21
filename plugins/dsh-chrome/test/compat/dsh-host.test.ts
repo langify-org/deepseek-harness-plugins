@@ -11,9 +11,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { pathToFileURL } from 'node:url';
-import { type Context, Service } from '@deepseek-ai/cordis';
+import type { Context } from '@deepseek-ai/cordis';
 import { evaluatePluginCompatibility } from '@deepseek-ai/dsh-app-boot';
-import type { ToolDefinition } from '@deepseek-ai/dsh-tools';
 import WebSocket from 'ws';
 import packageJson from '../../package.json' with { type: 'json' };
 import { NATIVE_HOST_NAME } from '../../src/protocol/connector.ts';
@@ -21,23 +20,10 @@ import { CONNECTOR_EXTENSION_ID } from '../../src/protocol/connector-identity.ts
 import { decodeViewerEvent, VIEWER_PATH, type ViewerEvent } from '../../src/protocol/viewer.ts';
 import { type DshHost, SIGNED_IN_COOKIE, startDshHost } from '../support/dsh-host.ts';
 import { distDir, missingRequirements } from '../support/environment.ts';
+import { RecordingTools } from '../support/recording-tools.ts';
 import { waitFor } from '../support/wait.ts';
 
 const skip = await missingRequirements({});
-
-/** Stands in for DSH's tool runtime, which needs the whole agent composition. */
-class RecordingTools extends Service {
-  readonly registered: ToolDefinition[] = [];
-
-  constructor(ctx: Context) {
-    super(ctx, 'tools');
-  }
-
-  register(definition: ToolDefinition): () => void {
-    this.registered.push(definition);
-    return () => this.registered.splice(this.registered.indexOf(definition), 1);
-  }
-}
 
 let workDir = '';
 let host: DshHost | undefined;

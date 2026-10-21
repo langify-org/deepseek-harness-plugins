@@ -5,8 +5,9 @@ DSH's real web client, and devices other than the host. Run these by hand before
 on DSH Desktop with the plugin installed as the README describes.
 
 The tests already cover the rest against a real Chrome in temporary profiles: the
-connector, page actions, frames and layout, input including composed text, help requests,
-and adding a page to a message (`pnpm test:integration`).
+connector, page actions, the agent's tools, frames and layout, input including composed
+text, help requests, adding a page to a message, and a host restart
+(`pnpm test:integration`).
 
 | # | Do | Expect |
 |---|---|---|

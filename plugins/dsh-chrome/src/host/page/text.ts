@@ -1,4 +1,5 @@
 import type { ChromePage } from '../runtime/pages.ts';
+import { evaluateInIsolatedWorld } from './isolated-world.ts';
 
 export interface PageText {
   readonly title: string;
@@ -7,27 +8,22 @@ export interface PageText {
   readonly truncated: boolean;
 }
 
-/** A world of its own, so page scripts cannot change what `innerText` returns. */
-const WORLD_NAME = 'dsh-chrome';
-
 /**
  * The page's visible text, as the user would copy it: `document.body.innerText`,
  * read in an isolated world.
  */
 export async function readPageText(page: ChromePage, maxChars: number): Promise<PageText> {
   const { frameTree } = await page.send('Page.getFrameTree');
-  const { executionContextId } = await page.send('Page.createIsolatedWorld', {
-    frameId: frameTree.frame.id,
-    worldName: WORLD_NAME,
-  });
-  const { result, exceptionDetails } = await page.send('Runtime.evaluate', {
-    expression: '({ title: document.title, text: document.body ? document.body.innerText : "" })',
-    contextId: executionContextId,
-    returnByValue: true,
-  });
-  if (exceptionDetails !== undefined)
-    throw new Error(`could not read the page: ${exceptionDetails.text}`);
-  const value = result.value as { title?: unknown; text?: unknown } | undefined;
+  let value: { title?: unknown; text?: unknown } | undefined;
+  try {
+    value = (await evaluateInIsolatedWorld(
+      page,
+      frameTree.frame.id,
+      '({ title: document.title, text: document.body ? document.body.innerText : "" })',
+    )) as typeof value;
+  } catch (error) {
+    throw new Error(`could not read the page: ${error instanceof Error ? error.message : error}`);
+  }
   const title = typeof value?.title === 'string' ? value.title : page.title;
   const fullText = typeof value?.text === 'string' ? value.text : '';
   const truncated = fullText.length > maxChars;

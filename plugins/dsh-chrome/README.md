@@ -138,5 +138,6 @@ of streamed.
 From the repository root: `pnpm install`, then in this directory `pnpm build`,
 `pnpm test` (unit), `pnpm test:compat` (against DSH's packages, after a build), and
 `pnpm test:integration`. The integration tests start Chrome in temporary profiles: the
-connector and page actions against a Chrome on Xvfb, and the whole path from the built
-sidebar module in a headless Chrome, through DSH's web server, to the shared page.
+connector and page actions against a Chrome on Xvfb; the agent's tools, checked by DSH's
+own schema validator; and the whole path from the built sidebar module in a headless
+Chrome, through DSH's web server, to the shared page.

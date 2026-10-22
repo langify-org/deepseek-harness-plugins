@@ -42,7 +42,8 @@ DSH web client (Desktop window, or any browser signed in to DSH)
 * **The relay** passes Chrome's native messaging frames (a 32-bit length, then JSON) through
   unchanged. Chrome starts it only for the connector's extension id, which is fixed by the
   public key in the extension manifest. It reaches DSH over a Unix socket in a `0700`
-  directory under `$XDG_RUNTIME_DIR`. Same-user processes are not isolated from each other.
+  directory under `$XDG_RUNTIME_DIR`, one per DSH home, so DSH installations with different
+  homes do not collide. Same-user processes are not isolated from each other.
 * **The viewer route** is a WebSocket upgrade on DSH's web server, admitted by
   `ctx.connection.requestRejection` like DSH's `/api`. Desktop and remote browsers use the
   same path; no port is opened. Frames are binary messages; everything else is JSON.

@@ -28,6 +28,15 @@ behavior behind it, so that a later DSH release can be checked against it.
   TypeScript `private` members instead. Plain objects a service holds are not proxied.
 - A `Service` subclass that needs asynchronous setup does it in `[Service.init]()`, and
   releases what it acquired with `this.ctx.effect(() => () => …)`.
+- **A row counts as started once its `apply` returns.** DSH then checks the rows that
+  inject its services, and reports those still waiting as "did not activate". A row whose
+  service other rows inject awaits it: `await ctx.plugin(MyService, config)`.
+- Keep a plugin's files in the DSH home (`dshHomePath()` from
+  `@deepseek-ai/dsh-home-paths`), not in a fixed place: Desktop, a `dsh` of one's own and a
+  development DSH each have their own home. Name anything else they would share, such as a
+  socket, by the home.
+- `dsh web` does not print what plugins log with `ctx.logger`. Tell the user what they need
+  to do in the plugin's own UI, or in the error a request returns.
 - Authenticate every network route the way DSH authenticates `/api`: call
   `ctx.connection.requestRejection(request)` before upgrading or answering. Remote clients
   (a phone over a tunnel) then work with no extra configuration, and nothing else can reach
@@ -61,6 +70,7 @@ behavior behind it, so that a later DSH release can be checked against it.
 | Unit | always | Pure logic: parsing, formatting, state machines. |
 | Compat | always, after a build | The built bundles inside a real Cordis context with DSH's own Host services, at the DSH version `engines.dsh` names. This tier caught the private-field proxy rule above. |
 | Integration | on demand | The plugin against the real external software it drives. |
+| Development DSH | by hand, `pnpm dev` | The installed plugin in a whole DSH: the Loader, startup order, the real web client. This is where the row start-up rule above showed. |
 
 Keep fakes at the edges: a fake stands in for a whole DSH service only when the real one
 needs the full agent composition, and says which checks it reduces.

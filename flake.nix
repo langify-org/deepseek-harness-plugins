@@ -16,16 +16,9 @@
       workspaceFor = pkgs: pkgs.callPackage ./nix/workspace.nix { };
     in
     {
-      # One package per plugin: its npm tarball, for DSH's "Add plugin".
-      packages = forAllSystems (
-        pkgs:
-        let
-          workspace = workspaceFor pkgs;
-        in
-        {
-          dsh-chrome = workspace.buildPlugin { directory = "dsh-chrome"; };
-        }
-      );
+      # One package per plugin, named by its directory: its npm tarball, for DSH's
+      # "Add plugin".
+      packages = forAllSystems (pkgs: (workspaceFor pkgs).plugins);
 
       # Building a plugin runs the workspace's lint, type checks and tests.
       checks = forAllSystems (pkgs: self.packages.${pkgs.stdenv.hostPlatform.system});

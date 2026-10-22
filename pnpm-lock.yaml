@@ -169,6 +169,9 @@ importers:
       '@biomejs/biome':
         specifier: 2.5.15
         version: 2.5.15
+      '@langify-org/dsh-dev':
+        specifier: workspace:*
+        version: link:tooling/dsh-dev
       '@types/node':
         specifier: 24.19.2
         version: 24.19.2
@@ -206,6 +209,9 @@ importers:
         specifier: 0.2.1-rc.2
         version: 0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)
       '@deepseek-ai/dsh-client-ui-slots':
+        specifier: 0.2.1-rc.2
+        version: 0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)
+      '@deepseek-ai/dsh-home-paths':
         specifier: 0.2.1-rc.2
         version: 0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)
       '@deepseek-ai/dsh-host-webserver':
@@ -253,6 +259,8 @@ importers:
       ws:
         specifier: 8.22.0
         version: 8.22.0
+
+  tooling/dsh-dev: {}
 
   tooling/dsh-plugin-build:
     dependencies:

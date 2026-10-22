@@ -1,5 +1,5 @@
-# The pnpm workspace as Nix sees it: its sources, its dependency store, and a builder
-# that turns one plugin package into the npm tarball DSH installs.
+# The pnpm workspace as Nix sees it: its sources, its dependency store, and its plugins,
+# each built into the npm tarball DSH installs.
 {
   lib,
   stdenv,
@@ -98,7 +98,21 @@ let
         license = lib.licenses.mit;
       };
     };
+
+  # The workspace's plugins, by directory: every package under plugins/ whose manifest has
+  # a `dsh` field (the rule dsh-dev applies too).
+  plugins =
+    let
+      isPlugin =
+        directory: type:
+        type == "directory"
+        && lib.pathExists (../plugins + "/${directory}/package.json")
+        && lib.importJSON (../plugins + "/${directory}/package.json") ? dsh;
+    in
+    lib.mapAttrs (directory: _type: buildPlugin { inherit directory; }) (
+      lib.filterAttrs isPlugin (builtins.readDir ../plugins)
+    );
 in
 {
-  inherit src pnpmDeps buildPlugin;
+  inherit src pnpmDeps plugins;
 }

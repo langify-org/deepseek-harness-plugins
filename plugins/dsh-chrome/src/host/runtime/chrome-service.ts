@@ -108,6 +108,10 @@ export class ChromeService extends Service {
     });
     this.ctx.effect(() => () => server.close(), 'dsh-chrome: connector server');
     this.ctx.effect(() => () => this.closeDedicated(), 'dsh-chrome: dedicated Chrome');
+    this.log.info(
+      `dsh-chrome: waiting for Chrome; its connector is ${installed.extensionDir} ` +
+        '(chrome://extensions, Developer mode, "Load unpacked")',
+    );
   }
 
   /** The unpacked connector extension, for the user to load into Chrome. */

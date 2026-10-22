@@ -4,6 +4,9 @@ dist/
 coverage/
 *.log
 
+# The development DSH's home (pnpm dev)
+/.dsh-home/
+
 # Nix
 result
 result-*

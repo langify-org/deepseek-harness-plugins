@@ -9,6 +9,8 @@
     "node": ">=24"
   },
   "scripts": {
+    "dev": "dsh-dev start",
+    "dsh": "dsh-dev dsh",
     "build": "pnpm -r run build",
     "lint": "biome check",
     "format": "biome check --write",
@@ -20,6 +22,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
+    "@langify-org/dsh-dev": "workspace:*",
     "@types/node": "24.19.2",
     "typescript": "7.0.2"
   }

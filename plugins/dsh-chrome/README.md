@@ -22,9 +22,20 @@ See [docs/design.md](docs/design.md) for how it works and why.
    `result/langify-org-dsh-chrome-<version>.tgz`. Copy the tarball somewhere stable.
 2. In DSH, open **Plugins → Add plugin** and give the tarball's absolute path. Restart DSH
    completely (on Desktop: quit, not just close the window).
-3. Install the connector in Chrome. DSH writes it to `~/.local/share/dsh-chrome/extension`
-   when the plugin starts. In Chrome, open `chrome://extensions`, turn on **Developer
-   mode**, choose **Load unpacked**, and select that directory.
+3. Install the connector in Chrome. When the plugin starts, it writes the connector to
+   `dsh-chrome/extension` in the DSH home. In Chrome, open `chrome://extensions`, turn on
+   **Developer mode**, choose **Load unpacked**, and select that directory. Until Chrome
+   is connected, opening a page in the Chrome tab says so and names the directory.
+
+To try the plugin from this repository instead, run `pnpm dev` at its root: it serves a
+development DSH with the plugin installed, whose connector is in
+`.dsh-home/dsh-chrome/extension`.
+
+dsh-chrome keeps its files in the DSH home, with the rest of DSH's data: `~/.dsh` for
+`dsh`, DSH Desktop's own home for Desktop, or wherever `DSH_HOME` points. Each home has its
+own connector socket, so DSH installations with different homes can run at once. A Chrome
+user data directory can name only one relay, though: Chrome connects to the DSH that
+started last, whichever home's copy of the connector it loaded.
 
 On every start, the plugin also registers the connector's relay with Chrome by writing
 `NativeMessagingHosts/io.github.langify_org.dsh_chrome.json` into Chrome's user data
@@ -76,9 +87,11 @@ Settings go in the DSH profile's `cordis.patch.yml`, under the plugin's row:
 | `dailyProfile.userDataDir` | `~/.config/google-chrome` | Your Chrome's user data directory. |
 | `dedicatedProfile.enabled` | `false` | Let dsh-chrome start a separate Chrome profile of its own. |
 | `dedicatedProfile.executable` | `google-chrome-stable` | The Chrome it starts. |
-| `dedicatedProfile.userDataDir` | `~/.local/share/dsh-chrome/profiles/dedicated` | That profile's directory. |
+| `dedicatedProfile.userDataDir` | `dsh-chrome/profiles/dedicated` in the DSH home | That profile's directory. |
 | `dedicatedProfile.display` | `virtual` | `virtual`: a private Xvfb display that keeps working while the screen is locked. `desktop`: a normal window, for signing in to sites the first time. |
 | `defaultProfile` | `daily` | The profile new pages open in: `daily` or `dedicated`. |
+| `dataDir` | `dsh-chrome` in the DSH home | Where the connector and its relay are kept for Chrome. |
+| `connectorSocketPath` | one per DSH home, in `$XDG_RUNTIME_DIR/dsh-chrome` | The Unix socket the relay connects to. |
 | `nodeExecutable` | the Node running DSH | The Node that Chrome runs the connector's relay with. Set it if that Node cannot run outside DSH. |
 | `viewer.jpegQuality` | `70` | JPEG quality of the frames the sidebar shows. |
 | `viewer.hiddenFrameIntervalMs` | `250` | How often a page hidden in Chrome is captured while you view it. |
@@ -99,8 +112,8 @@ With `dedicatedProfile.enabled`, the agent can open pages in a Chrome profile th
 yours (`chrome_open` with `profile: dedicated`, or `defaultProfile: dedicated`). Start it
 once with `display: desktop` to sign in to the sites it needs, then switch to `virtual`.
 1Password needs its native messaging manifest in the profile:
-`ln -s ~/.config/google-chrome/NativeMessagingHosts/com.1password.1password.json
-~/.local/share/dsh-chrome/profiles/dedicated/NativeMessagingHosts/`. Google may refuse
+link `~/.config/google-chrome/NativeMessagingHosts/com.1password.1password.json` into the
+dedicated profile's `NativeMessagingHosts` directory. Google may refuse
 sign-in to a browser it believes is automated; sign in there with `display: desktop`.
 
 ## What the sidebar cannot show
@@ -142,14 +155,14 @@ of streamed.
 | Symptom | Check |
 | --- | --- |
 | "your Chrome is not connected" | Chrome is running, the connector is loaded in `chrome://extensions` without errors, and `~/.config/google-chrome/NativeMessagingHosts/io.github.langify_org.dsh_chrome.json` exists. DSH's log says when a browser connects. |
-| Chrome never connects | Run the relay as Chrome would: `~/.local/share/dsh-chrome/native-host-daily < /dev/null`. It exits quietly when it reached DSH, and prints why when it could not (DSH not running, or a `nodeExecutable` that cannot run outside DSH). |
+| Chrome never connects | Run the relay as Chrome would: `<DSH home>/dsh-chrome/native-host-daily < /dev/null`. It exits quietly when it reached DSH, and prints why when it could not (DSH not running, or a `nodeExecutable` that cannot run outside DSH). |
 | The page is blank in the sidebar | The Chrome window may be minimized; the sidebar then shows captures. Reload the page from the toolbar. |
 
 ## Develop
 
-From the repository root: `pnpm install`, then in this directory `pnpm build`,
-`pnpm test` (unit), `pnpm test:compat` (against DSH's packages, after a build), and
-`pnpm test:integration`. The integration tests start Chrome in temporary profiles: the
+From the repository root: `pnpm install`, then `pnpm dev` to try the plugin in a
+development DSH. In this directory, `pnpm build`, `pnpm test` (unit), `pnpm test:compat`
+(against DSH's packages, after a build), and `pnpm test:integration`. The integration tests start Chrome in temporary profiles: the
 connector and page actions against a Chrome on Xvfb; the agent's tools, checked by DSH's
 own schema validator; and the whole path from the built sidebar module in a headless
 Chrome, through DSH's web server, to the shared page.

@@ -19,6 +19,11 @@ export interface ChromeOptions {
   readonly authorityPath: string;
   /** How many device pixels a CSS pixel takes: 2 draws sharply on high-density screens. */
   readonly deviceScaleFactor: number;
+  /**
+   * Whether pages are told that Chrome is under automated control (`navigator.webdriver`),
+   * as Chrome tells them of a browser debugged through a pipe.
+   */
+  readonly announceAutomation: boolean;
   readonly log: Log;
 }
 
@@ -45,18 +50,10 @@ export async function launchChrome(options: ChromeOptions): Promise<ChromeProces
     XAUTHORITY: options.authorityPath,
   };
   delete env['WAYLAND_DISPLAY'];
-  const chrome = spawn(
-    options.executable,
-    [
-      `--user-data-dir=${options.profileDir}`,
-      '--remote-debugging-pipe',
-      '--no-first-run',
-      '--no-default-browser-check',
-      '--ozone-platform=x11',
-      `--force-device-scale-factor=${options.deviceScaleFactor}`,
-    ],
-    { env, stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] },
-  );
+  const chrome = spawn(options.executable, chromeArguments(options), {
+    env,
+    stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'],
+  });
   const exited = exitOf(chrome);
   const spawned = new Promise<void>((resolve, reject) => {
     chrome.once('spawn', () => resolve());
@@ -93,4 +90,26 @@ export async function launchChrome(options: ChromeOptions): Promise<ChromeProces
     await stopProcess(chrome, exited);
     throw error;
   }
+}
+
+/**
+ * Chrome's command line. Chrome takes a browser debugged through a pipe for one under
+ * automated control, and tells pages so (`navigator.webdriver`); unless that is wanted, the
+ * flag behind it is turned off. Google refuses to sign in to a browser that says so ("This
+ * browser or app may not be secure"), and other sites take whoever uses it for a bot, the
+ * user working by hand included. Chrome warns of the flag with a bar in its first tab at
+ * each start, which only a managed policy turns off.
+ */
+export function chromeArguments(
+  options: Pick<ChromeOptions, 'profileDir' | 'deviceScaleFactor' | 'announceAutomation'>,
+): string[] {
+  return [
+    `--user-data-dir=${options.profileDir}`,
+    '--remote-debugging-pipe',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--ozone-platform=x11',
+    `--force-device-scale-factor=${options.deviceScaleFactor}`,
+    ...(options.announceAutomation ? [] : ['--disable-blink-features=AutomationControlled']),
+  ];
 }

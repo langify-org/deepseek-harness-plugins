@@ -83,6 +83,15 @@ DSH web client (Desktop window, or any browser signed in to DSH)
   auto-attaches to page targets and holds each new one at its start until it has turned its
   dialogs' events on. Holding it also matters for input: without it, Chrome leaves the mouse
   release that opens a popup window unanswered, and the input after it with it.
+* **Not announced as automated.** Chrome takes a browser debugged through a pipe for one
+  under automated control, and tells pages so (`navigator.webdriver`, the Blink feature
+  `AutomationControlled`). Google's sign-in then refuses the browser ("This browser or app
+  may not be secure"), and bot checks of other sites fail, even while the user works by
+  hand. dsh-chrome turns the feature off (`--disable-blink-features=AutomationControlled`)
+  unless `announceAutomation` is set: the Chrome is the user's as much as the agent's, and
+  the agent acts in the user's sessions, on their behalf, at a person's pace. Chrome warns of
+  any `--disable-blink-features` with a bar in its first tab at each start ("unsupported
+  command-line flag"); only a managed policy turns the warning off, so it stays.
 * **The desktop.** Chrome keeps the user's session bus (D-Bus), where it finds the keyring
   that encrypts the profile's cookies and passwords. Through it, Chrome also asks the
   desktop for its file chooser (the desktop portal) and shows site notifications there:
@@ -92,8 +101,9 @@ DSH web client (Desktop window, or any browser signed in to DSH)
   the user can enter, one per DSH home. As an X server, it admits only the programs that show
   the cookie written for it into that directory (`-auth`, `XAUTHORITY`): Openbox and Chrome.
   Without one, Xvnc admits any local X client, of any user, on the X socket every user can
-  open, and that would reach Chrome's screen and input around the VNC socket's directory. The X server keeps the screen in memory, so it works
-  while the machine's own screen is locked or off. Openbox maximizes Chrome's windows without
+  open, and that would reach Chrome's screen and input around the VNC socket's directory.
+  The X server keeps the screen in memory, so it works while the machine's own screen is
+  locked or off. Openbox maximizes Chrome's windows without
   decorations, and Chrome draws no frame of its own (`browser.custom_chrome_frame: false` in
   the profile's preferences), so the screen shows the window and nothing else. A window a
   page opens stays centred above, with a title bar whose only button closes it: without a
@@ -244,6 +254,13 @@ agent asked for and may need.
   would need to know when Chrome has read it.
 * A composition shows at the bottom of the tab, away from Chrome's caret.
 * The screen carries no sound.
+* Pages are not told that Chrome is automated, so sites cannot tell the agent's actions from
+  the user's either. Telling them (`announceAutomation`) would keep the user from signing in
+  to Google; a mode in which Chrome runs without the pipe, while the user signs in, would tell
+  them honestly at every other time, at the cost of the agent waiting meanwhile.
+* Pages get no WebGL: the screen has no GPU, and Chrome no longer falls back to drawing WebGL
+  in software. `--enable-unsafe-swiftshader` would turn that back on, and with it a software
+  GPU running shader code from any page, which Chrome turned off for that reason.
 * `chrome_screenshot` shows the agent a page, not the screen: it does not see Chrome's own UI.
 * The tools look for DSH in a page's frames through the page's frame tree, which leaves out
   frames of another site, drawn by another process. DSH's cookie does not reach those today

@@ -38,6 +38,8 @@ export interface ChromeServiceConfig {
   readonly runtimeDir: string;
   /** How many device pixels a CSS pixel takes in Chrome. */
   readonly deviceScaleFactor: number;
+  /** Whether pages are told that Chrome is under automated control (`navigator.webdriver`). */
+  readonly announceAutomation: boolean;
 }
 
 /** Whether Chrome runs, for the sidebar. */
@@ -210,6 +212,7 @@ export class ChromeService extends Service {
         display: display.name,
         authorityPath: display.authorityPath,
         deviceScaleFactor: this.config.deviceScaleFactor,
+        announceAutomation: this.config.announceAutomation,
         log: this.log,
       });
       try {

@@ -96,6 +96,13 @@ test('a viewer that connects starts the screen, and Chrome fills it at twice the
   assert.deepEqual(window, { width: 640, height: 400, dpr: 2 });
 });
 
+test('by default, pages are not told that Chrome is under automated control', {
+  skip,
+}, async () => {
+  // Google's sign-in refuses a browser that says it is ("may not be secure").
+  assert.equal(await evaluate<boolean>(sessionPage(), 'navigator.webdriver'), false);
+});
+
 test("the screen takes the size a viewer asks, and Chrome's window follows it", {
   skip,
 }, async () => {

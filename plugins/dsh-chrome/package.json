@@ -1,6 +1,6 @@
 {
   "name": "@langify-org/dsh-chrome",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Share a real Chrome between you and the agent in the DeepSeek Harness right sidebar",
   "license": "MIT",

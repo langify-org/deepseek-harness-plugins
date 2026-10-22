@@ -25,6 +25,7 @@ export interface Config {
   xvncExecutable: string;
   windowManagerExecutable: string;
   deviceScaleFactor: number;
+  announceAutomation: boolean;
   profileDir: string;
   shareNativeHosts: boolean;
   userChromeDir: string;
@@ -52,6 +53,16 @@ export const Config: z<Config> = z.object({
     .description(
       "How many of the screen's pixels a CSS pixel of Chrome takes. 2 is sharp on high-density " +
         'displays and still clear on others; 1 sends a quarter of the pixels.',
+    ),
+  announceAutomation: z
+    .boolean()
+    .default(false)
+    .description(
+      'Tell pages that Chrome is under automated control (navigator.webdriver), as Chrome ' +
+        'would for the pipe dsh-chrome controls it through. Off by default, since Google ' +
+        'refuses to sign in to a browser that says so ("This browser or app may not be ' +
+        'secure"), and other sites take whoever uses it for a bot, you included when you ' +
+        'work by hand.',
     ),
   profileDir: z
     .string()
@@ -86,6 +97,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     xvncExecutable: config.xvncExecutable,
     windowManagerExecutable: config.windowManagerExecutable,
     deviceScaleFactor: config.deviceScaleFactor,
+    announceAutomation: config.announceAutomation,
     profileDir: config.profileDir,
     earlierProfileDirs: earlierProfileDirs(),
     shareNativeHosts: config.shareNativeHosts,

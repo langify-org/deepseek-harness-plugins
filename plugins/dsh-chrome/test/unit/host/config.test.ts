@@ -28,3 +28,7 @@ test('by default, runs Chrome on Xvnc under Openbox, at twice the pixels, in the
     },
   );
 });
+
+test('by default, does not tell pages that Chrome is under automated control', () => {
+  assert.equal(Config({} as Config).announceAutomation, false);
+});

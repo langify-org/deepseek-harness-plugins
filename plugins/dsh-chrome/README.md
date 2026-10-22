@@ -115,6 +115,7 @@ Settings go in the DSH profile's `cordis.patch.yml`, under the plugin's row:
 | `xvncExecutable` | `Xvnc` | TigerVNC's Xvnc. |
 | `windowManagerExecutable` | `openbox` | Openbox. |
 | `deviceScaleFactor` | `2` | How many of the screen's pixels a CSS pixel of Chrome takes, from 1 to 4. 2 is sharp on high-density displays and still clear on others; 1 sends a quarter of the pixels. |
+| `announceAutomation` | `false` | Tell pages that Chrome is under automated control (`navigator.webdriver`), as Chrome would for the pipe dsh-chrome controls it through. Google then refuses to sign in, and other sites may take you for a bot; see [Security](#security). |
 | `profileDir` | `dsh-chrome/chrome-profile` in the DSH home | The Chrome profile: its user data directory. |
 | `shareNativeHosts` | `true` | Let the profile's extensions reach the native apps your own Chrome's reach, by linking their native messaging manifests into it. |
 | `userChromeDir` | `~/.config/google-chrome` | Your own Chrome's user data directory, whose native apps are shared. |
@@ -141,6 +142,8 @@ The tools and the turn-start reading are separate rows; turn either off on its o
   screen. Keys, ASCII and single characters are typed. A paste larger than 256 KiB, Xvnc's
   limit, does not arrive.
 - Windows have no taskbar: keep to tabs, since a second Chrome window covers the first.
+- Pages get no WebGL: the screen has no GPU, and Chrome no longer draws WebGL in software
+  on its own. 3D maps and WebGL games do not work.
 - The screen carries no sound.
 - Pages that a subagent opens belong to the subagent's session, not to yours.
 
@@ -160,6 +163,15 @@ The tools and the turn-start reading are separate rows; turn either off on its o
   operate web pages only: not Chrome's own pages (settings, saved passwords), extensions'
   pages, or local files, even when you opened them; nor cookie stores, network traffic, or
   other extensions' code on a page (your password manager's).
+- Pages are not told that Chrome is under automated control: `navigator.webdriver` is false,
+  as in a Chrome you use by hand. Chrome would set it for the pipe it is controlled through,
+  and Google's sign-in then refuses the browser ("This browser or app may not be secure"),
+  as do other sites' bot checks, even when you are the one at the controls. So sites cannot
+  tell either when the agent acts; it acts at a person's pace, in your sessions, on your
+  behalf. Set `announceAutomation` to tell them, if sites you use require it. Chrome warns
+  of the flag this takes, `--disable-blink-features=AutomationControlled`, with a bar in its
+  first tab at each start ("unsupported command-line flag"); the flag changes nothing but
+  `navigator.webdriver`, and the bar's ✕ closes it.
 - With `shareNativeHosts`, the profile's extensions can start the native apps your own
   Chrome's can. Each app's manifest still names the only extensions it accepts.
 - The agent may not open DSH's own web UI through Chrome, nor operate a page that shows it,
@@ -178,6 +190,7 @@ The tools and the turn-start reading are separate rows; turn either off on its o
 | "Xvnc (Xvnc) was not found" | Install TigerVNC where DSH's environment finds it, or set `xvncExecutable`. |
 | "the window manager (openbox) was not found" | Install Openbox, or set `windowManagerExecutable`. |
 | "Chrome (google-chrome-stable) was not found" | Install Google Chrome, or set `executable`. |
+| Google: "This browser or app may not be secure" | `announceAutomation` is off, as it is by default. |
 | Chrome starts and closes at once | Another Chrome may use the profile: dsh-chrome's runs only one. Look for a `chrome` whose `--user-data-dir` is `profileDir`. |
 | 1Password's extension cannot reach the app | The desktop app runs on the machine DSH runs on, its browser integration is on for Chrome, and `~/.config/google-chrome/NativeMessagingHosts/com.1password.1password.json` exists. |
 

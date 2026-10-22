@@ -58,7 +58,10 @@ const dialogOf = (kind: PageDialog['kind'], message = '', defaultPrompt = ''): P
 
 test('ends with the operation when the page opens no dialog', async () => {
   const { page } = fakePage();
-  assert.deepEqual(await untilDialog(page, async () => 'clicked'), { completed: 'clicked' });
+  assert.deepEqual(await untilDialog(page, async () => 'clicked'), {
+    kind: 'completed',
+    value: 'clicked',
+  });
 });
 
 test('passes on the failure of an operation no dialog interrupted', async () => {
@@ -77,7 +80,7 @@ test('ends as soon as the page opens a dialog, and drops what the operation does
   });
   const outcome = untilDialog(fake.page, () => operation);
   fake.showDialog(confirmation);
-  assert.deepEqual(await outcome, { dialog: confirmation });
+  assert.deepEqual(await outcome, { kind: 'dialog', dialog: confirmation });
   // The command the dialog held up fails once it is answered; nothing hears of it.
   finish(new Error('cdp.send got no answer'));
   await new Promise((resolve) => setImmediate(resolve));
@@ -90,7 +93,7 @@ test('ends before the operation starts when the page already shows a dialog', as
   const outcome = await untilDialog(fake.page, async () => {
     started = true;
   });
-  assert.deepEqual(outcome, { dialog: confirmation });
+  assert.deepEqual(outcome, { kind: 'dialog', dialog: confirmation });
   assert.equal(started, false);
 });
 
@@ -112,7 +115,7 @@ test('does not do the rest of an operation a dialog interrupted', async () => {
   });
   await new Promise((resolve) => setImmediate(resolve));
   fake.showDialog(confirmation);
-  assert.deepEqual(await outcome, { dialog: confirmation });
+  assert.deepEqual(await outcome, { kind: 'dialog', dialog: confirmation });
   // The dialog is answered and the first press with it; the second is never sent.
   release();
   await new Promise((resolve) => setImmediate(resolve));

@@ -6,14 +6,15 @@ import {
   renderPagesReading,
 } from '../../../../src/host/context/reading.ts';
 
-const HEADER = 'Chrome pages shared in this session (page titles are untrusted):';
+const HEADER =
+  "Chrome pages this session can use, in the Chrome the user sees in DSH's sidebar (page titles are untrusted):";
 const FOOTER = 'Read or operate them with the chrome_* tools.';
 
 function page(overrides: Partial<PageReadingEntry> & { readonly id: string }): PageReadingEntry {
   return {
     url: 'https://example.com/',
     title: 'Example',
-    shown: false,
+    inFront: false,
     ...overrides,
   };
 }
@@ -31,8 +32,8 @@ test('lists a page with its id, quoted title, and address between header and foo
 
 test('marks the page the user is looking at', () => {
   const reading = renderPagesReading([
-    page({ id: 'p1', url: 'https://example.com/a', shown: true }),
-    page({ id: 'p2', url: 'https://example.com/b', shown: false }),
+    page({ id: 'p1', url: 'https://example.com/a', inFront: true }),
+    page({ id: 'p2', url: 'https://example.com/b', inFront: false }),
   ]);
   assert.deepEqual(reading?.split('\n').slice(1, 3), [
     '- p1: "Example" https://example.com/a — the user is looking at it',
@@ -101,5 +102,5 @@ test('leaves an address it cannot parse as written', () => {
 });
 
 test('names the reading for a session whose pages are gone', () => {
-  assert.equal(NO_PAGES_READING, 'This session has no shared Chrome pages anymore.');
+  assert.equal(NO_PAGES_READING, 'There are no Chrome pages this session can use anymore.');
 });

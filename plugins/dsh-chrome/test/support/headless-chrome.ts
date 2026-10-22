@@ -1,6 +1,50 @@
 import { type ChildProcess, spawn } from 'node:child_process';
-import { BrowserPipe } from '../../src/host/chrome/dedicated-chrome/browser-pipe.ts';
+import type { Readable, Writable } from 'node:stream';
+import { PipeTransport } from '../../src/host/chrome/cdp/pipe-transport.ts';
 import { chromeExecutable } from './environment.ts';
+
+/**
+ * A CDP client of the test's own, for the headless Chrome that stands in for the user's
+ * browser: unlike the plugin's connection, it may send any command, as DevTools may.
+ */
+class RawCdp {
+  readonly #transport: PipeTransport;
+  readonly #pending = new Map<
+    number,
+    { resolve(value: unknown): void; reject(error: Error): void }
+  >();
+  #nextId = 1;
+
+  constructor(chrome: ChildProcess) {
+    this.#transport = new PipeTransport(chrome.stdio[3] as Writable, chrome.stdio[4] as Readable);
+    this.#transport.onMessage((text) => {
+      const { id, result, error } = JSON.parse(text) as {
+        id?: number;
+        result?: unknown;
+        error?: { message: string };
+      };
+      if (id === undefined) return;
+      const pending = this.#pending.get(id);
+      this.#pending.delete(id);
+      if (error !== undefined) pending?.reject(new Error(error.message));
+      else pending?.resolve(result);
+    });
+    this.#transport.onClose((reason) => {
+      for (const pending of this.#pending.values()) pending.reject(reason);
+      this.#pending.clear();
+    });
+  }
+
+  call(method: string, params: object, sessionId?: string): Promise<unknown> {
+    const id = this.#nextId++;
+    return new Promise((resolve, reject) => {
+      this.#pending.set(id, { resolve, reject });
+      this.#transport.send(
+        JSON.stringify({ id, method, params, ...(sessionId === undefined ? {} : { sessionId }) }),
+      );
+    });
+  }
+}
 
 /** One tab of a headless Chrome the test drives over CDP, as a user would use it. */
 export interface HeadlessTab {
@@ -30,7 +74,7 @@ export async function openHeadlessTab(userDataDir: string, url: string): Promise
     { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] },
   );
   const exited = new Promise<void>((resolve) => chrome.once('exit', () => resolve()));
-  const pipe = new BrowserPipe(chrome);
+  const pipe = new RawCdp(chrome);
   const { targetId } = (await pipe.call('Target.createTarget', { url: 'about:blank' })) as {
     targetId: string;
   };

@@ -1,8 +1,0 @@
-{
-  // Tests of the connector extension: its code with Chrome's types, run on Node with fakes.
-  "extends": "./tsconfig.extension.json",
-  "compilerOptions": {
-    "types": ["chrome", "node"]
-  },
-  "include": ["src/protocol", "src/extension", "test/unit/extension"]
-}

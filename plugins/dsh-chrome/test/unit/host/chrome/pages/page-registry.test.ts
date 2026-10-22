@@ -1,458 +1,279 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type {
-  BrowserEvent,
-  ConnectedBrowser,
-  RequestOptions,
-} from '../../../../../src/host/chrome/connector/connected-browser.ts';
+import { CdpConnection } from '../../../../../src/host/chrome/cdp/cdp-connection.ts';
 import type { ChromePage, PageEnding } from '../../../../../src/host/chrome/pages/page.ts';
-import { PageRegistry } from '../../../../../src/host/chrome/pages/page-registry.ts';
-import type { PageSnapshot } from '../../../../../src/protocol/connector.ts';
+import {
+  type PageOpening,
+  PageRegistry,
+} from '../../../../../src/host/chrome/pages/page-registry.ts';
+import { silentLog } from '../../../../../src/host/platform/log.ts';
+import { FakeBrowser, settle } from '../../../../support/fake-browser.ts';
 
-interface FakeBrowser {
-  readonly identity: {
-    readonly profile: string;
-    readonly browserId: string;
-    readonly label: string;
-    readonly extensionVersion: string;
-  };
-  eventListener: ((event: BrowserEvent) => void) | undefined;
-  closeListener: (() => void) | undefined;
-  readonly cdpCalls: { readonly tabId: number; readonly method: string }[];
-  onEvent(listener: (event: BrowserEvent) => void): () => void;
-  onClose(listener: () => void): () => void;
-  sendCdp(
-    tabId: number,
-    method: string,
-    params: object,
-    options?: RequestOptions,
-  ): Promise<unknown>;
-  activatePage(tabId: number, options?: RequestOptions): Promise<void>;
-  closePage(tabId: number, options?: RequestOptions): Promise<void>;
-  emit(event: BrowserEvent): void;
-  close(): void;
+/** A registry following a fake browser's pages, as it follows Chrome's. */
+async function tracked(): Promise<{ readonly browser: FakeBrowser; readonly pages: PageRegistry }> {
+  const browser = new FakeBrowser();
+  const pages = new PageRegistry();
+  await pages.track(new CdpConnection(browser, silentLog));
+  return { browser, pages };
 }
 
-function fakeBrowser(label = 'Work Chrome'): FakeBrowser {
-  const browser: FakeBrowser = {
-    identity: {
-      profile: 'personal',
-      browserId: `browser-${label}`,
-      label,
-      extensionVersion: '1.0.0',
-    },
-    eventListener: undefined,
-    closeListener: undefined,
-    cdpCalls: [],
-    onEvent(listener) {
-      browser.eventListener = listener;
-      return () => {
-        browser.eventListener = undefined;
-      };
-    },
-    onClose(listener) {
-      browser.closeListener = listener;
-      return () => {
-        browser.closeListener = undefined;
-      };
-    },
-    sendCdp(tabId, method) {
-      browser.cdpCalls.push({ tabId, method });
-      return Promise.resolve({});
-    },
-    activatePage() {
-      return Promise.resolve();
-    },
-    closePage() {
-      return Promise.resolve();
-    },
-    emit(event) {
-      browser.eventListener?.(event);
-    },
-    close() {
-      browser.closeListener?.();
-    },
-  };
-  return browser;
+function only(pages: PageRegistry): ChromePage {
+  const [page, ...others] = pages.all();
+  assert.ok(page !== undefined && others.length === 0, `${pages.all().length} pages`);
+  return page;
 }
 
-function snapshot(
-  tabId: number,
-  overrides: Partial<Omit<PageSnapshot, 'tabId'>> = {},
-): PageSnapshot {
-  return {
-    tabId,
-    groupKey: 'session-1',
-    url: `https://example.com/${tabId}`,
-    title: `Page ${tabId}`,
-    loading: false,
-    ...overrides,
-  };
-}
-
-test('gives a tab the same page id in a new registry, as after a restart of DSH', () => {
-  const browser = fakeBrowser() as unknown as ConnectedBrowser;
-  const before = new PageRegistry();
-  before.track(browser);
-  const after = new PageRegistry();
-  after.track(browser);
-
-  const page = before.adopt('session-1', browser, snapshot(4));
-  assert.equal(after.adopt('session-1', browser, snapshot(4)).id, page.id);
-  assert.notEqual(after.adopt('session-1', browser, snapshot(5)).id, page.id);
-
-  const other = fakeBrowser('Home Chrome') as unknown as ConnectedBrowser;
-  after.track(other);
-  assert.notEqual(after.adopt('session-1', other, snapshot(4)).id, page.id);
+test("follows Chrome's page targets: discovered, and attached in flattened sessions", async () => {
+  const { browser } = await tracked();
+  const pageFilter = [{ type: 'page', exclude: false }];
+  assert.deepEqual(browser.commands('Target.setDiscoverTargets')[0]?.params, {
+    discover: true,
+    filter: pageFilter,
+  });
+  assert.deepEqual(browser.commands('Target.setAutoAttach')[0]?.params, {
+    autoAttach: true,
+    waitForDebuggerOnStart: true,
+    flatten: true,
+    filter: pageFilter,
+  });
 });
 
-test('adopts a page with a minted short id, the session, and the tab snapshot', () => {
-  const registry = new PageRegistry();
-  const browser = fakeBrowser();
-  const connection = browser as unknown as ConnectedBrowser;
-  registry.track(connection);
-
-  const page = registry.adopt(
-    'session-1',
-    connection,
-    snapshot(4, { url: 'https://example.com/a', title: 'A', loading: true }),
+test('lets a new page run once its dialogs are followed, and leaves a running page alone', async () => {
+  const { browser } = await tracked();
+  browser.attachPage({ targetId: 'T1' }, 'S1', { waitingForDebugger: true });
+  browser.attachPage({ targetId: 'T2' }, 'S2');
+  await settle();
+  await settle();
+  assert.deepEqual(
+    browser.sent
+      .filter(
+        ({ method }) => method === 'Page.enable' || method === 'Runtime.runIfWaitingForDebugger',
+      )
+      .map(({ method, sessionId }) => `${sessionId} ${method}`),
+    ['S1 Page.enable', 'S2 Page.enable', 'S1 Runtime.runIfWaitingForDebugger'],
   );
+});
 
+test('adopts a page the user opened in Chrome as no session’s, and turns on its dialogs', async () => {
+  const { browser, pages } = await tracked();
+  browser.attachPage({ targetId: 'T1', url: 'https://example.com/', title: 'Example' }, 'S1');
+  const page = only(pages);
   assert.match(page.id, /^p[0-9a-f]{6}$/);
-  assert.equal(page.sessionId, 'session-1');
-  assert.equal(page.tabId, 4);
-  assert.equal(page.url, 'https://example.com/a');
-  assert.equal(page.title, 'A');
-  assert.equal(page.loading, true);
-  assert.equal(registry.get(page.id), page);
-});
-
-test('returns the same page when the same tab is adopted twice', () => {
-  const registry = new PageRegistry();
-  const browser = fakeBrowser();
-  const connection = browser as unknown as ConnectedBrowser;
-  registry.track(connection);
-
-  const first = registry.adopt('session-1', connection, snapshot(4));
-  const second = registry.adopt(
-    'session-1',
-    connection,
-    snapshot(4, { url: 'https://example.com/changed', title: 'Changed' }),
-  );
-
-  assert.equal(second, first);
-  assert.equal(first.url, 'https://example.com/4');
-  assert.equal(first.title, 'Page 4');
-  assert.equal(registry.ofSession('session-1').length, 1);
-});
-
-test("lists a session's pages most recently used first and touch() moves one to the front", () => {
-  const registry = new PageRegistry();
-  const browser = fakeBrowser();
-  const connection = browser as unknown as ConnectedBrowser;
-  registry.track(connection);
-
-  const first = registry.adopt('session-1', connection, snapshot(1));
-  const second = registry.adopt('session-1', connection, snapshot(2));
-  const other = registry.adopt('session-2', connection, snapshot(3));
-
   assert.deepEqual(
-    registry.ofSession('session-1').map((page) => page.id),
-    [second.id, first.id],
+    {
+      targetId: page.targetId,
+      sessionId: page.sessionId,
+      openedBy: page.openedBy,
+      openerId: page.openerId,
+      url: page.url,
+      title: page.title,
+    },
+    {
+      targetId: 'T1',
+      sessionId: undefined,
+      openedBy: 'user',
+      openerId: undefined,
+      url: 'https://example.com/',
+      title: 'Example',
+    },
   );
+  await settle();
   assert.deepEqual(
-    registry.ofSession('session-2').map((page) => page.id),
-    [other.id],
+    browser.commands('Page.enable').map(({ sessionId }) => sessionId),
+    ['S1'],
   );
-  assert.deepEqual(registry.ofSession('session-3'), []);
+});
 
-  registry.touch(first.id);
+test('gives a page to the session that opened it, before or after Chrome reports it', async () => {
+  const { browser, pages } = await tracked();
+  pages.claim('T1', 'session-a', 'agent');
+  const adopted = pages.whenAdopted('T1');
+  browser.attachPage({ targetId: 'T1' }, 'S1');
+  const first = await adopted;
+  assert.deepEqual([first.sessionId, first.openedBy], ['session-a', 'agent']);
+
+  browser.attachPage({ targetId: 'T2' }, 'S2');
+  pages.claim('T2', 'session-b', 'user');
+  const second = await pages.whenAdopted('T2');
+  assert.deepEqual([second.sessionId, second.openedBy], ['session-b', 'user']);
+
+  // A page keeps the session it belongs to.
+  pages.claim('T1', 'session-b', 'user');
+  assert.equal(first.sessionId, 'session-a');
+});
+
+test("adopts a page another page opened into the opener's session, and announces the opening", async () => {
+  const { browser, pages } = await tracked();
+  pages.claim('T1', 'session-a', 'agent');
+  browser.attachPage({ targetId: 'T1' }, 'S1');
+  const opener = await pages.whenAdopted('T1');
+  const openings: PageOpening[] = [];
+  pages.onPageOpened((opening) => openings.push(opening));
+
+  browser.attachPage({ targetId: 'T2', openerId: 'T1', url: 'https://login/' }, 'S2');
+  const popup = await pages.whenAdopted('T2');
   assert.deepEqual(
-    registry.ofSession('session-1').map((page) => page.id),
-    [first.id, second.id],
+    [popup.sessionId, popup.openedBy, popup.openerId],
+    ['session-a', 'page', opener.id],
   );
+  assert.deepEqual(openings, [{ page: popup, opener }]);
 });
 
-test('marks a page shown until every release is called, and release is idempotent', () => {
-  const registry = new PageRegistry();
-  const browser = fakeBrowser();
-  const connection = browser as unknown as ConnectedBrowser;
-  registry.track(connection);
-  const page = registry.adopt('session-1', connection, snapshot(4));
-
-  assert.equal(registry.isShown(page.id), false);
-  const releaseFirst = registry.show(page.id);
-  const releaseSecond = registry.show(page.id);
-  assert.equal(registry.isShown(page.id), true);
-
-  releaseFirst();
-  assert.equal(registry.isShown(page.id), true);
-  releaseSecond();
-  assert.equal(registry.isShown(page.id), false);
-
-  releaseSecond();
-  releaseFirst();
-  assert.equal(registry.isShown(page.id), false);
-});
-
-test('notifies change listeners when a page is adopted, shown, released, changed, or removed', () => {
-  const registry = new PageRegistry();
-  const browser = fakeBrowser();
-  const connection = browser as unknown as ConnectedBrowser;
-  registry.track(connection);
-
-  let changes = 0;
-  registry.onChange(() => {
-    changes += 1;
-  });
-
-  const page = registry.adopt('session-1', connection, snapshot(4));
-  assert.equal(changes, 1);
-
-  const release = registry.show(page.id);
-  assert.equal(changes, 2);
-
-  release();
-  assert.equal(changes, 3);
-  release();
-  assert.equal(changes, 3);
-
-  browser.emit({ type: 'page-changed', page: snapshot(4, { title: 'New title' }) });
-  assert.equal(changes, 4);
-
-  browser.emit({ type: 'page-ended', tabId: 4, reason: 'closed' });
-  assert.equal(changes, 5);
-});
-
-test('notifies change listeners on touch only when the order changes', () => {
-  const registry = new PageRegistry();
-  const browser = fakeBrowser();
-  const connection = browser as unknown as ConnectedBrowser;
-  registry.track(connection);
-
-  const first = registry.adopt('session-1', connection, snapshot(1));
-  const second = registry.adopt('session-1', connection, snapshot(2));
-  let changes = 0;
-  registry.onChange(() => {
-    changes += 1;
-  });
-
-  registry.touch(second.id);
-  assert.equal(changes, 0);
-
-  registry.touch(first.id);
-  assert.equal(changes, 1);
-
-  registry.touch(first.id);
-  assert.equal(changes, 1);
-});
-
-test('a page-changed event updates the page and tells its change listeners', () => {
-  const registry = new PageRegistry();
-  const browser = fakeBrowser();
-  const connection = browser as unknown as ConnectedBrowser;
-  registry.track(connection);
-  const page = registry.adopt(
-    'session-1',
-    connection,
-    snapshot(4, { url: 'https://example.com/a', title: 'A', loading: false }),
-  );
-
-  const changed: ChromePage[] = [];
-  page.onChanged((changedPage) => changed.push(changedPage));
-  let changes = 0;
-  registry.onChange(() => {
-    changes += 1;
-  });
-
-  browser.emit({
-    type: 'page-changed',
-    page: snapshot(4, { url: 'https://example.com/b', title: 'B', loading: true }),
-  });
-
-  assert.equal(page.url, 'https://example.com/b');
-  assert.equal(page.title, 'B');
-  assert.equal(page.loading, true);
-  assert.deepEqual(changed, [page]);
-  assert.equal(changed[0], page);
-  assert.equal(changes, 1);
-});
-
-test('routes a cdp-event to the page listeners of that method', () => {
-  const registry = new PageRegistry();
-  const browser = fakeBrowser();
-  const connection = browser as unknown as ConnectedBrowser;
-  registry.track(connection);
-  const page = registry.adopt('session-1', connection, snapshot(4));
-
-  const received: unknown[] = [];
-  page.on('Page.loadEventFired', (params) => received.push(params));
-
-  browser.emit({
-    type: 'cdp-event',
-    tabId: 4,
-    method: 'Page.loadEventFired',
-    params: { timestamp: 12.5 },
-  });
-
-  assert.deepEqual(received, [{ timestamp: 12.5 }]);
-});
-
-test('a page-ended event removes the page and ends it with the reason', () => {
-  const registry = new PageRegistry();
-  const browser = fakeBrowser();
-  const connection = browser as unknown as ConnectedBrowser;
-  registry.track(connection);
-  const page = registry.adopt('session-1', connection, snapshot(4));
-
-  const endings: PageEnding[] = [];
-  page.onEnded((ending) => endings.push(ending));
-  let changes = 0;
-  registry.onChange(() => {
-    changes += 1;
-  });
-
-  browser.emit({ type: 'page-ended', tabId: 4, reason: 'released-by-user' });
-
-  assert.deepEqual(endings, ['released-by-user']);
-  assert.equal(registry.get(page.id), undefined);
-  assert.deepEqual(registry.ofSession('session-1'), []);
-  assert.equal(changes, 1);
-});
-
-test('closing the browser ends its pages as disconnected', () => {
-  const registry = new PageRegistry();
-  const browser = fakeBrowser();
-  const connection = browser as unknown as ConnectedBrowser;
-  registry.track(connection);
-  const first = registry.adopt('session-1', connection, snapshot(1));
-  const second = registry.adopt('session-1', connection, snapshot(2));
-
-  const endings = new Map<string, PageEnding>();
-  first.onEnded((ending) => endings.set(first.id, ending));
-  second.onEnded((ending) => endings.set(second.id, ending));
-
-  browser.close();
-
-  assert.equal(endings.size, 2);
-  assert.equal(endings.get(first.id), 'disconnected');
-  assert.equal(endings.get(second.id), 'disconnected');
-  assert.equal(registry.get(first.id), undefined);
-  assert.equal(registry.get(second.id), undefined);
-  assert.deepEqual(registry.ofSession('session-1'), []);
-});
-
-test('throws when adopting a page of a browser that is not tracked', () => {
-  const registry = new PageRegistry();
-  registry.track(fakeBrowser('Other Chrome') as unknown as ConnectedBrowser);
-  const untracked = fakeBrowser();
-
-  assert.throws(
-    () => registry.adopt('session-1', untracked as unknown as ConnectedBrowser, snapshot(4)),
-    /adopting a page of an untracked browser/,
-  );
-});
-
-test("turns on an adopted page's Page domain, so that Chrome reports its dialogs", () => {
-  const fake = fakeBrowser();
-  const registry = new PageRegistry();
-  registry.track(fake as unknown as ConnectedBrowser);
-  registry.adopt('session-1', fake as unknown as ConnectedBrowser, snapshot(4));
-  assert.deepEqual(fake.cdpCalls, [{ tabId: 4, method: 'Page.enable' }]);
-});
-
-test('follows a dialog from its opening to its closing, telling the page and the list', () => {
-  const fake = fakeBrowser();
-  const registry = new PageRegistry();
-  registry.track(fake as unknown as ConnectedBrowser);
-  const page = registry.adopt('session-1', fake as unknown as ConnectedBrowser, snapshot(4));
+test("follows a page's address and title, telling listeners only of changes", async () => {
+  const { browser, pages } = await tracked();
+  browser.attachPage({ targetId: 'T1', url: 'about:blank', title: '' }, 'S1');
+  const page = only(pages);
   let pageChanges = 0;
   let listChanges = 0;
   page.onChanged(() => pageChanges++);
-  registry.onChange(() => listChanges++);
+  pages.onChange(() => listChanges++);
+  const info = { targetId: 'T1', type: 'page', url: 'https://a/', title: 'A', attached: true };
+  browser.emit('Target.targetInfoChanged', { targetInfo: info });
+  browser.emit('Target.targetInfoChanged', { targetInfo: info });
+  assert.deepEqual([page.url, page.title, pageChanges, listChanges], ['https://a/', 'A', 1, 1]);
+});
 
-  fake.emit({
-    type: 'cdp-event',
-    tabId: 4,
-    method: 'Page.javascriptDialogOpening',
-    params: {
-      url: 'https://example.com/4',
-      message: 'Leave?',
-      type: 'confirm',
-      hasBrowserHandler: true,
-    },
-  });
+test('ends a page when its target goes, and every page when Chrome closes the connection', async () => {
+  const { browser, pages } = await tracked();
+  browser.attachPage({ targetId: 'T1' }, 'S1');
+  browser.attachPage({ targetId: 'T2' }, 'S2');
+  browser.attachPage({ targetId: 'T3' }, 'S3');
+  const [third, second, first] = pages.all();
+  const endings: Record<string, PageEnding> = {};
+  for (const page of [first, second, third]) {
+    page?.onEnded((ending) => {
+      endings[page.targetId] = ending;
+    });
+  }
+  browser.emit('Target.targetDestroyed', { targetId: 'T1' });
+  browser.emit('Target.detachedFromTarget', { sessionId: 'S2' });
+  browser.exit();
+  assert.deepEqual(endings, { T1: 'closed', T2: 'closed', T3: 'chrome-stopped' });
+  assert.deepEqual(pages.all(), []);
+  assert.equal(first?.ending, 'closed');
+});
+
+test("follows a page's dialog from its opening to its closing", async () => {
+  const { browser, pages } = await tracked();
+  browser.attachPage({ targetId: 'T1' }, 'S1');
+  const page = only(pages);
+  let listChanges = 0;
+  pages.onChange(() => listChanges++);
+  browser.emit(
+    'Page.javascriptDialogOpening',
+    { url: 'https://a/', message: 'Leave?', type: 'confirm', hasBrowserHandler: true },
+    'S1',
+  );
   assert.deepEqual(page.dialog, {
     kind: 'confirm',
     message: 'Leave?',
     defaultPrompt: '',
-    url: 'https://example.com/4',
+    url: 'https://a/',
   });
-  fake.emit({
-    type: 'cdp-event',
-    tabId: 4,
-    method: 'Page.javascriptDialogClosed',
-    params: { result: true, userInput: '' },
-  });
+  // Another session's dialog is not this page's.
+  browser.emit('Page.javascriptDialogClosed', { result: true, userInput: '' }, 'S9');
+  assert.notEqual(page.dialog, undefined);
+  browser.emit('Page.javascriptDialogClosed', { result: true, userInput: '' }, 'S1');
   assert.equal(page.dialog, undefined);
-  assert.deepEqual([pageChanges, listChanges], [2, 2]);
+  assert.equal(listChanges, 2);
 });
 
-test("adopts a page another page opened into the opener's session, and announces the opening", () => {
-  const fake = fakeBrowser();
-  const browser = fake as unknown as ConnectedBrowser;
-  const registry = new PageRegistry();
-  registry.track(browser);
-  const opener = registry.adopt('session-1', browser, snapshot(4), { openedBy: 'user' });
-  const openings: { page: ChromePage; opener: ChromePage; foreground: boolean }[] = [];
-  registry.onPageOpened((opening) => openings.push(opening));
+test("sends a page's commands, and hears its events, in the page's own session", async () => {
+  const { browser, pages } = await tracked();
+  browser.attachPage({ targetId: 'T1' }, 'S1');
+  browser.attachPage({ targetId: 'T2' }, 'S2');
+  const page = pages.all().find((candidate) => candidate.targetId === 'T1');
+  assert.ok(page);
+  await page.send('Page.reload');
+  assert.equal(browser.commands('Page.reload')[0]?.sessionId, 'S1');
+  const loads: number[] = [];
+  page.on('Page.loadEventFired', ({ timestamp }) => loads.push(timestamp));
+  browser.emit('Page.loadEventFired', { timestamp: 1 }, 'S2');
+  browser.emit('Page.loadEventFired', { timestamp: 2 }, 'S1');
+  assert.deepEqual(loads, [2]);
+  await page.close();
+  assert.deepEqual(browser.commands('Target.closeTarget')[0]?.params, { targetId: 'T1' });
+});
 
-  fake.emit({
-    type: 'page-opened',
-    // The connector's group key would name the session too; the opener's session decides.
-    page: snapshot(7, { groupKey: 'session-1' }),
-    openerTabId: 4,
-    foreground: true,
+test("lists a session's pages and those it may use, the most recently used first", async () => {
+  const { browser, pages } = await tracked();
+  pages.claim('T1', 'session-a', 'agent');
+  browser.attachPage({ targetId: 'T1' }, 'S1');
+  browser.attachPage({ targetId: 'T2' }, 'S2');
+  pages.claim('T3', 'session-b', 'agent');
+  browser.attachPage({ targetId: 'T3' }, 'S3');
+  const ids = (list: readonly ChromePage[]) => list.map((page) => page.targetId);
+  assert.deepEqual(ids(pages.ofSession('session-a')), ['T1']);
+  assert.deepEqual(ids(pages.reachableBy('session-a')), ['T2', 'T1']);
+  const first = pages.all().find((page) => page.targetId === 'T1');
+  pages.touch(first?.id ?? '');
+  assert.deepEqual(ids(pages.reachableBy('session-a')), ['T1', 'T2']);
+  // T3 came after T2.
+  assert.deepEqual(ids(pages.reachableBy('session-b')), ['T3', 'T2']);
+});
+
+test('finds the page in front: one showing a dialog, else the focused one, else one in view', async () => {
+  const { browser, pages } = await tracked();
+  const views: Record<string, string> = { S1: 'hidden', S2: 'visible', S3: 'hidden' };
+  browser.answer('Runtime.evaluate', ({ sessionId }) => ({
+    result: { value: views[sessionId ?? ''] },
+  }));
+  browser.attachPage({ targetId: 'T1' }, 'S1');
+  browser.attachPage({ targetId: 'T2' }, 'S2');
+  browser.attachPage({ targetId: 'T3' }, 'S3');
+  const byTarget = (targetId: string) => pages.all().find((page) => page.targetId === targetId);
+  assert.equal(await pages.pageInFront(), byTarget('T2'));
+  views['S3'] = 'focused';
+  assert.equal(await pages.pageInFront(), byTarget('T3'));
+  browser.emit(
+    'Page.javascriptDialogOpening',
+    { url: '', message: 'Hi', type: 'alert', hasBrowserHandler: true },
+    'S1',
+  );
+  assert.equal(await pages.pageInFront(), byTarget('T1'));
+});
+
+test('asks a page whether it is in view in a world of its own, which the page cannot redefine', async () => {
+  const { browser, pages } = await tracked();
+  let worlds = 0;
+  browser.answer('Page.createIsolatedWorld', () => ({ executionContextId: 100 + ++worlds }));
+  let gone = false;
+  browser.answer('Runtime.evaluate', ({ params }) =>
+    gone && params['contextId'] === 101
+      ? { error: 'Cannot find context with specified id' }
+      : { result: { value: 'visible' } },
+  );
+  browser.attachPage({ targetId: 'T1' }, 'S1');
+  const page = only(pages);
+  assert.equal(await pages.pageInFront(), page);
+  assert.equal(await pages.pageInFront(), page);
+  assert.deepEqual(
+    browser.commands('Runtime.evaluate').map(({ params }) => params['contextId']),
+    [101, 101],
+  );
+  assert.deepEqual(browser.commands('Page.createIsolatedWorld')[0]?.params, {
+    frameId: 'T1',
+    worldName: 'dsh-chrome',
   });
-  const popup = registry.ofSession('session-1').find((page) => page.tabId === 7);
-  assert.ok(popup);
-  assert.equal(popup.openedBy, 'page');
-  assert.equal(popup.openerId, opener.id);
-  assert.deepEqual(openings, [{ page: popup, opener, foreground: true }]);
+  // The page went on to another document, and the world with the first.
+  gone = true;
+  assert.equal(await pages.pageInFront(), page);
+  assert.equal(worlds, 2);
 });
 
-test('adopts a page whose opener is gone into the group it opened in, announcing nothing', () => {
-  const fake = fakeBrowser();
-  const browser = fake as unknown as ConnectedBrowser;
-  const registry = new PageRegistry();
-  registry.track(browser);
-  let openings = 0;
-  registry.onPageOpened(() => openings++);
-  fake.emit({
-    type: 'page-opened',
-    page: snapshot(9, { groupKey: 'session-2' }),
-    openerTabId: 4,
-    foreground: false,
-  });
-  const [page] = registry.ofSession('session-2');
-  assert.equal(page?.openedBy, 'page');
-  assert.equal(page?.openerId, undefined);
-  assert.equal(openings, 0);
+test('brings a page to the front, and returns once Chrome has it focused', async () => {
+  const { browser, pages } = await tracked();
+  let checks = 0;
+  browser.answer('Runtime.evaluate', () => ({
+    result: { value: ++checks < 3 ? 'visible' : 'focused' },
+  }));
+  browser.attachPage({ targetId: 'T1' }, 'S1');
+  await only(pages).bringToFront();
+  assert.deepEqual(browser.commands('Target.activateTarget')[0]?.params, { targetId: 'T1' });
+  assert.equal(checks, 3);
 });
 
-test("ends a browser's pages for a reason of the host's, and no other browser's", () => {
-  const restarting = fakeBrowser('Dedicated Chrome');
-  const other = fakeBrowser('Work Chrome');
-  const registry = new PageRegistry();
-  for (const fake of [restarting, other]) registry.track(fake as unknown as ConnectedBrowser);
-  const ended = registry.adopt('session-1', restarting as unknown as ConnectedBrowser, snapshot(4));
-  const kept = registry.adopt('session-1', other as unknown as ConnectedBrowser, snapshot(5));
-  const endings: PageEnding[] = [];
-  ended.onEnded((ending) => endings.push(ending));
-
-  registry.endPagesOf(restarting as unknown as ConnectedBrowser, 'restarted');
-  // The browser leaving afterwards ends nothing twice.
-  restarting.close();
-  assert.deepEqual(endings, ['restarted']);
-  assert.deepEqual(registry.ofSession('session-1'), [kept]);
+test('gives up waiting for a page Chrome does not report', async () => {
+  const { pages } = await tracked();
+  await assert.rejects(pages.whenAdopted('T9', { timeoutMs: 20 }), /did not report/);
 });

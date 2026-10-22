@@ -31,8 +31,12 @@
             pkgs.nodejs_24
             pkgs.pnpm_12
           ]
-          # The integration tests start Chrome on a private X display.
-          ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.xvfb ];
+          # dsh-chrome runs Chrome on a screen TigerVNC's Xvnc serves, with Openbox as
+          # its window manager; `pnpm dev` and the integration tests need both.
+          ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+            pkgs.tigervnc
+            pkgs.openbox
+          ];
         };
       });
 

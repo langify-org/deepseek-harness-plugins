@@ -1,5 +1,5 @@
 /**
- * Tells the agent which Chrome pages its session shares, and which one the user is
+ * Tells the agent which Chrome pages its session can use, and which one the user is
  * looking at, when that changes: one short message at the start of a turn.
  *
  * Mounted as its own Loader row (`dsh-chrome-context`), so a profile can turn it off.
@@ -43,11 +43,18 @@ export function apply(ctx: Context): void {
         return decision;
       }
       const sessionId = agent.id;
-      const pages = chrome.pagesOf(sessionId).map((page) => ({
+      // A reading that cannot be had (Chrome closing, say) leaves the turn as it is.
+      const read = await chrome.pages.refresh({ signal }).then(
+        () => true,
+        () => false,
+      );
+      if (!read) return decision;
+      const inFront = await chrome.pages.pageInFront();
+      const pages = chrome.pages.reachableBy(sessionId).map((page) => ({
         id: page.id,
         url: page.url,
         title: page.title,
-        shown: chrome.pages.isShown(page.id),
+        inFront: page.id === inFront?.id,
       }));
       const previous = lastReading.get(sessionId);
       const current =

@@ -1,67 +1,40 @@
 import type { RawData, WebSocket } from 'ws';
-import { normalizeAddress } from '../../protocol/address.ts';
 import {
+  type ChromeStatus,
   decodeViewerRequest,
-  encodeFrame,
-  type PageState,
   type ViewerEvent,
   type ViewerRequest,
-  type Viewport,
 } from '../../protocol/viewer.ts';
-import type { ChromeService } from '../chrome/chrome-service.ts';
-import type { ChromePage } from '../chrome/pages/page.ts';
-import { navigate } from '../page-operations/actions.ts';
-import { answerDialog } from '../page-operations/dialogs.ts';
+import type { ChromeService, ChromeState } from '../chrome/chrome-service.ts';
+import { normalizeAddress } from '../page-operations/address.ts';
 import { pageTextMarkdown, readPageText } from '../page-operations/text.ts';
 import type { Log } from '../platform/log.ts';
-import { PageInput } from './page-input.ts';
-import type { PageScreen, ScreenFrame, ScreenRegistry, ScreenViewer } from './page-screen.ts';
+import type { LayoutViewer, ScreenLayout, ViewerArea } from './screen-layout.ts';
 
-/** Above this many unsent bytes, a viewer is too slow and frames wait for it. */
-const MAX_BUFFERED_BYTES = 4 * 1024 * 1024;
 /** The most page text a viewer may add to a message. */
 const MAX_PAGE_TEXT_CHARS = 200_000;
 
 export interface ViewerDependencies {
   readonly chrome: ChromeService;
-  readonly screens: ScreenRegistry;
+  readonly layout: ScreenLayout;
   readonly log: Log;
 }
 
-interface Attachment {
-  readonly page: ChromePage;
-  readonly screen: PageScreen;
-  readonly input: PageInput;
-  detach(): void;
-}
-
 /**
- * One viewer: a sidebar tab, connected over the viewer WebSocket. It watches one DSH
- * session's pages and shows one of them at a time.
- *
- * It shows what a Chrome window would: a page the shown page brings to the front (a popup,
- * a link's new tab) is shown next, and when a page opened that way is closed, the page that
- * opened it is shown again.
- *
- * A viewer holds at most one undelivered frame. The host sends a frame, the viewer
- * reports it drawn, and only then gets the next; frames produced in between replace
- * each other, so a slow viewer skips frames instead of falling behind.
+ * One viewer's control connection: a sidebar tab of one DSH session. It hears whether
+ * Chrome runs, how the screen is laid out, and the session's requests for help; it gives
+ * its size, claims the screen when the user works in it, and asks for pages and their text.
+ * Its pixels and input travel over its screen connection.
  */
-export class ViewerConnection implements ScreenViewer {
+export class ViewerConnection implements LayoutViewer {
   readonly #socket: WebSocket;
   readonly #deps: ViewerDependencies;
   readonly #subscriptions: (() => void)[] = [];
   #sessionId: string | undefined;
-  #viewport: Viewport = { width: 1, height: 1, deviceScaleFactor: 1 };
-  #visible = true;
-  #attachment: Attachment | undefined;
-  /** While the viewer is visible and shows a page: the page's "shown" mark. */
-  #releaseShown: (() => void) | undefined;
-  /** Set once the socket closed; requests still running must not attach anything. */
+  #area: ViewerArea | undefined;
+  /** The request for help last sent, as JSON, so that only changes are sent. */
+  #sentHelp: string | undefined;
   #closed = false;
-  #frameSeq = 0;
-  #frameInFlight: number | undefined;
-  #waitingFrame: ScreenFrame | undefined;
 
   constructor(socket: WebSocket, deps: ViewerDependencies) {
     this.#socket = socket;
@@ -69,30 +42,16 @@ export class ViewerConnection implements ScreenViewer {
     socket.on('message', (data, isBinary) => this.#receive(data, isBinary));
     socket.on('close', () => this.#close());
     socket.on('error', (error) =>
-      deps.log.warn(`dsh-chrome: viewer connection failed: ${error.message}`),
+      deps.log.warn(`dsh-chrome: a viewer connection failed: ${error.message}`),
     );
   }
 
-  get viewport(): Viewport {
-    return this.#viewport;
+  get area(): ViewerArea | undefined {
+    return this.#area;
   }
 
-  get visible(): boolean {
-    return this.#visible;
-  }
-
-  showFrame(frame: ScreenFrame): void {
-    if (
-      !this.#visible ||
-      this.#frameInFlight !== undefined ||
-      this.#socket.bufferedAmount > MAX_BUFFERED_BYTES
-    ) {
-      this.#waitingFrame = frame;
-      return;
-    }
-    const seq = ++this.#frameSeq;
-    this.#frameInFlight = seq;
-    this.#socket.send(encodeFrame({ seq, width: frame.width, height: frame.height }, frame.image));
+  ownerChanged(owner: boolean): void {
+    this.#send({ type: 'screen', owner });
   }
 
   #receive(data: RawData, isBinary: boolean): void {
@@ -106,99 +65,48 @@ export class ViewerConnection implements ScreenViewer {
       });
       return;
     }
-    void this.#handle(request).catch((error: unknown) =>
+    void this.#handle(request).catch((error: unknown) => {
       this.#send({
         type: 'failed',
         requestType: request.type,
         requestId: 'requestId' in request ? request.requestId : null,
         message: error instanceof Error ? error.message : String(error),
-      }),
-    );
+      });
+    });
   }
 
   async #handle(request: ViewerRequest): Promise<void> {
-    const { chrome } = this.#deps;
-    if (request.type === 'watch') {
-      this.#watch(request.sessionId);
-      return;
-    }
-    if (request.type === 'set-dedicated-display') {
-      await chrome.setDedicatedDisplay(request.display);
-      return;
-    }
-    const sessionId = this.#sessionId;
-    if (sessionId === undefined) throw new Error('the viewer has not named its session');
-
+    const { chrome, layout } = this.#deps;
     switch (request.type) {
+      case 'watch':
+        this.#watch(request.sessionId);
+        return;
+      case 'viewport':
+        this.#area = { width: request.width, height: request.height };
+        layout.areaChanged(this);
+        return;
+      case 'claim-screen':
+        layout.claim(this);
+        return;
+      case 'start-chrome':
+        await chrome.chrome();
+        return;
       case 'open': {
-        const url = requireAddress(request.url);
-        this.#viewport = request.viewport;
-        const page = await chrome.openPage(sessionId, url, { openedBy: 'user' });
-        // The page stays open for the session; only this viewer is gone.
-        if (!this.#closed) this.#attach(page);
+        const url = normalizeAddress(request.url);
+        if (url === undefined) throw new Error(`"${request.url}" is not a web address`);
+        await chrome.openPage(this.#requireSession(), url, { openedBy: 'user' });
         return;
       }
-      case 'attach': {
-        const page = chrome.page(request.pageId);
-        if (page === undefined || page.sessionId !== sessionId) {
-          this.#send({ type: 'ended', reason: 'the page is no longer open' });
-          return;
-        }
-        this.#viewport = request.viewport;
-        this.#attach(page);
+      case 'answer-help': {
+        // Only the session's own request; the agent of another session waits for its own.
+        const open = chrome.helpRequests.ofSession(this.#requireSession());
+        if (open?.id !== request.requestId) throw new Error('that request is no longer open');
+        chrome.helpRequests.answer(request.requestId, request.answer);
         return;
       }
-      case 'visibility':
-        this.#visible = request.visible;
-        this.#updateShown();
-        this.#attachment?.screen.visibilityChanged();
-        if (request.visible) this.#flushWaitingFrame();
-        return;
-      case 'frame-drawn':
-        if (request.seq !== this.#frameInFlight) return;
-        this.#frameInFlight = undefined;
-        this.#flushWaitingFrame();
-        return;
-      default:
-        break;
-    }
-
-    const attachment = this.#attachment;
-    if (attachment === undefined) throw new Error('no page is shown');
-    const { page, screen } = attachment;
-    switch (request.type) {
-      case 'resize':
-        this.#viewport = request.viewport;
-        screen.viewportChanged(this);
-        return;
-      case 'input':
-        screen.claimOwnership(this);
-        chrome.pages.touch(page.id);
-        attachment.input.dispatch(request.input);
-        screen.inputDispatched();
-        return;
-      case 'navigate':
-        await navigate(page, { url: requireAddress(request.url) });
-        return;
-      case 'history':
-        await navigate(page, { history: request.delta < 0 ? 'back' : 'forward' });
-        return;
-      case 'reload':
-        await navigate(page, { history: 'reload' });
-        return;
-      case 'close-page':
-        await page.close();
-        return;
-      case 'answer-help':
-        chrome.helpRequests.answer(page.id, request.requestId, request.answer);
-        return;
-      case 'answer-dialog':
-        await answerDialog(page, {
-          accept: request.accept,
-          promptText: request.promptText ?? undefined,
-        });
-        return;
       case 'read-text': {
+        const page = await chrome.pages.pageInFront();
+        if (page === undefined) throw new Error('Chrome shows no page');
         const text = await readPageText(page, MAX_PAGE_TEXT_CHARS);
         this.#send({
           type: 'page-text',
@@ -213,128 +121,51 @@ export class ViewerConnection implements ScreenViewer {
   }
 
   #watch(sessionId: string): void {
-    if (this.#sessionId !== undefined) {
-      if (this.#sessionId !== sessionId) throw new Error('a viewer watches one session');
-      return;
-    }
-    const { chrome } = this.#deps;
+    if (this.#sessionId !== undefined) throw new Error('this viewer already watches a session');
+    if (this.#closed) return;
     this.#sessionId = sessionId;
+    const { chrome, layout } = this.#deps;
     this.#subscriptions.push(
-      chrome.pages.onChange(() => this.#sendPages()),
-      chrome.pages.onPageOpened(({ page, opener, foreground }) => {
-        if (foreground && opener.id === this.#attachment?.page.id) this.#attach(page);
-      }),
-      chrome.helpRequests.onChange((pageId) => {
-        if (pageId === this.#attachment?.page.id) this.#sendHelp();
-      }),
-      chrome.onDedicatedChange((state) => this.#send({ type: 'dedicated-chrome', chrome: state })),
+      chrome.onStateChange((state) => this.#send({ type: 'chrome', status: statusOf(state) })),
+      chrome.helpRequests.onChange(() => this.#sendHelp()),
+      chrome.pages.onChange(() => this.#sendHelp()),
     );
-    this.#sendPages();
-    this.#send({ type: 'dedicated-chrome', chrome: chrome.dedicated });
-  }
-
-  #attach(page: ChromePage): void {
-    this.#detach();
-    const { screens, log } = this.#deps;
-    const screen = screens.screenOf(page);
-    const subscriptions = [
-      page.onChanged(() => this.#send({ type: 'page', page: this.#stateOf(page) })),
-      page.onEnded((ending) => {
-        const opener =
-          page.openerId === undefined ? undefined : this.#deps.chrome.page(page.openerId);
-        if (ending === 'closed' && opener !== undefined) {
-          this.#attach(opener);
-          return;
-        }
-        this.#detach();
-        this.#send({ type: 'ended', reason: ending });
-      }),
-    ];
-    this.#attachment = {
-      page,
-      screen,
-      input: new PageInput(page, log),
-      detach: () => {
-        for (const unsubscribe of subscriptions) unsubscribe();
-        screen.removeViewer(this);
-        screens.release(screen);
-      },
-    };
-    this.#send({ type: 'attached', page: this.#stateOf(page) });
+    this.#send({ type: 'chrome', status: statusOf(chrome.state) });
     this.#sendHelp();
-    this.#updateShown();
-    screen.addViewer(this);
+    layout.add(this);
   }
 
-  #detach(): void {
-    const attachment = this.#attachment;
-    this.#attachment = undefined;
-    attachment?.detach();
-    this.#updateShown();
-    this.#frameInFlight = undefined;
-    this.#waitingFrame = undefined;
+  #requireSession(): string {
+    if (this.#sessionId === undefined) throw new Error('watch a session first');
+    return this.#sessionId;
+  }
+
+  /** The session's open request for help, with the page it is about. */
+  #sendHelp(): void {
+    const { chrome } = this.#deps;
+    const request =
+      this.#sessionId === undefined ? undefined : chrome.helpRequests.ofSession(this.#sessionId);
+    const page = request === undefined ? undefined : chrome.page(request.pageId);
+    const state =
+      request === undefined
+        ? null
+        : {
+            id: request.id,
+            message: request.message,
+            pageTitle: page?.title ?? '',
+            pageUrl: page?.url ?? '',
+          };
+    const text = JSON.stringify(state);
+    // Page changes are frequent; the viewer hears of the request only when it changed.
+    if (text === this.#sentHelp) return;
+    this.#sentHelp = text;
+    this.#send({ type: 'help', request: state });
   }
 
   #close(): void {
     this.#closed = true;
-    this.#detach();
-    for (const unsubscribe of this.#subscriptions) unsubscribe();
-    this.#subscriptions.length = 0;
-  }
-
-  /** Marks the shown page as seen by the user while this viewer is visible. */
-  #updateShown(): void {
-    const page = this.#attachment?.page;
-    if (page === undefined || !this.#visible) {
-      this.#releaseShown?.();
-      this.#releaseShown = undefined;
-    } else if (this.#releaseShown === undefined) {
-      this.#releaseShown = this.#deps.chrome.pages.show(page.id);
-    }
-  }
-
-  #flushWaitingFrame(): void {
-    const frame = this.#waitingFrame;
-    if (frame === undefined) return;
-    this.#waitingFrame = undefined;
-    this.showFrame(frame);
-  }
-
-  #sendPages(): void {
-    const sessionId = this.#sessionId;
-    if (sessionId === undefined) return;
-    const pages = this.#deps.chrome.pagesOf(sessionId).map((page) => this.#stateOf(page));
-    this.#send({ type: 'pages', pages });
-  }
-
-  #sendHelp(): void {
-    const page = this.#attachment?.page;
-    const request =
-      page === undefined ? undefined : this.#deps.chrome.helpRequests.current(page.id);
-    this.#send({
-      type: 'help',
-      request: request === undefined ? null : { id: request.id, message: request.message },
-    });
-  }
-
-  #stateOf(page: ChromePage): PageState {
-    return {
-      id: page.id,
-      url: page.url,
-      title: page.title,
-      loading: page.loading,
-      browserLabel: page.browser.identity.label,
-      openedBy: page.openedBy ?? null,
-      openerId: page.openerId ?? null,
-      dialog:
-        page.dialog === undefined
-          ? null
-          : {
-              kind: page.dialog.kind,
-              message: page.dialog.message,
-              defaultPrompt: page.dialog.defaultPrompt,
-            },
-    };
+    for (const unsubscribe of this.#subscriptions.splice(0)) unsubscribe();
+    this.#deps.layout.remove(this);
   }
 
   #send(event: ViewerEvent): void {
@@ -342,8 +173,13 @@ export class ViewerConnection implements ScreenViewer {
   }
 }
 
-function requireAddress(input: string): string {
-  const url = normalizeAddress(input);
-  if (url === undefined) throw new Error(`"${input}" is not a web address`);
-  return url;
+function statusOf(state: ChromeState): ChromeStatus {
+  switch (state.kind) {
+    case 'running':
+      return { kind: 'running', version: state.version };
+    case 'failed':
+      return { kind: 'failed', message: state.message };
+    default:
+      return { kind: state.kind };
+  }
 }

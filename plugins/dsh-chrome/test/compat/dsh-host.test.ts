@@ -1,12 +1,14 @@
 /**
  * The built plugin against DSH's own Host packages, at the versions it declares
  * (`engines.dsh`): DSH's compatibility check, a real Cordis context, DSH's web server and
- * connection service admitting the viewer route, and the tools' definitions.
+ * connection service admitting the viewer's routes, and the tools' definitions.
  *
- * Needs a build (`pnpm build`). Everything it writes stays in a temporary directory.
+ * No Chrome runs here: the X server it would need is named but missing, so starting it fails
+ * as it would on a machine without it. Needs a build (`pnpm build`). Everything it writes
+ * stays in a temporary directory.
  */
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, readlink, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readlink, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -15,30 +17,31 @@ import type { Context } from '@deepseek-ai/cordis';
 import { evaluatePluginCompatibility } from '@deepseek-ai/dsh-app-boot';
 import WebSocket from 'ws';
 import packageJson from '../../package.json' with { type: 'json' };
-import { NATIVE_HOST_NAME } from '../../src/protocol/connector.ts';
-import { CONNECTOR_EXTENSION_ID } from '../../src/protocol/connector-identity.ts';
-import { decodeViewerEvent, VIEWER_PATH, type ViewerEvent } from '../../src/protocol/viewer.ts';
+import {
+  decodeViewerEvent,
+  SCREEN_PATH,
+  VIEWER_PATH,
+  type ViewerEvent,
+} from '../../src/protocol/viewer.ts';
 import { type DshHost, SIGNED_IN_COOKIE, startDshHost } from '../support/dsh-host.ts';
 import { distDir, missingRequirements } from '../support/environment.ts';
 import { RecordingTools } from '../support/recording-tools.ts';
-import { waitFor } from '../support/wait.ts';
 
 const skip = await missingRequirements({});
 
-/** The manifest of a native app, as the user's own Chrome would list it. */
+/** The manifest of a native app, as the user's own Chrome lists it. */
 const NATIVE_APP_MANIFEST = 'com.example.desktop_app.json';
+/** An X server that is not there. */
+const MISSING_XVNC = '/nonexistent/Xvnc';
 
-/**
- * The plugin's configuration with every place it keeps files in the directory. Both profiles
- * are turned on, and the user's own Chrome is left at its defaults otherwise.
- */
-function configIn(dir: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+/** The plugin's configuration with every place it keeps files in the directory. */
+function configIn(dir: string): Record<string, unknown> {
   return {
-    dailyProfile: { enabled: true, userDataDir: join(dir, 'chrome') },
-    dedicatedProfile: { userDataDir: join(dir, 'dedicated') },
+    xvncExecutable: MISSING_XVNC,
+    profileDir: join(dir, 'chrome-profile'),
+    userChromeDir: join(dir, 'chrome'),
     dataDir: join(dir, 'data'),
-    connectorSocketPath: join(dir, 'connector.sock'),
-    ...overrides,
+    runtimeDir: join(dir, 'run'),
   };
 }
 
@@ -58,14 +61,9 @@ before(async () => {
   await mkdir(join(workDir, 'chrome', 'NativeMessagingHosts'), { recursive: true });
   await writeFile(join(workDir, 'chrome', 'NativeMessagingHosts', NATIVE_APP_MANIFEST), '{}\n');
   const plugin = await import(pathToFileURL(join(distDir, 'host', 'index.js')).href);
-  await started.plugin(plugin, configIn(workDir, { defaultProfile: 'daily' }));
+  await started.plugin(plugin, configIn(workDir));
   await started.plugin(await import(pathToFileURL(join(distDir, 'host', 'tools.js')).href));
   await started.plugin(await import(pathToFileURL(join(distDir, 'host', 'context.js')).href));
-  await waitFor(
-    () => started.get('chrome')?.extensionDir !== undefined,
-    5000,
-    'the plugin to start',
-  );
   port = started.webServer.port ?? 0;
 });
 
@@ -81,68 +79,60 @@ test('the declared DSH range accepts this DSH release and refuses the next minor
   assert.notEqual(evaluatePluginCompatibility(packageJson, {}, '0.2.1-alpha.4'), undefined);
 });
 
-test('starting installs the connector and a native host manifest for each profile turned on', {
+test("starting readies the profile, with the user's native apps, and starts no Chrome", {
   skip,
 }, async () => {
-  for (const [profile, userDataDir] of [
-    ['daily', 'chrome'],
-    ['dedicated', 'dedicated'],
-  ] as const) {
-    const manifest = JSON.parse(
-      await readFile(
-        join(workDir, userDataDir, 'NativeMessagingHosts', `${NATIVE_HOST_NAME}.json`),
-        'utf8',
-      ),
-    );
-    assert.deepEqual(manifest.allowed_origins, [`chrome-extension://${CONNECTOR_EXTENSION_ID}/`]);
-    assert.equal(manifest.path, join(workDir, 'data', `native-host-${profile}`));
-  }
-  // The dedicated profile's extensions reach the native apps the user's own Chrome's do.
   assert.equal(
-    await readlink(join(workDir, 'dedicated', 'NativeMessagingHosts', NATIVE_APP_MANIFEST)),
+    await readlink(join(workDir, 'chrome-profile', 'NativeMessagingHosts', NATIVE_APP_MANIFEST)),
     join(workDir, 'chrome', 'NativeMessagingHosts', NATIVE_APP_MANIFEST),
   );
-  const extension = JSON.parse(
-    await readFile(join(workDir, 'data', 'extension', 'manifest.json'), 'utf8'),
-  );
-  assert.equal(extension.version, packageJson.version);
+  assert.deepEqual(root?.get('chrome')?.state, { kind: 'stopped' });
 });
 
-test('the viewer route refuses requests DSH would not authenticate', { skip }, async () => {
+test("the viewer's routes refuse requests DSH would not authenticate", { skip }, async () => {
   const origin = `http://127.0.0.1:${port}`;
-  assert.equal(await upgradeStatus({ origin }), 401);
-  assert.equal(
-    await upgradeStatus({ origin: 'https://elsewhere.example', cookie: SIGNED_IN_COOKIE }),
-    403,
-  );
+  for (const path of [VIEWER_PATH, SCREEN_PATH]) {
+    assert.equal(await upgradeStatus(path, { origin }), 401, path);
+    assert.equal(
+      await upgradeStatus(path, { origin: 'https://elsewhere.example', cookie: SIGNED_IN_COOKIE }),
+      403,
+      path,
+    );
+  }
 });
 
-test('a signed-in viewer watches its session and hears why a page cannot open', {
+test('a signed-in viewer watches its session, owns the screen, and hears why Chrome did not start', {
   skip,
 }, async () => {
-  const socket = new WebSocket(`ws://127.0.0.1:${port}${VIEWER_PATH}`, {
-    headers: { origin: `http://127.0.0.1:${port}`, cookie: SIGNED_IN_COOKIE },
-  });
+  const socket = signedInSocket(VIEWER_PATH);
   const events = eventQueue(socket);
   await new Promise((resolve, reject) => socket.once('open', resolve).once('error', reject));
   socket.send(JSON.stringify({ type: 'watch', sessionId: 'session-1' }));
-  assert.deepEqual(await events.next(), { type: 'pages', pages: [] });
-  assert.deepEqual(await events.next(), {
-    type: 'dedicated-chrome',
-    chrome: { state: 'stopped', display: 'virtual' },
-  });
-  socket.send(
-    JSON.stringify({
-      type: 'open',
-      url: 'example.com',
-      viewport: { width: 400, height: 300, deviceScaleFactor: 1 },
-    }),
-  );
+  assert.deepEqual(await events.next(), { type: 'chrome', status: { kind: 'stopped' } });
+  assert.deepEqual(await events.next(), { type: 'help', request: null });
+  // The only viewer owns the screen: it is laid out at its size.
+  assert.deepEqual(await events.next(), { type: 'screen', owner: true });
+
+  socket.send(JSON.stringify({ type: 'open', url: 'example.com' }));
+  assert.deepEqual(await events.next(), { type: 'chrome', status: { kind: 'starting' } });
+  const failedStart = await events.next();
+  assert.ok(failedStart.type === 'chrome' && failedStart.status.kind === 'failed');
+  assert.match(failedStart.status.message, /Xvnc \(\/nonexistent\/Xvnc\) was not found/);
   const failure = await events.next();
   assert.ok(failure.type === 'failed', JSON.stringify(failure));
   assert.equal(failure.requestType, 'open');
-  assert.match(failure.message, /your Chrome is not connected/);
   socket.close();
+});
+
+test('the screen route closes with the reason the screen did not start', { skip }, async () => {
+  const socket = signedInSocket(SCREEN_PATH);
+  const { code, reason } = await new Promise<{ code: number; reason: string }>((resolve) =>
+    socket.once('close', (closeCode, closeReason) =>
+      resolve({ code: closeCode, reason: closeReason.toString() }),
+    ),
+  );
+  assert.equal(code, 1011);
+  assert.match(reason, /^the screen did not start: Xvnc/);
 });
 
 test('the host row finishes starting only once ctx.chrome is available', { skip }, async () => {
@@ -181,10 +171,16 @@ test('the tools row registers every chrome tool with a valid definition', { skip
   }
 });
 
+function signedInSocket(path: string): WebSocket {
+  return new WebSocket(`ws://127.0.0.1:${port}${path}`, {
+    headers: { origin: `http://127.0.0.1:${port}`, cookie: SIGNED_IN_COOKIE },
+  });
+}
+
 /** The HTTP status a WebSocket upgrade gets back, or 101 when it succeeds. */
-function upgradeStatus(headers: Record<string, string>): Promise<number> {
+function upgradeStatus(path: string, headers: Record<string, string>): Promise<number> {
   return new Promise((resolve, reject) => {
-    const socket = new WebSocket(`ws://127.0.0.1:${port}${VIEWER_PATH}`, { headers });
+    const socket = new WebSocket(`ws://127.0.0.1:${port}${path}`, { headers });
     socket.once('unexpected-response', (_request, response) => {
       resolve(response.statusCode ?? 0);
       socket.terminate();

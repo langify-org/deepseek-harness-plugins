@@ -1,27 +1,27 @@
 # dsh-chrome
 
-Share a Chrome page between you and the agent, in the right sidebar of DeepSeek Harness
+Share a real Chrome between you and the agent, in the right sidebar of DeepSeek Harness
 (DSH).
 
-The page lives in a real Chrome, which dsh-chrome runs out of sight on a profile of its
-own: nothing appears on your screen, and the sidebar shows the page and sends your clicks
-and typing to it. The agent reads and operates the same page with tools. The profile keeps
-what you set up in it: the sites you signed in to, Chrome's sync, extensions such as
-1Password. It works the same from DSH Desktop and from DSH opened in a browser elsewhere,
-such as a phone on your tailnet.
-
-Your own Chrome profile can be connected instead, with the logins you already have; its
-pages then open in a window on your screen (see [Your own Chrome](#your-own-chrome)).
+dsh-chrome runs a Chrome of its own, on a profile of its own, on a screen of its own on the
+machine DSH runs on. The sidebar shows that screen, the whole Chrome window with its tabs,
+address bar, menus and extension popups, and sends your pointer, keys and text to it. The
+agent reads and operates the same Chrome's pages with tools. The profile keeps what you set
+up in it: the sites you signed in to, Chrome's sync, extensions such as 1Password. It works
+the same from DSH Desktop and from DSH opened in a browser elsewhere, such as a phone on
+your tailnet.
 
 See [docs/design.md](docs/design.md) for how it works and why.
 
 ## Requirements
 
 - DSH 0.2 (`>=0.2.1-rc.2 <0.3`), with its web client.
-- Google Chrome 120 or later, on the machine DSH runs on. Tested with Chrome 154 on Linux.
-- Xvfb, the virtual display the hidden Chrome runs on (Linux). Without it, set
-  `dedicatedProfile.display: desktop`, which shows its windows instead.
-- macOS should work with `display: desktop` but is untested; Windows is not supported.
+- Linux, with these on the machine DSH runs on:
+  - Google Chrome. Tested with Chrome 154.
+  - TigerVNC's `Xvnc`, the X server Chrome draws on, which keeps the screen in memory and
+    serves it over VNC (`tigervnc` in Nix, `tigervnc-standalone-server` on Debian and Ubuntu).
+  - Openbox, the window manager that keeps Chrome's window filling that screen.
+- macOS and Windows are not supported: the screen is an X server.
 
 ## Install
 
@@ -30,100 +30,74 @@ See [docs/design.md](docs/design.md) for how it works and why.
 2. In DSH, open **Plugins → Add plugin** and give the tarball's absolute path. Restart DSH
    completely (on Desktop: quit, not just close the window).
 
-That is all: the Chrome starts when a page first opens. To try the plugin from this
-repository instead, run `pnpm dev` at its root, which serves a development DSH with the
-plugin installed.
+That is all: Chrome starts when you open the Chrome tab, or when the agent first opens a
+page. To try the plugin from this repository instead, run `pnpm dev` at its root, which
+serves a development DSH with the plugin installed.
 
 dsh-chrome keeps its files in the DSH home, with the rest of DSH's data: `~/.dsh` for
 `dsh`, DSH Desktop's own home for Desktop, or wherever `DSH_HOME` points. The profile is
-`dsh-chrome/profiles/dedicated` there. Each home has its own, so DSH installations with
-different homes can run at once.
+`dsh-chrome/chrome-profile` there. Each home has its own Chrome and screen, so DSH
+installations with different homes can run at once.
 
-### From 0.1
+### From 0.2 or 0.1
 
-0.1 shared pages of your own Chrome; 0.2 runs a Chrome of its own instead. On its first
-start, 0.2 removes the relay registration 0.1 wrote into your Chrome, so the connector you
-loaded there no longer connects: remove it in `chrome://extensions`, or turn your own Chrome
-back on as described in [Your own Chrome](#your-own-chrome).
+0.3 shows the whole Chrome window instead of a page, and runs only its own Chrome:
+
+- The profile 0.2 ran (`dsh-chrome/profiles/dedicated`) moves to `dsh-chrome/chrome-profile`,
+  with its sign-ins and extensions. The connector extension and its relay are removed from
+  the DSH home, and so are the relay's registrations in the profile and in your own Chrome
+  (`NativeMessagingHosts/io.github.langify_org.dsh_chrome.json`) where they name this DSH
+  home's relay. Chrome then drops the connector from the profile by itself.
+- Your own Chrome is no longer shared. If you loaded the connector there in 0.1, remove it
+  in `chrome://extensions`.
+- The settings of 0.2 (`dedicatedProfile`, `dailyProfile`, `defaultProfile`, `viewer`,
+  `connectorSocketPath`, `nodeExecutable`) are ignored; see [Configure](#configure).
 
 ## Set it up
 
-The Chrome starts with an empty profile. Press **⚙** in the Chrome tab's toolbar to show
-its window on the screen of the computer DSH runs on, and set it up there as you would a
-new Chrome:
+Open **Chrome** from the sidebar's new-tab guide, and set it up there as you would a new
+Chrome:
 
 - sign in to the sites the agent should use; they stay signed in;
 - sign in to Chrome itself, if you like, so that sync brings your bookmarks, saved
   passwords and extensions;
 - add 1Password from the Chrome Web Store and sign in to it. dsh-chrome lets the profile's
   extensions reach the native apps your own Chrome's reach, so 1Password's extension finds
-  the desktop app as it does in your own Chrome (`dedicatedProfile.shareNativeHosts`).
-
-Press **Done** above the page, or quit that Chrome, and it goes back out of sight.
-Chrome cannot move its windows between displays, so it starts again each way, and the
-pages it showed close.
+  the desktop app running on that machine as it does in your own Chrome
+  (`shareNativeHosts`).
 
 ## Use
 
-Open **Chrome** from the sidebar's new-tab guide and enter an address.
-
 | In the sidebar | |
 | --- | --- |
-| Click, scroll, type | Goes to the page. Japanese and other input methods compose in DSH and send the finished text. On a touch screen, tap to click and drag to scroll. |
-| ← → ↻ and the address bar | Navigate the page. |
-| Page list | Switch between the session's pages, including those the agent opened. |
-| 📷 / 📄 | Add a screenshot or the page's text to your next message. |
-| ✕ | Close the page. |
-| ⚙ | Show the Chrome on the computer's screen, to set it up. |
+| Click, drag, scroll, type | Goes to Chrome, as at its own screen. Japanese and other input methods compose in DSH, and the finished text goes to Chrome. |
+| Keyboard shortcuts | Go to Chrome by the key's letter, or on a layout without Latin letters by the US key's, so Ctrl+C copies on a Russian keyboard too. On macOS, ⌘ acts as Ctrl. Characters AltGr or Option choose are typed as such. The browser that shows DSH keeps some shortcuts for itself (in Chrome: Ctrl+T, Ctrl+W, Ctrl+N): use Chrome's own ＋ and ✕ for those. |
+| Copy and paste | A copy you make in Chrome (a shortcut, a menu, a page's button) reaches your own clipboard too, where the browser allows it: DSH served over HTTPS or on `localhost`. What the agent copies stays in Chrome. Ctrl+V (⌘V) pastes your own clipboard, or Chrome's when your last copy there could not reach yours. |
+| 📷 / 📄 | Add a screenshot of Chrome, or the text of the page you are looking at, to your next message. |
+| ⌨ | Shows a touch screen's keyboard. On a touch screen, tap to click and drag two fingers to scroll. |
 
-Pages a page opens, such as a sign-in popup or a link that opens a new tab, join the
-session. The sidebar follows a page brought to the front, as a Chrome window would, and
-returns to the page that opened it when it closes. A dialog the page opens (`alert`,
-`confirm`, `prompt`, or whether to leave the page) appears above the page; the page waits
-until you answer it there.
+Chrome's own UI is on the screen like the page: menus, permission prompts, extension popups,
+the downloads it saves (into the Downloads folder of the machine DSH runs on), and the
+dialogs pages open. A window a page opens, such as a sign-in popup, stays above Chrome's
+window until it closes; its title bar has a button to close it.
+
+Every Chrome tab in DSH shows the same Chrome. The screen takes the size of the tab you last
+looked at or worked in, at two of its pixels for each of the tab's, so it is sharp on
+high-density displays too; another tab shows it scaled to fit until you look at or work in
+that one. Opening a Chrome tab starts Chrome. Chrome closes when you close its last tab, and
+the Chrome tab then offers **Open Chrome**; it starts again, with the same profile, when you
+choose that, when a Chrome tab is opened anew, or when the agent opens a page.
 
 The agent gets these tools: `chrome_pages`, `chrome_open`, `chrome_navigate`,
 `chrome_snapshot`, `chrome_screenshot`, `chrome_click`, `chrome_type`, `chrome_press`,
-`chrome_scroll`, `chrome_answer_dialog`, `chrome_close`, and `chrome_ask_user`. With the
-last one, the agent asks you to do something yourself, such as signing in or entering a
-one-time code; the request appears above the page with **Done** and **I can’t**. Its
-actions report the dialogs and pages they led to. At the start of each turn, the agent is
-told which pages the session shares and which one you are looking at, when that changed.
-
-## Your own Chrome
-
-To share pages of the Chrome you use every day, with its logins and extensions:
-
-```yaml
-- id: dsh-chrome
-  config:
-    dailyProfile:
-      enabled: true
-    defaultProfile: daily
-```
-
-Then install the connector there: when the plugin starts, it writes it to
-`dsh-chrome/extension` in the DSH home. In Chrome, open `chrome://extensions`, turn on
-**Developer mode**, choose **Load unpacked**, and select that directory. Until Chrome is
-connected, opening a page says so and names the directory. On every start, the plugin
-registers the connector's relay with Chrome by writing
-`NativeMessagingHosts/io.github.langify_org.dsh_chrome.json` into Chrome's user data
-directory (`~/.config/google-chrome` by default); Chrome starts that relay only for the
-connector, and nothing else in the profile changes. Turned off again, the plugin removes
-that file if it is still its own. A Chrome user data directory names one relay, so it
-connects to the DSH that wrote its file last.
-
-Its pages open in a window of your Chrome, on your screen, in a tab group named after the
-DSH session, and your Chrome differs from the hidden one in what dsh-chrome may do:
-
-- Chrome shows a bar saying that the connector started debugging the browser; cancelling
-  it stops sharing every page. As the bar comes and goes, and when the window is resized,
-  Chrome lays the window out again, and the sidebar may flicker for a moment.
-- dsh-chrome never brings the window to the front, which would take your focus. Chrome
-  shows a page's `confirm` and `prompt` only while the page is in front, and answers them
-  for a page that is not as if you had cancelled.
-- A page in a minimized or covered window is captured a few times a second instead of
-  streamed.
+`chrome_scroll`, `chrome_answer_dialog`, `chrome_close`, and `chrome_ask_user`. It may use
+the pages it opened, the pages those opened, and the pages you opened in Chrome; a page
+another session's agent opened is not its own. `chrome_open` opens a new tab in front, and
+an action brings its page to the front first, as you would. With `chrome_ask_user`, the
+agent asks you to do something yourself, such as signing in or entering a one-time code;
+the request appears above Chrome with **Done** and **I can’t**. Its actions report the
+dialogs and pages they led to. At the start of each turn, the agent is told which pages it
+may use and which one you are looking at, when that changed.
 
 ## Configure
 
@@ -132,26 +106,20 @@ Settings go in the DSH profile's `cordis.patch.yml`, under the plugin's row:
 ```yaml
 - id: dsh-chrome
   config:
-    viewer:
-      jpegQuality: 70
+    deviceScaleFactor: 1
 ```
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `dedicatedProfile.enabled` | `true` | Run a Chrome of its own for dsh-chrome, started when a page opens. |
-| `dedicatedProfile.executable` | `google-chrome-stable` | The Chrome it starts. |
-| `dedicatedProfile.userDataDir` | `dsh-chrome/profiles/dedicated` in the DSH home | Its profile's directory. |
-| `dedicatedProfile.display` | `virtual` | `virtual`: a private Xvfb display, which also works while the screen is locked. `desktop`: its windows on your screen. **⚙** shows them for a while either way. |
-| `dedicatedProfile.shareNativeHosts` | `true` | Let its extensions reach the native apps your own Chrome's reach, by linking their native messaging manifests into its profile. |
-| `dailyProfile.enabled` | `false` | Let the connector in your own Chrome profile reach this DSH. |
-| `dailyProfile.userDataDir` | `~/.config/google-chrome` | Your Chrome's user data directory, and where the native apps are linked from. |
-| `defaultProfile` | `dedicated` | The profile new pages open in: `dedicated` or `daily`. |
-| `dataDir` | `dsh-chrome` in the DSH home | Where the connector and its relay are kept for Chrome. |
-| `connectorSocketPath` | one per DSH home, in `$XDG_RUNTIME_DIR/dsh-chrome` | The Unix socket the relay connects to. |
-| `nodeExecutable` | the Node running DSH | The Node that Chrome runs the connector's relay with. Set it if that Node cannot run outside DSH. |
-| `viewer.jpegQuality` | `70` | JPEG quality of the frames the sidebar shows. |
-| `viewer.hiddenFrameIntervalMs` | `250` | How often a page hidden in Chrome is captured while you view it. |
-| `viewer.maxDeviceScaleFactor` | `2` | The highest pixel density a page renders at. |
+| `executable` | `google-chrome-stable` | The Chrome to run. |
+| `xvncExecutable` | `Xvnc` | TigerVNC's Xvnc. |
+| `windowManagerExecutable` | `openbox` | Openbox. |
+| `deviceScaleFactor` | `2` | How many of the screen's pixels a CSS pixel of Chrome takes, from 1 to 4. 2 is sharp on high-density displays and still clear on others; 1 sends a quarter of the pixels. |
+| `profileDir` | `dsh-chrome/chrome-profile` in the DSH home | The Chrome profile: its user data directory. |
+| `shareNativeHosts` | `true` | Let the profile's extensions reach the native apps your own Chrome's reach, by linking their native messaging manifests into it. |
+| `userChromeDir` | `~/.config/google-chrome` | Your own Chrome's user data directory, whose native apps are shared. |
+| `dataDir` | `dsh-chrome` in the DSH home | Where dsh-chrome keeps what it records between starts. |
+| `runtimeDir` | `$XDG_RUNTIME_DIR/dsh-chrome/<digest of the DSH home>`, or in the temporary directory without `XDG_RUNTIME_DIR` | Where the screen's VNC socket and X cookie are. It, and the directory it is in, must be yours: dsh-chrome makes it private, and refuses one of another user. |
 
 The tools and the turn-start reading are separate rows; turn either off on its own:
 
@@ -162,33 +130,38 @@ The tools and the turn-start reading are separate rows; turn either off on its o
   disabled: true
 ```
 
-## What the sidebar cannot show
+## Limits
 
-The sidebar shows the page, not Chrome around it. Chrome's own UI stays in Chrome's
-window, where only **⚙** shows it: permission prompts, extension popups (1Password's
-toolbar popup; its in-page autofill menu does show), file pickers, and the lists of
-`<select>` menus (use the arrow keys instead). So a page cannot be given a file, and a
-download goes to Chrome's download folder without a word. Google may refuse to sign in a
-browser it believes is automated; sign in with **⚙** instead.
-
-Pages that a subagent opens belong to the subagent's session, not to yours.
+- Chrome asks the desktop of the machine DSH runs on for what it does not draw itself: a
+  page's file chooser opens there (through the desktop portal, on GNOME and KDE), not in the
+  sidebar, and so do site notifications. Uploading a file from another device is not
+  possible yet.
+- Text an input method composes reaches Chrome as a paste when it has characters beyond
+  ASCII (Japanese, accented letters, emoji), so it also becomes the clipboard of Chrome's
+  screen. Keys, ASCII and single characters are typed. A paste larger than 256 KiB, Xvnc's
+  limit, does not arrive.
+- Windows have no taskbar: keep to tabs, since a second Chrome window covers the first.
+- The screen carries no sound.
+- Pages that a subagent opens belong to the subagent's session, not to yours.
 
 ## Security
 
-- No remote-debugging port is opened. The connector controls only the tabs it opened and
-  the tabs those opened, and passes on only the CDP commands, parameters and events
-  dsh-chrome uses. Through it, the plugin reaches no further than the page's own scripts:
-  cookie stores, network traffic (which carries cookies and credentials), other
-  extensions' code on the page (your password manager's), and local files stay out of its
-  reach.
-- Chrome starts the connector's relay only for the connector's extension id. The relay
-  reaches DSH over a Unix socket that only your OS user can open; other processes of your
-  user are trusted, as they already can read your browser profile.
-- The hidden Chrome shows no debugging bar (`--silent-debugger-extension-api`): its profile
-  is dsh-chrome's own, and nobody would see the bar.
-- With `shareNativeHosts`, the hidden Chrome's extensions can start the native apps your
-  own Chrome's can. Each app's manifest still names the only extensions it accepts.
-- The sidebar connects over DSH's own authenticated channel; it opens no new port.
+- Whoever can use your DSH's web UI can use this Chrome, with every sign-in in its profile,
+  as they can use DSH's terminal.
+- No TCP port is opened. dsh-chrome controls Chrome over the pipe it starts Chrome with
+  (`--remote-debugging-pipe`), which only it holds. Xvnc serves the screen on a Unix socket
+  only (`-rfbport -1`, `-nolisten tcp`), without a password, in a directory only your OS user
+  can enter. As an X server, it admits only the programs given its cookie (`Xauthority` in
+  that directory): Openbox and Chrome. Other processes of your user are trusted, as they can
+  already read the profile.
+- The sidebar reaches the screen through DSH's own authenticated WebSocket, admitted like
+  DSH's `/api`.
+- dsh-chrome sends Chrome only the CDP commands it uses, and the agent's tools read and
+  operate web pages only: not Chrome's own pages (settings, saved passwords), extensions'
+  pages, or local files, even when you opened them; nor cookie stores, network traffic, or
+  other extensions' code on a page (your password manager's).
+- With `shareNativeHosts`, the profile's extensions can start the native apps your own
+  Chrome's can. Each app's manifest still names the only extensions it accepts.
 - The agent may not open DSH's own web UI through Chrome, nor operate a page that shows it,
   in a frame included: in a profile signed in to DSH, it could otherwise approve its own
   actions. DSH is recognized by the addresses it serves; one behind a proxy on another local
@@ -202,22 +175,26 @@ Pages that a subagent opens belong to the subagent's session, not to yours.
 
 | Symptom | Check |
 | --- | --- |
-| "could not start Xvfb" | Install Xvfb, or set `dedicatedProfile.display: desktop`. |
-| "could not start the dedicated Chrome" | `google-chrome-stable` runs from DSH's environment, or set `dedicatedProfile.executable`. |
-| "your Chrome is not connected" | (Your own Chrome) Chrome is running, the connector is loaded in `chrome://extensions` without errors, and `~/.config/google-chrome/NativeMessagingHosts/io.github.langify_org.dsh_chrome.json` exists. |
-| Your Chrome never connects | Run the relay as Chrome would: `<DSH home>/dsh-chrome/native-host-daily < /dev/null`. It exits quietly when it reached DSH, and prints why when it could not (DSH not running, or a `nodeExecutable` that cannot run outside DSH). |
-| The page is blank in the sidebar | (Your own Chrome) The window may be minimized; the sidebar then shows captures. Reload the page from the toolbar. |
+| "Xvnc (Xvnc) was not found" | Install TigerVNC where DSH's environment finds it, or set `xvncExecutable`. |
+| "the window manager (openbox) was not found" | Install Openbox, or set `windowManagerExecutable`. |
+| "Chrome (google-chrome-stable) was not found" | Install Google Chrome, or set `executable`. |
+| Chrome starts and closes at once | Another Chrome may use the profile: dsh-chrome's runs only one. Look for a `chrome` whose `--user-data-dir` is `profileDir`. |
+| 1Password's extension cannot reach the app | The desktop app runs on the machine DSH runs on, its browser integration is on for Chrome, and `~/.config/google-chrome/NativeMessagingHosts/com.1password.1password.json` exists. |
 
 ## Develop
 
 From the repository root: `pnpm install`, then `pnpm dev` to try the plugin in a
 development DSH. In this directory, `pnpm build`, `pnpm test` (unit), `pnpm test:compat`
-(against DSH's packages, after a build), and `pnpm test:integration`. The integration
-tests start Chrome in temporary profiles on Xvfb: the connector, page actions, popups,
-dialogs and steady frames, with windows arranged as for your own Chrome and as for the
-hidden one; the agent's tools, checked by DSH's own schema validator; and the whole path
-from the built sidebar module in a headless Chrome, through DSH's web server, to the
-shared page. Every test process gets a DSH home of its own.
+(against DSH's packages, after a build), and `pnpm test:integration`. The integration tests
+start Chrome in temporary profiles on Xvnc under Openbox: the agent's tools, checked by
+DSH's own schema validator; Chrome on its screen, as a VNC client sees and works it; and the
+whole path from the built sidebar module, with noVNC, in a headless Chrome, through DSH's
+web server, to Chrome. Every test process gets a DSH home of its own.
 
-`src/` is split by process, and within the Host by what each part is; which part may
-import which is defined, and checked, in [test/unit/dependencies.test.ts](test/unit/dependencies.test.ts).
+`src/` is split by where the code runs, and within the Host by what each part is; which part
+may import which is defined, and checked, in
+[test/unit/dependencies.test.ts](test/unit/dependencies.test.ts).
+
+The sidebar bundles [noVNC](https://github.com/novnc/noVNC) 1.7.0 (MPL-2.0), whose license
+the package carries in `dist/licenses/`. A patch (`patches/` at the repository root) removes
+noVNC's one top-level `await`, which DSH's module loader cannot run.

@@ -3,7 +3,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import packageJson from '../../package.json' with { type: 'json' };
-import { VIEWER_PATH } from '../protocol/viewer.ts';
+import { SCREEN_PATH, VIEWER_PATH } from '../protocol/viewer.ts';
 import { ChromeTab, type ChromeTabInjected } from './chrome-tab.tsx';
 import type {} from './dsh-context.ts';
 import { addToMessage } from './message-attachments.ts';
@@ -18,6 +18,7 @@ const TAB_KIND = 'chrome';
 export function apply(ctx: Context): void {
   const injected: ChromeTabInjected = {
     openViewerSocket: () => ctx.connection.openWebSocket(VIEWER_PATH),
+    openScreenSocket: () => ctx.connection.openWebSocket(SCREEN_PATH),
     // The conversation UI is optional: a web client without it has no message to add to.
     addToMessage: (sessionId, files, inputActions) =>
       addToMessage(ctx.get('conversation'), sessionId, files, inputActions),
@@ -28,9 +29,8 @@ export function apply(ctx: Context): void {
       ctx.sidebarRightTabs.register({
         id: TAB_TYPE_ID,
         kind: TAB_KIND,
-        multiple: true,
-        // The page keeps its connection while its tab is in the background, and returning
-        // to the tab must not reconnect.
+        // Every Chrome tab shows the one Chrome, so a pane needs one. A tab in the background
+        // keeps its connection to dsh-chrome, and leaves only the screen's stream.
         keepMounted: true,
         title: () => 'Chrome',
         guide: [
@@ -38,7 +38,7 @@ export function apply(ctx: Context): void {
             id: 'open',
             order: 31,
             title: () => 'Chrome',
-            description: () => 'A Chrome page, shared with the agent',
+            description: () => 'Chrome, shared with the agent',
           },
         ],
       }),

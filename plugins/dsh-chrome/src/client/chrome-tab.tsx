@@ -4,21 +4,22 @@ import type { UseSidebarRightTabInfo } from '@deepseek-ai/dsh-client-ui-sidebar-
 import type { SessionIdOf } from '@deepseek-ai/dsh-client-ui-slots';
 import {
   type CSSProperties,
-  type FormEvent,
   type ReactNode,
   useEffect,
+  useRef,
   useState,
   useSyncExternalStore,
 } from 'react';
-import { normalizeAddress } from '../protocol/address.ts';
-import type { PageDialogState } from '../protocol/viewer.ts';
 import type { AddToMessageResult } from './message-attachments.ts';
+import { type ScreenHandle, ScreenView } from './screen/screen-view.tsx';
 import { ViewerSession, type ViewerSnapshot } from './viewer/viewer-session.ts';
-import { ViewerSurface } from './viewer/viewer-surface.tsx';
 
 /** What the plugin injects into each Chrome tab body. */
 export interface ChromeTabInjected {
+  /** Opens the viewer socket: state and requests. */
   readonly openViewerSocket: () => ConnectionWebSocket;
+  /** Opens the screen socket: Chrome's screen, as VNC. */
+  readonly openScreenSocket: () => ConnectionWebSocket;
   /** Attaches files to the session's next message. */
   readonly addToMessage: (
     sessionId: SessionIdOf,
@@ -41,13 +42,14 @@ export interface ChromeTabProps extends ChromeTabInjected {
 }
 
 /**
- * The body of a Chrome tab in the right sidebar: an address bar and the shared page.
- * A tab remembers the page it showed, so a reload or a restart of the web client shows
- * the same page again while it is still open in Chrome.
+ * The body of a Chrome tab in the right sidebar: Chrome's screen, the agent's requests for
+ * help, and buttons to add what Chrome shows to the user's message. Every Chrome tab shows the
+ * same Chrome; the screen is laid out for the tab the user last worked in.
  */
 export function ChromeTab({
   sessionId,
   openViewerSocket,
+  openScreenSocket,
   addToMessage,
   inputActions,
   useTabInfo,
@@ -56,25 +58,10 @@ export function ChromeTab({
   const [session, setSession] = useState<ViewerSession>();
 
   useEffect(() => {
-    const memoryKey = `dsh-chrome.page.${sessionId}.${tab.id}`;
-    const created = new ViewerSession({
-      sessionId,
-      openSocket: openViewerSocket,
-      rememberedPageId: localStorage.getItem(memoryKey) ?? undefined,
-      rememberPage: (pageId) => {
-        if (pageId === undefined) localStorage.removeItem(memoryKey);
-        else localStorage.setItem(memoryKey, pageId);
-      },
-    });
+    const created = new ViewerSession({ sessionId, openSocket: openViewerSocket });
     setSession(created);
     return () => created.dispose();
-  }, [sessionId, tab.id, openViewerSocket]);
-
-  const documentVisible = useDocumentVisible();
-  useEffect(
-    () => session?.setVisible(tab.visible && documentVisible),
-    [session, tab.visible, documentVisible],
-  );
+  }, [sessionId, openViewerSocket]);
 
   const requestedUrl = urlParam(tab.navigation.params);
   // biome-ignore lint/correctness/useExhaustiveDependencies: each navigation of the tab opens its address, even the same one again.
@@ -82,66 +69,81 @@ export function ChromeTab({
     if (session !== undefined && requestedUrl !== undefined) session.open(requestedUrl);
   }, [session, requestedUrl, tab.navigation.revision]);
 
+  const documentVisible = useDocumentVisible();
   if (session === undefined) return null;
   const attach = (files: readonly File[]) =>
     session.notify(ADD_TO_MESSAGE_NOTICES[addToMessage(sessionId, files, inputActions)]);
-  return <ChromePage session={session} addToMessage={attach} />;
+  return (
+    <ChromeScreen
+      session={session}
+      openScreenSocket={openScreenSocket}
+      visible={tab.visible && documentVisible}
+      addToMessage={attach}
+    />
+  );
 }
 
-function ChromePage({
+function ChromeScreen({
   session,
+  openScreenSocket,
+  visible,
   addToMessage,
 }: {
   readonly session: ViewerSession;
+  readonly openScreenSocket: () => ConnectionWebSocket;
+  /** Whether the tab is on screen; a hidden tab lets go of the screen's stream. */
+  readonly visible: boolean;
   readonly addToMessage: (files: readonly File[]) => void;
 }) {
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot);
+  const screenRef = useRef<ScreenHandle>();
+  const [screenConnected, setScreenConnected] = useState(false);
+  const chrome = snapshot.chrome;
+  // The screen connects while the tab is seen; connecting starts Chrome if it is not running.
+  const active = visible && snapshot.connection === 'connected' && chrome?.kind !== 'failed';
+
+  // The screen is laid out for the tab the user looks at: one that comes into view takes it.
+  useEffect(() => {
+    if (visible && snapshot.connection === 'connected') session.claimScreen();
+  }, [visible, snapshot.connection, session]);
 
   const addScreenshot = () => {
-    const image = session.lastImage;
-    if (image === undefined) return;
-    addToMessage([new File([image], `${fileStem(snapshot)}.jpg`, { type: 'image/jpeg' })]);
+    screenRef.current?.screenshot().then(
+      (image) => addToMessage([new File([image], 'chrome.png', { type: 'image/png' })]),
+      (error: unknown) => session.notify(`Could not capture the screen: ${String(error)}`),
+    );
   };
   const addText = () => {
     session.readText().then(
       (page) =>
-        addToMessage([
-          new File([page.text], `${fileStem(snapshot)}.md`, { type: 'text/markdown' }),
-        ]),
-      (error: unknown) => session.notify(`Could not read the page: ${String(error)}`),
+        addToMessage([new File([page.text], `${fileStem(page)}.md`, { type: 'text/markdown' })]),
+      (error: unknown) => session.notify(`Could not read the page: ${messageOf(error)}`),
     );
   };
 
   return (
     <div style={columnStyle}>
-      <Toolbar
-        session={session}
-        snapshot={snapshot}
-        onAddScreenshot={addScreenshot}
-        onAddText={addText}
-      />
-      {snapshot.dedicatedChrome?.display === 'desktop' ? (
-        <p role="status" style={helpStyle}>
-          <span style={{ flex: 1 }}>
-            Chrome is on the screen of the computer DSH runs on, to set it up: sign in to sites or
-            to Chrome, add extensions such as 1Password.
-          </span>
-          <button
-            type="button"
-            style={buttonStyle}
-            onClick={() => session.setDedicatedDisplay('virtual')}
-          >
-            Done
-          </button>
-        </p>
-      ) : null}
-      {snapshot.page?.dialog == null ? null : (
-        <PageDialogBar session={session} dialog={snapshot.page.dialog} />
-      )}
+      <div style={toolbarStyle}>
+        <span style={statusStyle}>{statusText(snapshot, screenConnected)}</span>
+        {action('Add a screenshot to your message', addScreenshot, '📷', !screenConnected)}
+        {action(
+          'Add the text of the page you are looking at to your message',
+          addText,
+          '📄',
+          chrome?.kind !== 'running',
+        )}
+        {action(
+          'Show the keyboard',
+          () => screenRef.current?.showKeyboard(),
+          '⌨',
+          !screenConnected,
+        )}
+      </div>
       {snapshot.help === undefined ? null : (
-        <div role="alert" style={helpStyle}>
+        <div role="alert" style={bannerStyle}>
           <span style={{ flex: 1 }}>
             <strong>The agent asks you:</strong> {snapshot.help.message}
+            {snapshot.help.pageTitle === '' ? null : <em> ({snapshot.help.pageTitle})</em>}
           </span>
           <button type="button" style={buttonStyle} onClick={() => session.answerHelp('done')}>
             Done
@@ -151,109 +153,117 @@ function ChromePage({
           </button>
         </div>
       )}
-      {snapshot.notice === undefined ? null : (
-        <p style={noticeStyle}>
-          {snapshot.notice}{' '}
-          <button type="button" style={linkButtonStyle} onClick={() => session.notify(undefined)}>
-            Dismiss
-          </button>
-        </p>
-      )}
-      {snapshot.status === 'disconnected' ? (
-        <p style={noticeStyle}>
-          The connection to DSH was lost.{' '}
-          <button type="button" style={linkButtonStyle} onClick={() => session.reconnect()}>
-            Reconnect
-          </button>
-        </p>
-      ) : null}
-      {snapshot.page === undefined ? (
-        <p style={hintStyle}>Enter an address to open a page in Chrome.</p>
-      ) : (
-        <ViewerSurface session={session} />
-      )}
+      <StateNotice snapshot={snapshot} session={session} />
+      <div style={screenColumnStyle}>
+        <ScreenView
+          openSocket={openScreenSocket}
+          active={active}
+          onArea={(width, height) => session.setArea(width, height)}
+          onInteract={() => session.claimScreen()}
+          onStatus={(status) => setScreenConnected(status === 'connected')}
+          onHandle={(handle) => {
+            screenRef.current = handle;
+          }}
+        />
+        {snapshot.notice === undefined ? null : (
+          // Each notice is a toast of its own, with its own time.
+          <Toast
+            key={snapshot.notice}
+            notice={snapshot.notice}
+            onDismiss={() => session.notify(undefined)}
+          />
+        )}
+      </div>
     </div>
   );
 }
 
+/** How long a passing notice stays. */
+const TOAST_MS = 6000;
+
 /**
- * The dialog the shown page opened. In Chrome it would stand in front of the page, which
- * takes no input until it is answered; here it stands above it.
+ * A passing notice, over the bottom of the screen: in the layout, it would resize the screen,
+ * and Chrome would lay its page out anew, as it comes and as it goes.
  */
-function PageDialogBar({
-  session,
-  dialog,
-}: {
-  readonly session: ViewerSession;
-  readonly dialog: PageDialogState;
-}) {
-  const [promptText, setPromptText] = useState(dialog.defaultPrompt);
-  useEffect(() => setPromptText(dialog.defaultPrompt), [dialog]);
-  const answer = (accept: boolean) =>
-    session.answerDialog(accept, dialog.kind === 'prompt' ? promptText : null);
-  const leaving = dialog.kind === 'beforeunload';
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    answer(true);
-  };
+function Toast({ notice, onDismiss }: { readonly notice: string; readonly onDismiss: () => void }) {
+  const dismiss = useRef(onDismiss);
+  dismiss.current = onDismiss;
+  useEffect(() => {
+    const timer = setTimeout(() => dismiss.current(), TOAST_MS);
+    return () => clearTimeout(timer);
+  }, []);
   return (
-    <form role="alertdialog" aria-label="The page asks" style={helpStyle} onSubmit={submit}>
-      <span style={{ flex: 1, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-        <strong>{leaving ? 'Leave this page?' : 'The page asks:'}</strong>{' '}
-        {leaving ? 'Changes you made may not be saved.' : dialog.message}
-      </span>
-      {dialog.kind === 'prompt' ? (
-        <input
-          style={addressStyle}
-          value={promptText}
-          onChange={(event) => setPromptText(event.target.value)}
-          aria-label="Your answer"
-        />
-      ) : null}
-      <button type="submit" style={buttonStyle}>
-        {leaving ? 'Leave' : 'OK'}
+    <p role="status" style={toastStyle}>
+      {notice}{' '}
+      <button type="button" style={linkButtonStyle} onClick={onDismiss}>
+        Dismiss
       </button>
-      {dialog.kind === 'alert' ? null : (
-        <button type="button" style={buttonStyle} onClick={() => answer(false)}>
-          {leaving ? 'Stay' : 'Cancel'}
-        </button>
-      )}
-    </form>
+    </p>
   );
 }
 
-function Toolbar({
-  session,
+/** What stands between the user and Chrome: a lost connection, or Chrome not running. */
+function StateNotice({
   snapshot,
-  onAddScreenshot,
-  onAddText,
+  session,
 }: {
-  readonly session: ViewerSession;
   readonly snapshot: ViewerSnapshot;
-  readonly onAddScreenshot: () => void;
-  readonly onAddText: () => void;
+  readonly session: ViewerSession;
 }) {
-  const shownUrl = snapshot.page?.url ?? '';
-  const [address, setAddress] = useState(shownUrl);
-  useEffect(() => setAddress(shownUrl), [shownUrl]);
-  const hasPage = snapshot.page !== undefined;
+  if (snapshot.connection === 'disconnected') {
+    return (
+      <p style={noticeStyle}>
+        The connection to DSH was lost.{' '}
+        <button type="button" style={linkButtonStyle} onClick={() => session.reconnect()}>
+          Reconnect
+        </button>
+      </p>
+    );
+  }
+  const chrome = snapshot.chrome;
+  if (chrome?.kind === 'failed') {
+    return (
+      <p role="alert" style={noticeStyle}>
+        Chrome did not start: {chrome.message}{' '}
+        <button type="button" style={linkButtonStyle} onClick={() => session.startChrome()}>
+          Try again
+        </button>
+      </p>
+    );
+  }
+  if (chrome?.kind === 'stopped') {
+    return (
+      <p style={noticeStyle}>
+        Chrome is closed.{' '}
+        <button type="button" style={linkButtonStyle} onClick={() => session.startChrome()}>
+          Open Chrome
+        </button>
+      </p>
+    );
+  }
+  return null;
+}
 
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    const url = normalizeAddress(address);
-    if (url === undefined) {
-      session.notify(`"${address}" is not a web address.`);
-      return;
-    }
-    if (hasPage) session.navigate(url);
-    else session.open(url);
-  };
+function statusText(snapshot: ViewerSnapshot, screenConnected: boolean): string {
+  if (snapshot.connection !== 'connected') return 'Connecting to DSH…';
+  switch (snapshot.chrome?.kind) {
+    case 'starting':
+      return 'Starting Chrome…';
+    case 'running':
+      if (!screenConnected) return 'Connecting to the screen…';
+      // Another window showed Chrome last: it is fitted into this one until the user works here.
+      return snapshot.screenOwner ? 'Chrome' : 'Chrome, sized for another window';
+    default:
+      return 'Chrome';
+  }
+}
 
-  const action = (label: string, onClick: () => void, content: ReactNode) => (
+function action(label: string, onClick: () => void, content: ReactNode, disabled: boolean) {
+  return (
     <button
       type="button"
       style={buttonStyle}
-      disabled={!hasPage}
+      disabled={disabled}
       onClick={onClick}
       aria-label={label}
       title={label}
@@ -261,56 +271,7 @@ function Toolbar({
       {content}
     </button>
   );
-
-  return (
-    <form style={toolbarStyle} onSubmit={submit}>
-      {action('Back', () => session.goBack(), '←')}
-      {action('Forward', () => session.goForward(), '→')}
-      {action('Reload', () => session.reload(), snapshot.page?.loading ? '×' : '↻')}
-      <input
-        style={addressStyle}
-        value={address}
-        onChange={(event) => setAddress(event.target.value)}
-        placeholder="Address"
-        aria-label="Address"
-        spellCheck={false}
-        autoCapitalize="off"
-      />
-      {snapshot.pages.length > 1 ? (
-        <select
-          style={buttonStyle}
-          value={snapshot.page?.id ?? ''}
-          onChange={(event) => session.show(event.target.value)}
-          aria-label="Pages of this session"
-        >
-          {snapshot.pages.map((page) => (
-            <option key={page.id} value={page.id}>
-              {page.title || page.url}
-            </option>
-          ))}
-        </select>
-      ) : null}
-      {action('Add a screenshot to your message', onAddScreenshot, '📷')}
-      {action('Add the page text to your message', onAddText, '📄')}
-      {action('Close page', () => session.closePage(), '✕')}
-      {snapshot.dedicatedChrome === undefined || snapshot.dedicatedChrome.state === 'off' ? null : (
-        <button
-          type="button"
-          style={buttonStyle}
-          disabled={snapshot.dedicatedChrome.display === 'desktop'}
-          onClick={() => session.setDedicatedDisplay('desktop')}
-          aria-label={SET_UP_LABEL}
-          title={SET_UP_LABEL}
-        >
-          ⚙
-        </button>
-      )}
-    </form>
-  );
 }
-
-const SET_UP_LABEL =
-  'Set up Chrome: show its window on the computer DSH runs on (Chrome starts again, and its pages close)';
 
 /** Whether the DSH page itself is on screen: not in a background browser tab or app. */
 function useDocumentVisible(): boolean {
@@ -326,13 +287,12 @@ function useDocumentVisible(): boolean {
 /** Navigation parameters are JSON-shaped and unchecked; read the URL defensively. */
 function urlParam(params: unknown): string | undefined {
   if (typeof params !== 'object' || params === null || !('url' in params)) return undefined;
-  return typeof params.url === 'string' ? normalizeAddress(params.url) : undefined;
+  return typeof params.url === 'string' && params.url !== '' ? params.url : undefined;
 }
 
-/** A file name for what the page is: its title, or its host. */
-function fileStem(snapshot: ViewerSnapshot): string {
-  const page = snapshot.page;
-  const base = page?.title || (page === undefined ? '' : hostOf(page.url)) || 'page';
+/** A file name for a page: its title, or its host. */
+function fileStem(page: { readonly title: string; readonly url: string }): string {
+  const base = page.title || hostOf(page.url) || 'page';
   return (
     base
       .replace(/[\\/:*?"<>|\s]+/g, '-')
@@ -349,6 +309,10 @@ function hostOf(url: string): string {
   }
 }
 
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 const columnStyle: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
@@ -362,6 +326,7 @@ const toolbarStyle: CSSProperties = {
   padding: '4px 6px',
   borderBottom: '1px solid color-mix(in srgb, currentColor 15%, transparent)',
 };
+const statusStyle: CSSProperties = { flex: 1, minWidth: 0, opacity: 0.7, fontSize: '0.9em' };
 const buttonStyle: CSSProperties = {
   font: 'inherit',
   color: 'inherit',
@@ -371,8 +336,7 @@ const buttonStyle: CSSProperties = {
   padding: '2px 8px',
   minHeight: 28,
 };
-const addressStyle: CSSProperties = { ...buttonStyle, flex: 1, minWidth: 0 };
-const helpStyle: CSSProperties = {
+const bannerStyle: CSSProperties = {
   display: 'flex',
   gap: 6,
   alignItems: 'center',
@@ -387,7 +351,26 @@ const noticeStyle: CSSProperties = {
   fontSize: '0.9em',
   opacity: 0.85,
 };
-const hintStyle: CSSProperties = { ...noticeStyle, padding: 16, opacity: 0.7 };
+const screenColumnStyle: CSSProperties = {
+  position: 'relative',
+  display: 'flex',
+  flexDirection: 'column',
+  flex: 1,
+  minHeight: 0,
+};
+const toastStyle: CSSProperties = {
+  position: 'absolute',
+  left: 8,
+  right: 8,
+  bottom: 8,
+  margin: 0,
+  padding: '6px 10px',
+  fontSize: '0.9em',
+  borderRadius: 6,
+  color: 'CanvasText',
+  background: 'Canvas',
+  boxShadow: '0 2px 8px rgb(0 0 0 / 30%)',
+};
 const linkButtonStyle: CSSProperties = {
   font: 'inherit',
   color: 'inherit',

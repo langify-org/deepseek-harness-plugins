@@ -4,153 +4,104 @@ import { HelpRequests } from '../../../../src/host/chrome/help-requests.ts';
 import type { ChromePage, PageEnding } from '../../../../src/host/chrome/pages/page.ts';
 
 interface FakePage {
-  readonly id: string;
-  ending: PageEnding | undefined;
-  readonly endListeners: Set<(ending: PageEnding) => void>;
-  onEnded(listener: (ending: PageEnding) => void): () => void;
+  readonly page: ChromePage;
   end(ending: PageEnding): void;
 }
 
 function fakePage(id: string): FakePage {
-  const page: FakePage = {
+  const listeners = new Set<(ending: PageEnding) => void>();
+  let ending: PageEnding | undefined;
+  const page = {
     id,
-    ending: undefined,
-    endListeners: new Set(),
-    onEnded(listener) {
-      page.endListeners.add(listener);
-      return () => page.endListeners.delete(listener);
+    get ending() {
+      return ending;
     },
-    end(ending) {
-      page.ending = ending;
-      for (const listener of [...page.endListeners]) listener(ending);
+    onEnded(listener: (ending: PageEnding) => void) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  } as unknown as ChromePage;
+  return {
+    page,
+    end(reason) {
+      ending = reason;
+      for (const listener of [...listeners]) listener(reason);
     },
   };
-  return page;
 }
 
-function asChromePage(page: FakePage): ChromePage {
-  return page as unknown as ChromePage;
-}
+const never = () => new AbortController().signal;
 
-test('opens a request that current() shows and notifies change listeners', async () => {
+test("shows an open request to the asking session only, and settles it with the user's answer", async () => {
   const requests = new HelpRequests();
-  const page = fakePage('page-1');
-  const seen: string[] = [];
-  requests.onChange((pageId) => seen.push(pageId));
-  const promise = requests.ask(asChromePage(page), 'Please sign in', new AbortController().signal);
+  const { page } = fakePage('page-1');
+  let changes = 0;
+  requests.onChange(() => changes++);
+  const asked = requests.ask(page, 'session-a', 'Please sign in', never());
 
-  const request = requests.current('page-1');
-  assert.notEqual(request, undefined);
-  assert.equal(request?.pageId, 'page-1');
-  assert.equal(request?.message, 'Please sign in');
-  assert.deepEqual(seen, ['page-1']);
-
-  assert.equal(requests.answer('page-1', request?.id ?? '', 'done'), true);
-  assert.equal(await promise, 'done');
-});
-
-test('answers with done or declined by request id and clears the request', async () => {
-  const requests = new HelpRequests();
-  const page = fakePage('page-1');
-  const signal = new AbortController().signal;
-
-  const done = requests.ask(asChromePage(page), 'Sign in', signal);
-  const doneRequest = requests.current('page-1');
-  assert.equal(requests.answer('page-1', doneRequest?.id ?? '', 'done'), true);
-  assert.equal(await done, 'done');
-  assert.equal(requests.current('page-1'), undefined);
-
-  const declined = requests.ask(asChromePage(page), 'Confirm the payment', signal);
-  const declinedRequest = requests.current('page-1');
-  assert.equal(requests.answer('page-1', declinedRequest?.id ?? '', 'declined'), true);
-  assert.equal(await declined, 'declined');
-  assert.equal(requests.current('page-1'), undefined);
-});
-
-test('ignores an answer whose request id is not the open one', async () => {
-  const requests = new HelpRequests();
-  const page = fakePage('page-1');
-  const promise = requests.ask(
-    asChromePage(page),
-    'Solve the CAPTCHA',
-    new AbortController().signal,
+  const request = requests.ofSession('session-a');
+  assert.deepEqual(
+    { pageId: request?.pageId, sessionId: request?.sessionId, message: request?.message },
+    { pageId: 'page-1', sessionId: 'session-a', message: 'Please sign in' },
   );
+  assert.equal(requests.ofSession('session-b'), undefined);
+  assert.equal(changes, 1);
 
-  const request = requests.current('page-1');
-  assert.equal(requests.answer('page-1', 'some-other-request', 'done'), false);
-  assert.equal(requests.current('page-1')?.id, request?.id);
-
-  assert.equal(requests.answer('page-1', request?.id ?? '', 'done'), true);
-  assert.equal(await promise, 'done');
+  assert.equal(requests.answer(request?.id ?? '', 'declined'), true);
+  assert.equal(await asked, 'declined');
+  assert.equal(requests.ofSession('session-a'), undefined);
+  assert.equal(changes, 2);
 });
 
-test('rejects a second request on a page that already has one open', async () => {
+test('ignores an answer to a request that is not open', async () => {
   const requests = new HelpRequests();
-  const page = fakePage('page-1');
-  const signal = new AbortController().signal;
-  const first = requests.ask(asChromePage(page), 'First request', signal);
-
-  await assert.rejects(
-    requests.ask(asChromePage(page), 'Second request', signal),
-    /this page already has an open request for help/,
-  );
-  const request = requests.current('page-1');
-  assert.equal(request?.message, 'First request');
-
-  assert.equal(requests.answer('page-1', request?.id ?? '', 'done'), true);
-  assert.equal(await first, 'done');
+  const asked = requests.ask(fakePage('page-1').page, 'session-a', 'Sign in', never());
+  assert.equal(requests.answer('another-request', 'done'), false);
+  const request = requests.ofSession('session-a');
+  assert.equal(requests.answer(request?.id ?? '', 'done'), true);
+  assert.equal(await asked, 'done');
+  assert.equal(requests.answer(request?.id ?? '', 'done'), false);
 });
 
-test('rejects with the abort reason and clears the request when aborted', async () => {
+test("shows a session's latest request when it has several, on different pages", async () => {
   const requests = new HelpRequests();
-  const page = fakePage('page-1');
+  const first = requests.ask(fakePage('page-1').page, 'session-a', 'First', never());
+  const second = requests.ask(fakePage('page-2').page, 'session-a', 'Second', never());
+  assert.equal(requests.ofSession('session-a')?.message, 'Second');
+  requests.answer(requests.ofSession('session-a')?.id ?? '', 'done');
+  assert.equal(requests.ofSession('session-a')?.message, 'First');
+  requests.answer(requests.ofSession('session-a')?.id ?? '', 'done');
+  assert.deepEqual(await Promise.all([first, second]), ['done', 'done']);
+});
+
+test('refuses a second request on a page that has one open', async () => {
+  const requests = new HelpRequests();
+  const { page } = fakePage('page-1');
+  const asked = requests.ask(page, 'session-a', 'First', never());
+  await assert.rejects(requests.ask(page, 'session-b', 'Second', never()), /already has an open/);
+  requests.answer(requests.ofSession('session-a')?.id ?? '', 'done');
+  await asked;
+});
+
+test('ends a request when the agent stops waiting, with the reason it stopped', async () => {
+  const requests = new HelpRequests();
   const controller = new AbortController();
-  const promise = requests.ask(
-    asChromePage(page),
-    'Unlock the password manager',
-    controller.signal,
-  );
-
-  const reason = new Error('the agent stopped waiting');
-  controller.abort(reason);
-  await assert.rejects(promise, (error: unknown) => error === reason);
-  assert.equal(requests.current('page-1'), undefined);
+  const asked = requests.ask(fakePage('page-1').page, 'session-a', 'Sign in', controller.signal);
+  controller.abort(new Error('the turn was stopped'));
+  await assert.rejects(asked, /the turn was stopped/);
+  assert.equal(requests.ofSession('session-a'), undefined);
+  assert.throws(() => requests.ask(fakePage('page-2').page, 'session-a', 'x', controller.signal));
 });
 
-test('resolves page-ended when the page ends while the request is open', async () => {
+test('ends a request as page-ended when its page ends, or has ended', async () => {
   const requests = new HelpRequests();
-  const page = fakePage('page-1');
-  const promise = requests.ask(
-    asChromePage(page),
-    'Unlock the vault',
-    new AbortController().signal,
-  );
+  const open = fakePage('page-1');
+  const asked = requests.ask(open.page, 'session-a', 'Sign in', never());
+  open.end('closed');
+  assert.equal(await asked, 'page-ended');
+  assert.equal(requests.ofSession('session-a'), undefined);
 
-  page.end('closed');
-  assert.equal(await promise, 'page-ended');
-  assert.equal(requests.current('page-1'), undefined);
-});
-
-test('resolves page-ended at once for a page that has already ended', async () => {
-  const requests = new HelpRequests();
-  const page = fakePage('page-1');
-  page.end('released-by-user');
-
-  assert.equal(
-    await requests.ask(asChromePage(page), 'Help', new AbortController().signal),
-    'page-ended',
-  );
-  assert.equal(requests.current('page-1'), undefined);
-});
-
-test('throws synchronously when the signal is already aborted', () => {
-  const requests = new HelpRequests();
-  const page = fakePage('page-1');
-  const reason = new Error('already stopped');
-
-  assert.throws(
-    () => requests.ask(asChromePage(page), 'Help', AbortSignal.abort(reason)),
-    (error: unknown) => error === reason,
-  );
-  assert.equal(requests.current('page-1'), undefined);
+  const ended = fakePage('page-2');
+  ended.end('chrome-stopped');
+  assert.equal(await requests.ask(ended.page, 'session-a', 'Sign in', never()), 'page-ended');
 });

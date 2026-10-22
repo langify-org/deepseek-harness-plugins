@@ -2,146 +2,96 @@
  * dsh-chrome's host plugin, mounted by the Loader row that names the package itself
  * (which is also what makes DSH serve the package's browser client).
  *
- * It provides `ctx.chrome` (connected browsers and the pages the plugin controls) and
- * the viewer route the sidebar tab connects to. The agent's tools and its context
- * reading are separate rows: `dsh-chrome-tools` and `dsh-chrome-context`.
+ * It provides `ctx.chrome` (the Chrome dsh-chrome runs on a screen of its own, and its pages)
+ * and the routes the sidebar tab connects to. The agent's tools and its context reading are
+ * separate rows: `dsh-chrome-tools` and `dsh-chrome-context`.
  */
 import type { Context } from '@deepseek-ai/cordis';
 import z from '@deepseek-ai/schemastery';
-import type { DedicatedDisplay } from '../protocol/viewer.ts';
+import { ChromeService } from './chrome/chrome-service.ts';
 import {
-  ChromeService,
-  DAILY_PROFILE,
-  DEDICATED_PROFILE,
-  type ProfileName,
-} from './chrome/chrome-service.ts';
-import {
-  defaultChromeUserDataDir,
-  defaultConnectorSocketPath,
   defaultDataDir,
-  defaultDedicatedUserDataDir,
+  defaultProfileDir,
+  defaultRuntimeDir,
+  defaultUserChromeDir,
+  earlierProfileDirs,
 } from './platform/locations.ts';
 import * as viewer from './viewer/index.ts';
 
 export const name = 'dsh-chrome';
 
 export interface Config {
-  dailyProfile: {
-    enabled: boolean;
-    userDataDir: string;
-  };
-  dedicatedProfile: {
-    enabled: boolean;
-    executable: string;
-    userDataDir: string;
-    display: DedicatedDisplay;
-    shareNativeHosts: boolean;
-  };
-  defaultProfile: ProfileName;
+  executable: string;
+  xvncExecutable: string;
+  windowManagerExecutable: string;
+  deviceScaleFactor: number;
+  profileDir: string;
+  shareNativeHosts: boolean;
+  userChromeDir: string;
   dataDir: string;
-  connectorSocketPath: string;
-  nodeExecutable: string;
-  viewer: {
-    jpegQuality: number;
-    hiddenFrameIntervalMs: number;
-    maxDeviceScaleFactor: number;
-  };
+  runtimeDir: string;
 }
 
 export const Config: z<Config> = z.object({
-  dailyProfile: z
-    .object({
-      enabled: z
-        .boolean()
-        .default(false)
-        .description(
-          'Let the connector in your own Chrome profile reach this DSH. Its pages open in a ' +
-            'window of your Chrome, on your desktop.',
-        ),
-      userDataDir: z
-        .string()
-        .default(defaultChromeUserDataDir())
-        .description("Chrome's user data directory for your own profile."),
-    })
-    .default({}),
-  dedicatedProfile: z
-    .object({
-      enabled: z
-        .boolean()
-        .default(true)
-        .description(
-          'Run a Chrome of its own for dsh-chrome, on a profile of its own, started when a page ' +
-            'opens. Its windows stay out of sight; the sidebar shows its pages.',
-        ),
-      executable: z.string().default('google-chrome-stable').description('The Chrome to start.'),
-      userDataDir: z
-        .string()
-        .default(defaultDedicatedUserDataDir())
-        .description("The dedicated profile's user data directory."),
-      display: z
-        .union(['virtual', 'desktop'] as const)
-        .default('virtual')
-        .description(
-          "'virtual' keeps its windows on a private Xvfb display, which also works while the " +
-            "screen is locked; 'desktop' shows them. The sidebar can show them for a while, to " +
-            'set the profile up.',
-        ),
-      shareNativeHosts: z
-        .boolean()
-        .default(true)
-        .description(
-          "Let its extensions reach the native apps your own Chrome's reach, such as " +
-            "1Password's desktop app, by linking their native messaging manifests.",
-        ),
-    })
-    .default({}),
-  defaultProfile: z
-    .union([DAILY_PROFILE, DEDICATED_PROFILE] as const)
-    .default(DEDICATED_PROFILE)
-    .description('The profile new pages open in.'),
+  executable: z.string().default('google-chrome-stable').description('The Chrome to run.'),
+  xvncExecutable: z
+    .string()
+    .default('Xvnc')
+    .description(
+      "TigerVNC's Xvnc: the X server Chrome draws on, which serves its screen over VNC.",
+    ),
+  windowManagerExecutable: z
+    .string()
+    .default('openbox')
+    .description("Openbox: the window manager that keeps Chrome's windows filling the screen."),
+  deviceScaleFactor: z
+    .number()
+    .min(1)
+    .max(4)
+    .default(2)
+    .description(
+      "How many of the screen's pixels a CSS pixel of Chrome takes. 2 is sharp on high-density " +
+        'displays and still clear on others; 1 sends a quarter of the pixels.',
+    ),
+  profileDir: z
+    .string()
+    .default(defaultProfileDir())
+    .description('The Chrome profile dsh-chrome runs: its user data directory.'),
+  shareNativeHosts: z
+    .boolean()
+    .default(true)
+    .description(
+      "Let the profile's extensions reach the native apps your own Chrome's reach, such as " +
+        "1Password's desktop app, by linking their native messaging manifests into it.",
+    ),
+  userChromeDir: z
+    .string()
+    .default(defaultUserChromeDir())
+    .description("Your own Chrome's user data directory, whose native apps are shared."),
   dataDir: z
     .string()
     .default(defaultDataDir())
-    .description('Where the connector extension and relay are kept for Chrome to load.'),
-  connectorSocketPath: z
+    .description('Where dsh-chrome keeps what it records between starts.'),
+  runtimeDir: z
     .string()
-    .default(defaultConnectorSocketPath())
-    .description('The Unix socket the relay connects to.'),
-  nodeExecutable: z
-    .string()
-    .default(process.execPath)
-    .description(
-      'The Node.js that Chrome runs the connector relay with. Defaults to the one running DSH; ' +
-        'set it when that one cannot run outside DSH (a bundled Node on NixOS without nix-ld).',
-    ),
-  viewer: z
-    .object({
-      jpegQuality: z.natural().min(1).max(100).default(70).description('JPEG quality of frames.'),
-      hiddenFrameIntervalMs: z
-        .natural()
-        .min(50)
-        .default(250)
-        .description('How often a hidden page is captured while someone views it.'),
-      maxDeviceScaleFactor: z
-        .number()
-        .min(1)
-        .max(4)
-        .default(2)
-        .description('The highest pixel density the page renders at for a viewer.'),
-    })
-    .default({}),
+    .default(defaultRuntimeDir())
+    .description("Where the screen's VNC socket is; only you should be able to enter it."),
 });
 
 export async function apply(ctx: Context, config: Config): Promise<void> {
   // This row counts as started once `ctx.chrome` is: DSH reports the rows that use it
   // (dsh-chrome-tools, dsh-chrome-context) as not activated if they are checked earlier.
   await ctx.plugin(ChromeService, {
-    dailyProfile: config.dailyProfile,
-    dedicatedProfile: config.dedicatedProfile,
-    defaultProfile: config.defaultProfile,
+    chromeExecutable: config.executable,
+    xvncExecutable: config.xvncExecutable,
+    windowManagerExecutable: config.windowManagerExecutable,
+    deviceScaleFactor: config.deviceScaleFactor,
+    profileDir: config.profileDir,
+    earlierProfileDirs: earlierProfileDirs(),
+    shareNativeHosts: config.shareNativeHosts,
+    userChromeDir: config.userChromeDir,
     dataDir: config.dataDir,
-    connectorSocketPath: config.connectorSocketPath,
-    nodeExecutable: config.nodeExecutable,
+    runtimeDir: config.runtimeDir,
   });
-  ctx.plugin(viewer, config.viewer);
+  ctx.plugin(viewer);
 }

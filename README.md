@@ -6,7 +6,7 @@ packages, and reproducible builds.
 
 | Plugin | What it does |
 | --- | --- |
-| [dsh-chrome](plugins/dsh-chrome/README.md) | Shares a real Chrome page between you and the agent in DSH's right sidebar: in a Chrome it runs out of sight on a profile of its own, or in your own Chrome. |
+| [dsh-chrome](plugins/dsh-chrome/README.md) | Shares a real Chrome between you and the agent in DSH's right sidebar: a Chrome of its own, on a profile of its own, whose whole window the sidebar shows. |
 
 ## Using a plugin
 
@@ -23,7 +23,7 @@ Each plugin's README covers its own setup.
 ## Developing
 
 ```console
-nix develop          # Node 24, pnpm, and Xvfb for the browser tests
+nix develop          # Node 24, pnpm, and Xvnc and Openbox for dsh-chrome's Chrome
 pnpm install
 pnpm dev             # run a development DSH with every plugin of the workspace installed
 pnpm check           # lint, type checks, unit tests, build, tests against DSH's packages

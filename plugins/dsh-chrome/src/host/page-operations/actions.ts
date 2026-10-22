@@ -1,4 +1,4 @@
-import { ConnectorRequestError } from '../chrome/connector/connected-browser.ts';
+import { CdpError } from '../chrome/cdp/cdp-connection.ts';
 import type { ChromePage } from '../chrome/pages/page.ts';
 import { ElementRefError, type PageElement } from './element-refs.ts';
 import { type KeyPress, parseKeyCombo, typedText } from './keys.ts';
@@ -30,7 +30,7 @@ async function elementCentre(
  * its own meaning.
  */
 function elementError(error: unknown, gone: string): unknown {
-  if (!(error instanceof ConnectorRequestError) || error.code !== 'chrome-error') return error;
+  if (!(error instanceof CdpError) || error.failure !== 'protocol') return error;
   return new ElementRefError(`${gone} (${error.message}); take a new snapshot`);
 }
 

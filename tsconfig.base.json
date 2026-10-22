@@ -1,6 +1,6 @@
 {
   // Shared compiler settings. Each package extends this per runtime target
-  // (Node host, browser client, Chrome extension) and adds its own `lib` and `types`.
+  // (Node host, browser client) and adds its own `lib` and `types`.
   //
   // Sources are run directly by Node's type stripping in tests and scripts, so only
   // erasable syntax is allowed and relative imports spell their `.ts` extension.

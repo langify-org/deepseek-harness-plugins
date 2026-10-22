@@ -1,34 +1,36 @@
 /**
- * The path the user's hands take, end to end. The built browser module renders the Chrome
- * tab in a real (headless) Chrome and connects through DSH's web server and connection
- * service to the built host plugin. The plugin starts its dedicated Chrome on a private
- * display, opens the page there through the connector, and streams it to the tab; clicks,
- * text, input method composition and keys typed in the tab reach that page. The agent's
- * request for help and adding the page to a message are exercised through the tab too.
+ * The whole path a user takes: the built browser module, with noVNC, in a headless Chrome
+ * standing in for DSH's web client, through DSH's web server and connection service, to
+ * Chrome on its screen.
  *
- * Needs a build (`pnpm build`), Google Chrome (or DSH_CHROME_TEST_EXECUTABLE) and Xvfb.
+ * Needs a build (`pnpm build`), Google Chrome (or DSH_CHROME_TEST_EXECUTABLE), Xvnc and
+ * Openbox.
  */
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Readable } from 'node:stream';
 import { after, before, test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import packageJson from '../../package.json' with { type: 'json' };
-import { fitFrame } from '../../src/client/viewer/frame-fit.ts';
 import type { ChromeService } from '../../src/host/chrome/chrome-service.ts';
 import type { ChromePage } from '../../src/host/chrome/pages/page.ts';
 import { type DshHost, startDshHost } from '../support/dsh-host.ts';
-import { chromeExecutable, distDir, missingRequirements } from '../support/environment.ts';
+import {
+  chromeExecutable,
+  distDir,
+  missingRequirements,
+  windowManagerExecutable,
+  xvncExecutable,
+} from '../support/environment.ts';
 import { type HeadlessTab, openHeadlessTab } from '../support/headless-chrome.ts';
 import { TEST_PAGE_HTML, TEST_PAGE_TITLE } from '../support/test-page.ts';
 import { HARNESS_PATH, serveViewerHarness } from '../support/viewer-harness.ts';
 import { waitFor } from '../support/wait.ts';
 
 const SESSION_ID = 'e2e-session';
-const TEST_PAGE_PATH = '/test-page';
 
 const skip = await missingRequirements({ chrome: true });
 
@@ -36,38 +38,29 @@ let workDir = '';
 let host: DshHost | undefined;
 let chrome: ChromeService | undefined;
 let viewer: HeadlessTab | undefined;
+let pageServer: Server | undefined;
+let pageUrl = '';
 
 before(async () => {
   if (skip) return;
   workDir = await mkdtemp(join(tmpdir(), 'dsh-chrome-e2e-'));
+  pageServer = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(TEST_PAGE_HTML);
+  });
+  await new Promise<void>((resolve) => pageServer?.listen(0, '127.0.0.1', resolve));
+  pageUrl = `http://127.0.0.1:${(pageServer.address() as AddressInfo).port}/`;
   host = await startDshHost();
   const { root } = host;
-  const plugin = await import(pathToFileURL(join(distDir, 'host', 'index.js')).href);
-  await root.plugin(plugin, {
-    dailyProfile: { enabled: false },
-    dedicatedProfile: {
-      enabled: true,
-      executable: chromeExecutable,
-      userDataDir: join(workDir, 'dedicated'),
-      display: 'virtual',
-    },
-    defaultProfile: 'dedicated',
+  await root.plugin(await import(pathToFileURL(join(distDir, 'host', 'index.js')).href), {
+    executable: chromeExecutable,
+    xvncExecutable,
+    windowManagerExecutable,
+    profileDir: join(workDir, 'chrome-profile'),
+    userChromeDir: join(workDir, 'user-chrome'),
     dataDir: join(workDir, 'data'),
-    connectorSocketPath: join(workDir, 'connector.sock'),
+    runtimeDir: join(workDir, 'run'),
   });
-  await waitFor(
-    () => root.get('chrome')?.extensionDir !== undefined,
-    10_000,
-    'the plugin to start',
-  );
   chrome = root.get('chrome');
-  root.webServer.register({
-    kind: 'exact',
-    path: TEST_PAGE_PATH,
-    handler: (_request, response) => {
-      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(TEST_PAGE_HTML);
-    },
-  });
   serveViewerHarness(root.webServer, packageJson.name, SESSION_ID);
   viewer = await openHeadlessTab(join(workDir, 'viewer'), `${host.origin}${HARNESS_PATH}/`);
 });
@@ -75,6 +68,9 @@ before(async () => {
 after(async () => {
   await viewer?.close();
   await host?.dispose();
+  await new Promise<void>((resolve) =>
+    pageServer ? pageServer.close(() => resolve()) : resolve(),
+  );
   if (workDir !== '') await rm(workDir, { recursive: true, force: true });
 });
 
@@ -87,67 +83,102 @@ test('the module registers a kept-mounted Chrome tab type', { skip }, async () =
   });
 });
 
-test('an address entered in the tab opens the page in Chrome and shows it', { skip }, async () => {
+test("the tab starts Chrome and shows its screen, laid out at the tab's size", {
+  skip,
+}, async () => {
   const tab = requireViewer();
-  const address = await waitForElement(tab, 'input[aria-label="Address"]');
-  await tab.click(address.x, address.y);
-  await tab.send('Input.insertText', { text: `${requireHost().origin}${TEST_PAGE_PATH}` });
-  await tab.send('Input.dispatchKeyEvent', {
-    type: 'keyDown',
-    key: 'Enter',
-    code: 'Enter',
-    windowsVirtualKeyCode: 13,
-    text: '\r',
-  });
-  await tab.send('Input.dispatchKeyEvent', {
-    type: 'keyUp',
-    key: 'Enter',
-    code: 'Enter',
-    windowsVirtualKeyCode: 13,
-  });
-
-  // The dedicated Chrome starts on first use, so the first page takes a while.
-  await waitFor(() => requireChrome().pagesOf(SESSION_ID).length === 1, 45_000, 'the page to open');
-  await waitFor(() => canvasShowsAFrame(tab), 20_000, 'a frame in the tab');
-  assert.equal(await targetEvaluate<string>('document.title'), TEST_PAGE_TITLE);
+  await waitFor(() => requireChrome().state.kind === 'running', 45_000, 'Chrome to start');
+  await waitFor(() => canvasShowsTheScreen(tab), 20_000, 'the screen in the tab');
+  // The screen has the tab's area in device pixels, at Chrome's two pixels per CSS pixel.
+  await waitFor(
+    async () => {
+      const { canvas, area } = await screenGeometry(tab);
+      return (
+        canvas.width === Math.round(area.width * 2) && canvas.height === Math.round(area.height * 2)
+      );
+    },
+    10_000,
+    "the screen to take the tab's size",
+  );
 });
 
-test('the page is laid out at the size of the tab that shows it', { skip }, async () => {
+test('keys typed in the tab go to Chrome, which opens the page the user types', {
+  skip,
+}, async () => {
   const tab = requireViewer();
-  const canvas = await waitForElement(tab, 'canvas');
+  await focusInput(tab);
+  // Ctrl+L, the address, Enter: as on a keyboard at the computer.
+  await tab.send('Input.dispatchKeyEvent', {
+    type: 'rawKeyDown',
+    key: 'Control',
+    code: 'ControlLeft',
+    windowsVirtualKeyCode: 17,
+    modifiers: 2,
+  });
+  await tab.send('Input.dispatchKeyEvent', {
+    type: 'rawKeyDown',
+    key: 'l',
+    code: 'KeyL',
+    windowsVirtualKeyCode: 76,
+    modifiers: 2,
+  });
+  await tab.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'l', code: 'KeyL', modifiers: 2 });
+  await tab.send('Input.dispatchKeyEvent', {
+    type: 'keyUp',
+    key: 'Control',
+    code: 'ControlLeft',
+    windowsVirtualKeyCode: 17,
+  });
+  await tab.send('Input.insertText', { text: pageUrl });
+  await tab.pressKey('Enter', 'Enter', 13);
   await waitFor(
-    async () =>
-      Math.abs((await targetEvaluate<number>('innerWidth')) - canvas.width) <= 1 &&
-      Math.abs((await targetEvaluate<number>('innerHeight')) - canvas.height) <= 1,
-    10_000,
-    'the page to follow the tab size',
+    async () => (await pageInFront())?.url === pageUrl,
+    15_000,
+    'the typed address to open',
   );
+  const page = await requirePageInFront();
+  await waitFor(
+    async () => (await evaluate<string>(page, 'document.readyState')) === 'complete',
+    10_000,
+    'the page to load',
+  );
+  assert.equal(await evaluate<string>(page, 'document.title'), TEST_PAGE_TITLE);
+  // The user opened it in Chrome: no session's, and any session may use it.
+  assert.equal(page.sessionId, undefined);
 });
 
 test('clicks, text, composed text and keys from the tab reach the page', { skip }, async () => {
   const tab = requireViewer();
-  const field = await targetEvaluate<{ x: number; y: number }>(
-    `(() => { const r = document.getElementById('field').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`,
-  );
-  const point = await viewerPointFor(tab, field);
-  await tab.click(point.x, point.y);
+  const page = await requirePageInFront();
+  await clickInPage(tab, page, 'field');
   await waitFor(
-    async () => (await targetEvaluate<string>('document.activeElement?.id ?? ""')) === 'field',
+    async () => (await evaluate<string>(page, 'document.activeElement?.id ?? ""')) === 'field',
     10_000,
-    'the field to take focus',
+    'the field to take the focus',
   );
+  await tab.send('Input.insertText', { text: 'abc' });
+  await waitFor(async () => (await fieldValue(page)) === 'abc', 10_000, 'typed text');
 
+  // An input method composes in the tab; only the finished text reaches the page, pasted.
+  await tab.send('Input.imeSetComposition', {
+    text: 'にほんご',
+    selectionStart: 4,
+    selectionEnd: 4,
+  });
+  assert.equal(await fieldValue(page), 'abc');
   await tab.send('Input.insertText', { text: '日本語' });
-  await waitFor(async () => (await fieldValue()) === '日本語', 10_000, 'typed text');
-
-  // An input method composes in the tab; only the finished text reaches the page.
-  await tab.send('Input.imeSetComposition', { text: 'てすと', selectionStart: 3, selectionEnd: 3 });
-  assert.equal(await fieldValue(), '日本語');
-  await tab.send('Input.insertText', { text: 'テスト' });
-  await waitFor(async () => (await fieldValue()) === '日本語テスト', 10_000, 'composed text');
+  await waitFor(async () => (await fieldValue(page)) === 'abc日本語', 10_000, 'composed text');
 
   await tab.pressKey('Backspace', 'Backspace', 8);
-  await waitFor(async () => (await fieldValue()) === '日本語テス', 10_000, 'a key press');
+  await waitFor(async () => (await fieldValue(page)) === 'abc日本', 10_000, 'a key press');
+
+  await clickInPage(tab, page, 'go');
+  await waitFor(
+    async () =>
+      (await evaluate<string>(page, "document.getElementById('go').textContent")) === 'Clicked',
+    10_000,
+    'the click',
+  );
 });
 
 test("the agent's request for help appears in the tab and takes the user's answer", {
@@ -155,7 +186,8 @@ test("the agent's request for help appears in the tab and takes the user's answe
 }, async () => {
   const tab = requireViewer();
   const answer = requireChrome().helpRequests.ask(
-    sharedPage(),
+    await requirePageInFront(),
+    SESSION_ID,
     'Please sign in to continue.',
     AbortSignal.timeout(20_000),
   );
@@ -178,10 +210,10 @@ test("the agent's request for help appears in the tab and takes the user's answe
   );
 });
 
-test('the page text and a screenshot can be added to the message', { skip }, async () => {
+test("the page's text and the screen can be added to the message", { skip }, async () => {
   const tab = requireViewer();
   await tab.evaluate(
-    `document.querySelector('button[aria-label="Add the page text to your message"]').click()`,
+    `document.querySelector('button[aria-label^="Add the text of the page"]').click()`,
   );
   await waitFor(
     async () => (await tab.evaluate<number>('window.__attached.length')) === 1,
@@ -207,7 +239,7 @@ test('the page text and a screenshot can be added to the message', { skip }, asy
   const image = await tab.evaluate<{ type: string; size: number }>(
     `({ type: window.__attached[1].type, size: window.__attached[1].size })`,
   );
-  assert.equal(image.type, 'image/jpeg');
+  assert.equal(image.type, 'image/png');
   assert.ok(image.size > 0);
   assert.match(await tab.evaluate<string>('document.body.textContent'), /Added to your message\./);
 });
@@ -217,24 +249,23 @@ function requireViewer(): HeadlessTab {
   return viewer;
 }
 
-function requireHost(): DshHost {
-  assert.ok(host, 'the host did not start');
-  return host;
-}
-
 function requireChrome(): ChromeService {
   assert.ok(chrome, 'the plugin did not start');
   return chrome;
 }
 
-function sharedPage(): ChromePage {
-  const page = requireChrome().pagesOf(SESSION_ID)[0];
-  assert.ok(page, 'no page is shared');
+function pageInFront(): Promise<ChromePage | undefined> {
+  return requireChrome().pages.pageInFront();
+}
+
+async function requirePageInFront(): Promise<ChromePage> {
+  const page = await pageInFront();
+  assert.ok(page, 'Chrome shows no page');
   return page;
 }
 
-async function targetEvaluate<T>(expression: string): Promise<T> {
-  const { result, exceptionDetails } = await sharedPage().send('Runtime.evaluate', {
+async function evaluate<T>(page: ChromePage, expression: string): Promise<T> {
+  const { result, exceptionDetails } = await page.send('Runtime.evaluate', {
     expression,
     returnByValue: true,
   });
@@ -242,112 +273,49 @@ async function targetEvaluate<T>(expression: string): Promise<T> {
   return result.value as T;
 }
 
-function fieldValue(): Promise<string> {
-  return targetEvaluate<string>(`document.getElementById('field').value`);
+function fieldValue(page: ChromePage): Promise<string> {
+  return evaluate<string>(page, "document.getElementById('field').value");
 }
 
-/** The centre and size of the first element matching the selector, once it exists. */
-async function waitForElement(
-  tab: HeadlessTab,
-  selector: string,
-): Promise<{ x: number; y: number; left: number; top: number; width: number; height: number }> {
-  const read = `(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, left: r.x, top: r.y, width: r.width, height: r.height }; })()`;
-  let found: Awaited<ReturnType<typeof waitForElement>> | null = null;
-  await waitFor(
-    async () => {
-      found = await tab.evaluate(read);
-      return found !== null;
-    },
-    10_000,
-    selector,
-  );
-  assert.ok(found);
-  return found;
-}
-
-/** Whether the tab's canvas has drawn a frame: its centre pixel is no longer transparent. */
-function canvasShowsAFrame(tab: HeadlessTab): Promise<boolean> {
+/** Whether noVNC has drawn the screen: its canvas has a size, and its middle is not empty. */
+function canvasShowsTheScreen(tab: HeadlessTab): Promise<boolean> {
   return tab.evaluate<boolean>(
-    `(() => { const c = document.querySelector('canvas'); if (!c || c.width === 0) return false; return c.getContext('2d').getImageData(c.width >> 1, c.height >> 1, 1, 1).data[3] > 0; })()`,
+    `(() => { const c = document.querySelector('canvas'); if (!c || c.width < 10) return false; return c.getContext('2d').getImageData(c.width >> 1, c.height >> 1, 1, 1).data[3] > 0; })()`,
   );
 }
 
-/** Where a point of the shared page is drawn in the tab, in the tab's CSS pixels. */
-async function viewerPointFor(
-  tab: HeadlessTab,
-  pagePoint: { x: number; y: number },
-): Promise<{ x: number; y: number }> {
-  const canvas = await waitForElement(tab, 'canvas');
-  const frame = {
-    width: await targetEvaluate<number>('innerWidth'),
-    height: await targetEvaluate<number>('innerHeight'),
-  };
-  const area = fitFrame({ width: canvas.width, height: canvas.height }, frame);
-  return {
-    x: canvas.left + area.x + (pagePoint.x * area.width) / frame.width,
-    y: canvas.top + area.y + (pagePoint.y * area.height) / frame.height,
-  };
+/** The screen's canvas (its size in the screen's pixels, and where it is drawn) and the tab's screen area. */
+function screenGeometry(tab: HeadlessTab): Promise<{
+  canvas: { width: number; height: number; left: number; top: number; cssWidth: number };
+  area: { width: number; height: number };
+}> {
+  return tab.evaluate(`(() => {
+    const c = document.querySelector('canvas');
+    const r = c.getBoundingClientRect();
+    const area = c.parentElement.parentElement.getBoundingClientRect();
+    return {
+      canvas: { width: c.width, height: c.height, left: r.left, top: r.top, cssWidth: r.width },
+      area: { width: area.width, height: area.height },
+    };
+  })()`);
 }
 
-test('the dedicated Chrome moves to the desktop to be set up, and back out of sight', {
-  skip,
-}, async () => {
-  assert.ok(chrome && host);
-  // The desktop is a display of the test's own: nothing appears on the screen of whoever runs it.
-  const desktop = await startTestDisplay();
-  const environment = {
-    DISPLAY: process.env['DISPLAY'],
-    WAYLAND_DISPLAY: process.env['WAYLAND_DISPLAY'],
-  };
-  process.env['DISPLAY'] = desktop.display;
-  delete process.env['WAYLAND_DISPLAY'];
-  try {
-    const page = await chrome.openPage(SESSION_ID, `${host.origin}${TEST_PAGE_PATH}`, {
-      openedBy: 'user',
-    });
-    await chrome.setDedicatedDisplay('desktop');
-    assert.deepEqual(chrome.dedicated, { state: 'running', display: 'desktop' });
-    // Someone sees its windows now: pages share one, and the focus is not taken.
-    assert.equal(chrome.browserFor('dedicated')?.visibleWindows, true);
-    // Chrome started again there, and the page it showed closed, saying why.
-    assert.equal(page.ending, 'restarted');
+/** Puts the tab's keyboard focus on its input surface, as a click on the screen does. */
+async function focusInput(tab: HeadlessTab): Promise<void> {
+  await tab.evaluate(`document.querySelector('textarea[aria-label="Type into Chrome"]').focus()`);
+}
 
-    await chrome.setDedicatedDisplay('virtual');
-    assert.deepEqual(chrome.dedicated, { state: 'running', display: 'virtual' });
-    assert.equal(chrome.browserFor('dedicated')?.visibleWindows, false);
-  } finally {
-    for (const [name, value] of Object.entries(environment)) {
-      if (value === undefined) delete process.env[name];
-      else process.env[name] = value;
-    }
-    await desktop.stop();
-  }
-});
-
-/** An Xvfb server of the test's own, standing in for the desktop. */
-async function startTestDisplay(): Promise<{ readonly display: string; stop(): Promise<void> }> {
-  const xvfb = spawn(
-    'Xvfb',
-    ['-displayfd', '3', '-screen', '0', '1280x800x24', '-nolisten', 'tcp'],
-    {
-      stdio: ['ignore', 'ignore', 'ignore', 'pipe'],
-    },
+/** Clicks the middle of an element of the page where the tab draws it. */
+async function clickInPage(tab: HeadlessTab, page: ChromePage, id: string): Promise<void> {
+  const onScreen = await evaluate<{ x: number; y: number }>(
+    page,
+    `(() => {
+      const r = document.getElementById(${JSON.stringify(id)}).getBoundingClientRect();
+      const top = screenY + outerHeight - innerHeight;
+      return { x: (screenX + r.x + r.width / 2) * devicePixelRatio, y: (top + r.y + r.height / 2) * devicePixelRatio };
+    })()`,
   );
-  const reported = xvfb.stdio[3] as Readable;
-  const display = await new Promise<string>((resolve, reject) => {
-    let text = '';
-    reported.setEncoding('utf8').on('data', (chunk: string) => {
-      text += chunk;
-      if (text.includes('\n')) resolve(`:${text.trim()}`);
-    });
-    xvfb.once('error', reject);
-  });
-  return {
-    display,
-    stop: () =>
-      new Promise((resolve) => {
-        xvfb.once('exit', () => resolve());
-        xvfb.kill('SIGTERM');
-      }),
-  };
+  const { canvas } = await screenGeometry(tab);
+  const scale = canvas.cssWidth / canvas.width;
+  await tab.click(canvas.left + onScreen.x * scale, canvas.top + onScreen.y * scale);
 }

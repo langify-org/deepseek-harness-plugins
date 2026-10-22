@@ -1,14 +1,18 @@
-import type { TabId } from '../../../protocol/connector.ts';
-import type { PageOpener } from '../../../protocol/viewer.ts';
 import type {
   CdpArgs,
   CdpCommand,
   CdpEventName,
   CdpEventParams,
   CdpResult,
-} from '../connector/cdp.ts';
-import type { ConnectedBrowser, RequestOptions } from '../connector/connected-browser.ts';
-import type { ChromePage, PageDialog, PageEnding, PageId } from './page.ts';
+} from '../cdp/cdp-methods.ts';
+import type {
+  ChromePage,
+  PageDialog,
+  PageEnding,
+  PageId,
+  PageOpener,
+  RequestOptions,
+} from './page.ts';
 
 /**
  * The page as one operation sees it: every command it sends ends when the signal aborts,
@@ -31,28 +35,20 @@ class SignalBoundPage implements ChromePage {
     return this.#page.id;
   }
 
-  get sessionId(): string {
+  get targetId(): string {
+    return this.#page.targetId;
+  }
+
+  get sessionId(): string | undefined {
     return this.#page.sessionId;
   }
 
-  get browser(): ConnectedBrowser {
-    return this.#page.browser;
-  }
-
-  get tabId(): TabId {
-    return this.#page.tabId;
-  }
-
-  get openedBy(): PageOpener | undefined {
+  get openedBy(): PageOpener {
     return this.#page.openedBy;
   }
 
   get openerId(): PageId | undefined {
     return this.#page.openerId;
-  }
-
-  get dialog(): PageDialog | undefined {
-    return this.#page.dialog;
   }
 
   get url(): string {
@@ -63,8 +59,8 @@ class SignalBoundPage implements ChromePage {
     return this.#page.title;
   }
 
-  get loading(): boolean {
-    return this.#page.loading;
+  get dialog(): PageDialog | undefined {
+    return this.#page.dialog;
   }
 
   get ending(): PageEnding | undefined {
@@ -97,10 +93,6 @@ class SignalBoundPage implements ChromePage {
 
   onEnded(listener: (ending: PageEnding) => void): () => void {
     return this.#page.onEnded(listener);
-  }
-
-  activate(): Promise<void> {
-    return this.#page.activate();
   }
 
   bringToFront(): Promise<void> {

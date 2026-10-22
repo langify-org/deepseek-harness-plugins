@@ -9,40 +9,41 @@ import { fileURLToPath } from 'node:url';
  * belongs to the deepest part that contains it, and may import the files of its own part
  * and of the parts listed for it; this table is the definition of the code's layering.
  *
- * The processes share `protocol` and nothing else. In the Host, `chrome` is `ctx.chrome`:
- * the service in its directory, and the connector, the dedicated Chrome and the pages it
- * is made of; page operations work on its pages; the viewer, the tools and the context
- * reading are what DSH and the agent use, and `host` itself is the main row.
+ * The host and the client share `protocol` and nothing else.
+ *
+ * In the Host, `chrome` is `ctx.chrome`: the service in its directory, and what it is made
+ * of: the CDP connection, the screen Chrome draws on, the Chrome process, its profile, and its
+ * pages. Page operations work on pages; the viewer, the tools and the context reading are what
+ * DSH and the agent use; and `host` itself is the main row.
+ *
+ * In the client, `screen` shows Chrome's screen and takes the user's input for it, and
+ * `viewer` is the tab's control connection; the tab itself puts them together.
  */
 const PARTS: Readonly<Record<string, readonly string[]>> = {
   protocol: [],
-  extension: ['protocol'],
-  'native-host': ['protocol'],
+  'client/screen': [],
   'client/viewer': ['protocol'],
-  client: ['protocol', 'client/viewer'],
+  client: ['protocol', 'client/screen', 'client/viewer'],
   'host/platform': [],
-  'host/chrome/connector': ['protocol', 'host/platform'],
-  'host/chrome/dedicated-chrome': ['protocol', 'host/platform'],
-  'host/chrome/pages': ['protocol', 'host/chrome/connector'],
+  'host/chrome/cdp': ['host/platform'],
+  'host/chrome/display': ['host/platform'],
+  'host/chrome/process': ['host/platform', 'host/chrome/cdp'],
+  'host/chrome/profile': [],
+  'host/chrome/pages': ['host/chrome/cdp'],
   'host/chrome': [
-    'protocol',
     'host/platform',
-    'host/chrome/connector',
-    'host/chrome/dedicated-chrome',
+    'host/chrome/cdp',
+    'host/chrome/display',
+    'host/chrome/process',
+    'host/chrome/profile',
     'host/chrome/pages',
   ],
-  // A page's commands fail with the connector's request errors.
-  'host/page-operations': ['protocol', 'host/chrome/connector', 'host/chrome/pages'],
-  'host/viewer': [
-    'protocol',
-    'host/platform',
-    'host/chrome',
-    'host/chrome/pages',
-    'host/page-operations',
-  ],
-  'host/tools': ['protocol', 'host/chrome', 'host/chrome/pages', 'host/page-operations'],
-  'host/context': ['protocol', 'host/chrome', 'host/chrome/pages', 'host/page-operations'],
-  host: ['protocol', 'host/platform', 'host/chrome', 'host/viewer'],
+  // A page's commands fail with the CDP connection's errors.
+  'host/page-operations': ['host/chrome/cdp', 'host/chrome/pages'],
+  'host/viewer': ['protocol', 'host/platform', 'host/chrome', 'host/page-operations'],
+  'host/tools': ['host/chrome', 'host/chrome/pages', 'host/page-operations'],
+  'host/context': ['host/chrome', 'host/page-operations'],
+  host: ['host/platform', 'host/chrome', 'host/viewer'],
 };
 
 const sourceDir = fileURLToPath(new URL('../../src/', import.meta.url));

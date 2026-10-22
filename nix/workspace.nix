@@ -24,6 +24,8 @@ let
       ../.gitignore
       ../plugins
       ../tooling
+      # Patches pnpm applies to dependencies as it installs them (pnpm-workspace.yaml).
+      ../patches
     ];
   };
 
@@ -35,7 +37,7 @@ let
     version = "0";
     inherit src pnpm;
     fetcherVersion = 4;
-    hash = "sha256-qLfzPvwZdu/k08UVYnBBD3PVie0A7l0pWstkuJAJukY=";
+    hash = "sha256-2XJgkiw3+exC8dyxLNq/nj/+b7vuLE4YtbA+3I41V1M=";
   };
 
   # Builds a plugin after the workspace-wide lint, type checks and the plugin's tests

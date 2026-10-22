@@ -1,8 +1,8 @@
 {
   "name": "@langify-org/dsh-chrome",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "Share a real Chrome page between you and the agent in the DeepSeek Harness right sidebar",
+  "description": "Share a real Chrome between you and the agent in the DeepSeek Harness right sidebar",
   "license": "MIT",
   "type": "module",
   "exports": {
@@ -22,7 +22,7 @@
     "test": "node --import ./test/support/isolated-dsh-home.ts --test 'test/unit/**/*.test.ts'",
     "test:compat": "node --import ./test/support/isolated-dsh-home.ts --test test/compat/*.test.ts",
     "test:integration": "node --import ./test/support/isolated-dsh-home.ts --test --test-timeout=120000 test/integration/*.test.ts",
-    "typecheck": "tsc -p tsconfig.host.json && tsc -p tsconfig.client.json && tsc -p tsconfig.extension.json && tsc -p tsconfig.extension-test.json"
+    "typecheck": "tsc -p tsconfig.host.json && tsc -p tsconfig.client.json && tsc -p tsconfig.client-test.json"
   },
   "dsh": {
     "bundle": {
@@ -66,7 +66,7 @@
     "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
     "@deepseek-ai/schemastery": "3.18.5",
     "@langify-org/dsh-plugin-build": "workspace:*",
-    "@types/chrome": "0.3.5",
+    "@novnc/novnc": "1.7.0",
     "@types/node": "24.19.2",
     "@types/react": "18.3.31",
     "@types/ws": "8.18.2",

@@ -1,188 +1,80 @@
 /**
- * Messages between the dsh-chrome host plugin and a viewer: the sidebar tab that shows a
- * page in the DSH web client.
+ * Messages between the dsh-chrome host plugin and a viewer: the sidebar tab that shows
+ * Chrome's screen in the DSH web client.
  *
- * Requests and state travel as JSON text messages over the viewer WebSocket. Frames
- * travel as binary messages: a 32-bit little-endian header length, a JSON
- * {@link FrameHeader}, then the JPEG image.
+ * A viewer holds two WebSockets to the DSH Host. Over the screen socket ({@link SCREEN_PATH})
+ * travels the VNC protocol (RFB), byte for byte as Chrome's screen serves it: pixels in,
+ * pointer and keys out. Over the viewer socket ({@link VIEWER_PATH}) travel the messages
+ * defined here, as JSON text: the screen's size, whether Chrome runs, the agent's requests
+ * for the user's help, and what the user asks for besides input.
  *
- * A viewer first names the DSH session it belongs to (`watch`); it then sees that
- * session's pages, and may show one of them at a time.
+ * Every viewer shows the same screen, laid out for one of them at a time: the one the user
+ * last worked in.
  *
  * This module is shared by the host plugin and the browser client: it uses only APIs
  * that both Node and browsers provide.
  */
 
-/** The viewer WebSocket's path on the DSH Host. */
+/** The viewer socket's path on the DSH Host. */
 export const VIEWER_PATH = '/dsh-chrome/viewer';
-
-/** The size of the viewer's drawing surface. */
-export interface Viewport {
-  /** CSS pixels. */
-  readonly width: number;
-  readonly height: number;
-  /** Device pixels per CSS pixel on the viewer's screen. */
-  readonly deviceScaleFactor: number;
-}
-
-/** CDP's modifier bit set: Alt 1, Ctrl 2, Meta 4, Shift 8. */
-export type Modifiers = number;
-
-export type MouseButton = 'none' | 'left' | 'middle' | 'right';
-
-/**
- * Input from the user, in the page's CSS pixel coordinates. The viewer maps its own
- * coordinates through the size each frame reports.
- */
-export type ViewerInput =
-  | {
-      readonly kind: 'mouse';
-      readonly action: 'move' | 'down' | 'up';
-      readonly x: number;
-      readonly y: number;
-      readonly button: MouseButton;
-      /** Pressed buttons as a bit set: left 1, right 2, middle 4. */
-      readonly buttons: number;
-      readonly clickCount: number;
-      readonly modifiers: Modifiers;
-    }
-  | {
-      readonly kind: 'wheel';
-      readonly x: number;
-      readonly y: number;
-      readonly deltaX: number;
-      readonly deltaY: number;
-      readonly modifiers: Modifiers;
-    }
-  | {
-      readonly kind: 'key';
-      readonly action: 'down' | 'up';
-      /** `KeyboardEvent.key` and `KeyboardEvent.code`. */
-      readonly key: string;
-      readonly code: string;
-      /** Windows virtual key code, which Chrome uses for keyboard shortcuts. */
-      readonly keyCode: number;
-      /** Text the key types; empty for keys that type nothing. */
-      readonly text: string;
-      readonly modifiers: Modifiers;
-      readonly repeat: boolean;
-    }
-  | {
-      /** Finished text: an IME's committed text, a soft keyboard's word, a paste. */
-      readonly kind: 'text';
-      readonly text: string;
-    };
+/** The screen socket's path on the DSH Host: the VNC stream of Chrome's screen. */
+export const SCREEN_PATH = '/dsh-chrome/screen';
 
 /** How the user answered the agent's request for help. */
 export type HelpAnswer = 'done' | 'declined';
 
 export type ViewerRequest =
-  /** Names the viewer's DSH session. The host answers with the session's pages. */
+  /** Names the viewer's DSH session; the host answers with the state of Chrome and the screen. */
   | { readonly type: 'watch'; readonly sessionId: string }
-  /** Opens a new page for the session and shows it. */
-  | { readonly type: 'open'; readonly url: string; readonly viewport: Viewport }
-  /** Shows one of the session's pages. */
-  | { readonly type: 'attach'; readonly pageId: string; readonly viewport: Viewport }
-  | { readonly type: 'resize'; readonly viewport: Viewport }
-  /** Whether the viewer is on screen; a hidden viewer gets no frames. */
-  | { readonly type: 'visibility'; readonly visible: boolean }
-  | { readonly type: 'input'; readonly input: ViewerInput }
-  | { readonly type: 'navigate'; readonly url: string }
-  | { readonly type: 'history'; readonly delta: -1 | 1 }
-  | { readonly type: 'reload' }
-  /** Closes the shown page's tab. */
-  | { readonly type: 'close-page' }
-  /** The viewer drew frame `seq`; the host may send the next one. */
-  | { readonly type: 'frame-drawn'; readonly seq: number }
-  /** The user's answer to the agent's request for help on the shown page. */
+  /** The size of the viewer's screen area, in CSS pixels; sent on every change. */
+  | { readonly type: 'viewport'; readonly width: number; readonly height: number }
+  /** The user works in this viewer: the screen is laid out for it. */
+  | { readonly type: 'claim-screen' }
+  /** Opens a page for the session, in front. */
+  | { readonly type: 'open'; readonly url: string }
+  /** Starts Chrome, if it is not running: when the tab opens, and when the user asks. */
+  | { readonly type: 'start-chrome' }
+  /** The user's answer to the agent's request for help. */
   | { readonly type: 'answer-help'; readonly requestId: string; readonly answer: HelpAnswer }
-  /** Asks for the shown page's text, to add it to the user's message. */
-  | { readonly type: 'read-text'; readonly requestId: string }
-  /** The user's answer to the dialog the shown page opened. */
-  | { readonly type: 'answer-dialog'; readonly accept: boolean; readonly promptText: string | null }
-  /** Moves the dedicated Chrome to a display: its window on the desktop, to set it up, or hidden. */
-  | { readonly type: 'set-dedicated-display'; readonly display: DedicatedDisplay };
+  /** Asks for the text of the page the user is looking at, to add it to the user's message. */
+  | { readonly type: 'read-text'; readonly requestId: string };
 
 export type ViewerRequestType = ViewerRequest['type'];
 
 /** Every request type, checked against {@link ViewerRequest} by the compiler. */
 const VIEWER_REQUEST_TYPES: Readonly<Record<ViewerRequestType, true>> = {
   watch: true,
+  viewport: true,
+  'claim-screen': true,
   open: true,
-  attach: true,
-  resize: true,
-  visibility: true,
-  input: true,
-  navigate: true,
-  history: true,
-  reload: true,
-  'close-page': true,
-  'frame-drawn': true,
+  'start-chrome': true,
   'answer-help': true,
   'read-text': true,
-  'answer-dialog': true,
-  'set-dedicated-display': true,
 };
 
-/**
- * Who opened a page: the agent with its tools, the user from a viewer, or another page of
- * the session (a sign-in popup, a link that opens a new tab).
- */
-export type PageOpener = 'agent' | 'user' | 'page';
+/** Whether Chrome runs. */
+export type ChromeStatus =
+  | { readonly kind: 'stopped' }
+  | { readonly kind: 'starting' }
+  | { readonly kind: 'running'; readonly version: string }
+  | { readonly kind: 'failed'; readonly message: string };
 
-/** A JavaScript dialog a page opened, which blocks it until it is answered. */
-export interface PageDialogState {
-  readonly kind: 'alert' | 'confirm' | 'prompt' | 'beforeunload';
-  readonly message: string;
-  /** The text a `prompt` offers; empty for the other kinds. */
-  readonly defaultPrompt: string;
-}
-
-/** What a viewer shows about a page besides its pixels. */
-export interface PageState {
-  readonly id: string;
-  readonly url: string;
-  readonly title: string;
-  readonly loading: boolean;
-  /** The label of the browser the page lives in. */
-  readonly browserLabel: string;
-  /** `null` for a page the host adopted from a connector that outlived it. */
-  readonly openedBy: PageOpener | null;
-  /** The page that opened this one, when `openedBy` is `page`. */
-  readonly openerId: string | null;
-  readonly dialog: PageDialogState | null;
-}
-
-/**
- * Where the dedicated Chrome shows its windows: on a virtual display no one sees, or on
- * the desktop of the computer DSH runs on, for setting the profile up.
- */
-export type DedicatedDisplay = 'virtual' | 'desktop';
-
-/** The Chrome dsh-chrome starts on a profile of its own. */
-export interface DedicatedChromeState {
-  /** `off` when the dedicated profile is turned off in the settings. */
-  readonly state: 'off' | 'stopped' | 'starting' | 'running';
-  readonly display: DedicatedDisplay;
-}
-
-/** The agent asks the user to do something on the page, and waits. */
+/** The agent asks the user to do something on a page, and waits. */
 export interface HelpRequestState {
   readonly id: string;
   readonly message: string;
+  /** The page, as the user sees it in Chrome's tab strip. */
+  readonly pageTitle: string;
+  readonly pageUrl: string;
 }
 
 export type ViewerEvent =
-  /** The session's pages, most recently used first. Sent after `watch` and on every change. */
-  | { readonly type: 'pages'; readonly pages: readonly PageState[] }
-  | { readonly type: 'attached'; readonly page: PageState }
-  /** The shown page's address, title or loading state changed. */
-  | { readonly type: 'page'; readonly page: PageState }
-  | { readonly type: 'ended'; readonly reason: string }
-  /** The agent's open request for help on the shown page, or `null` when there is none. */
+  /** Whether Chrome runs. Sent after `watch` and on every change. */
+  | { readonly type: 'chrome'; readonly status: ChromeStatus }
+  /** Whether the screen follows this viewer's size. Sent after `watch` and on every change. */
+  | { readonly type: 'screen'; readonly owner: boolean }
+  /** The session's open request for help, or `null` when there is none. */
   | { readonly type: 'help'; readonly request: HelpRequestState | null }
-  /** The dedicated Chrome's state. Sent after `watch` and on every change. */
-  | { readonly type: 'dedicated-chrome'; readonly chrome: DedicatedChromeState }
   | {
       readonly type: 'page-text';
       readonly requestId: string;
@@ -191,8 +83,8 @@ export type ViewerEvent =
       readonly text: string;
     }
   /**
-   * The host could not carry out a request. A viewer that waits for an answer to it (an
-   * open page, a page's text) learns from `requestType` and `requestId` that none will come.
+   * The host could not carry out a request. A viewer that waits for an answer to it (a
+   * page's text) learns from `requestType` and `requestId` that none will come.
    */
   | {
       readonly type: 'failed';
@@ -203,42 +95,13 @@ export type ViewerEvent =
       readonly message: string;
     };
 
-export interface FrameHeader {
-  readonly seq: number;
-  /** The CSS size of the page area the image shows. */
-  readonly width: number;
-  readonly height: number;
-}
+// Validation. Each side parses what it receives into fresh values: the peer is another
+// process, and fields this protocol does not define are dropped.
 
-export function encodeFrame(header: FrameHeader, image: Uint8Array): Uint8Array {
-  const headerBytes = new TextEncoder().encode(JSON.stringify(header));
-  const frame = new Uint8Array(4 + headerBytes.length + image.length);
-  new DataView(frame.buffer).setUint32(0, headerBytes.length, true);
-  frame.set(headerBytes, 4);
-  frame.set(image, 4 + headerBytes.length);
-  return frame;
-}
-
-export function decodeFrame(
-  frame: ArrayBuffer,
-): { readonly header: FrameHeader; readonly image: Uint8Array<ArrayBuffer> } | undefined {
-  if (frame.byteLength < 4) return undefined;
-  const headerLength = new DataView(frame).getUint32(0, true);
-  if (4 + headerLength > frame.byteLength) return undefined;
-  const header = parseFrameHeader(
-    safeJson(new TextDecoder().decode(new Uint8Array(frame, 4, headerLength))),
-  );
-  return header === undefined
-    ? undefined
-    : { header, image: new Uint8Array(frame, 4 + headerLength) };
-}
-
-/** Reads a viewer's text message. */
 export function decodeViewerRequest(text: string): ViewerRequest | undefined {
   return parseViewerRequest(safeJson(text));
 }
 
-/** Reads a host's text message. */
 export function decodeViewerEvent(text: string): ViewerEvent | undefined {
   return parseViewerEvent(safeJson(text));
 }
@@ -250,46 +113,20 @@ export function parseViewerRequest(value: unknown): ViewerRequest | undefined {
       const { sessionId } = value;
       return isString(sessionId) ? { type: 'watch', sessionId } : undefined;
     }
-    case 'open': {
-      const { url } = value;
-      const viewport = parseViewport(value['viewport']);
-      return isString(url) && viewport !== undefined ? { type: 'open', url, viewport } : undefined;
-    }
-    case 'attach': {
-      const { pageId } = value;
-      const viewport = parseViewport(value['viewport']);
-      return isString(pageId) && viewport !== undefined
-        ? { type: 'attach', pageId, viewport }
+    case 'viewport': {
+      const { width, height } = value;
+      return isPositive(width) && isPositive(height)
+        ? { type: 'viewport', width, height }
         : undefined;
     }
-    case 'resize': {
-      const viewport = parseViewport(value['viewport']);
-      return viewport === undefined ? undefined : { type: 'resize', viewport };
-    }
-    case 'visibility': {
-      const { visible } = value;
-      return typeof visible === 'boolean' ? { type: 'visibility', visible } : undefined;
-    }
-    case 'input': {
-      const input = parseViewerInput(value['input']);
-      return input === undefined ? undefined : { type: 'input', input };
-    }
-    case 'navigate': {
+    case 'claim-screen':
+      return { type: 'claim-screen' };
+    case 'open': {
       const { url } = value;
-      return isString(url) ? { type: 'navigate', url } : undefined;
+      return isString(url) ? { type: 'open', url } : undefined;
     }
-    case 'history': {
-      const { delta } = value;
-      return delta === -1 || delta === 1 ? { type: 'history', delta } : undefined;
-    }
-    case 'reload':
-      return { type: 'reload' };
-    case 'close-page':
-      return { type: 'close-page' };
-    case 'frame-drawn': {
-      const { seq } = value;
-      return isNumber(seq) ? { type: 'frame-drawn', seq } : undefined;
-    }
+    case 'start-chrome':
+      return { type: 'start-chrome' };
     case 'answer-help': {
       const { requestId, answer } = value;
       return isString(requestId) && (answer === 'done' || answer === 'declined')
@@ -300,16 +137,6 @@ export function parseViewerRequest(value: unknown): ViewerRequest | undefined {
       const { requestId } = value;
       return isString(requestId) ? { type: 'read-text', requestId } : undefined;
     }
-    case 'answer-dialog': {
-      const { accept, promptText } = value;
-      return typeof accept === 'boolean' && (promptText === null || isString(promptText))
-        ? { type: 'answer-dialog', accept, promptText }
-        : undefined;
-    }
-    case 'set-dedicated-display': {
-      const { display } = value;
-      return isDedicatedDisplay(display) ? { type: 'set-dedicated-display', display } : undefined;
-    }
     default:
       return undefined;
   }
@@ -318,45 +145,21 @@ export function parseViewerRequest(value: unknown): ViewerRequest | undefined {
 export function parseViewerEvent(value: unknown): ViewerEvent | undefined {
   if (!isRecord(value)) return undefined;
   switch (value['type']) {
-    case 'pages': {
-      const { pages } = value;
-      if (!Array.isArray(pages)) return undefined;
-      const parsed = pages.map(parsePageState);
-      return parsed.every((page): page is PageState => page !== undefined)
-        ? { type: 'pages', pages: parsed }
-        : undefined;
+    case 'chrome': {
+      const status = parseChromeStatus(value['status']);
+      return status === undefined ? undefined : { type: 'chrome', status };
     }
-    case 'attached': {
-      const page = parsePageState(value['page']);
-      return page === undefined ? undefined : { type: 'attached', page };
-    }
-    case 'page': {
-      const page = parsePageState(value['page']);
-      return page === undefined ? undefined : { type: 'page', page };
-    }
-    case 'ended': {
-      const { reason } = value;
-      return isString(reason) ? { type: 'ended', reason } : undefined;
+    case 'screen': {
+      const { owner } = value;
+      return typeof owner === 'boolean' ? { type: 'screen', owner } : undefined;
     }
     case 'help': {
       const { request } = value;
       if (request === null) return { type: 'help', request: null };
       if (!isRecord(request)) return undefined;
-      const { id, message } = request;
-      return isString(id) && isString(message)
-        ? { type: 'help', request: { id, message } }
-        : undefined;
-    }
-    case 'dedicated-chrome': {
-      const chrome = value['chrome'];
-      if (!isRecord(chrome)) return undefined;
-      const { state, display } = chrome;
-      return (state === 'off' ||
-        state === 'stopped' ||
-        state === 'starting' ||
-        state === 'running') &&
-        isDedicatedDisplay(display)
-        ? { type: 'dedicated-chrome', chrome: { state, display } }
+      const { id, message, pageTitle, pageUrl } = request;
+      return isString(id) && isString(message) && isString(pageTitle) && isString(pageUrl)
+        ? { type: 'help', request: { id, message, pageTitle, pageUrl } }
         : undefined;
     }
     case 'page-text': {
@@ -378,96 +181,24 @@ export function parseViewerEvent(value: unknown): ViewerEvent | undefined {
   }
 }
 
-function parseViewerInput(value: unknown): ViewerInput | undefined {
+function parseChromeStatus(value: unknown): ChromeStatus | undefined {
   if (!isRecord(value)) return undefined;
   switch (value['kind']) {
-    case 'mouse': {
-      const { action, x, y, button, buttons, clickCount, modifiers } = value;
-      return (action === 'move' || action === 'down' || action === 'up') &&
-        isNumber(x) &&
-        isNumber(y) &&
-        isMouseButton(button) &&
-        isNumber(buttons) &&
-        isNumber(clickCount) &&
-        isNumber(modifiers)
-        ? { kind: 'mouse', action, x, y, button, buttons, clickCount, modifiers }
-        : undefined;
+    case 'stopped':
+      return { kind: 'stopped' };
+    case 'starting':
+      return { kind: 'starting' };
+    case 'running': {
+      const { version } = value;
+      return isString(version) ? { kind: 'running', version } : undefined;
     }
-    case 'wheel': {
-      const { x, y, deltaX, deltaY, modifiers } = value;
-      return isNumber(x) &&
-        isNumber(y) &&
-        isNumber(deltaX) &&
-        isNumber(deltaY) &&
-        isNumber(modifiers)
-        ? { kind: 'wheel', x, y, deltaX, deltaY, modifiers }
-        : undefined;
-    }
-    case 'key': {
-      const { action, key, code, keyCode, text, modifiers, repeat } = value;
-      return (action === 'down' || action === 'up') &&
-        isString(key) &&
-        isString(code) &&
-        isNumber(keyCode) &&
-        isString(text) &&
-        isNumber(modifiers) &&
-        typeof repeat === 'boolean'
-        ? { kind: 'key', action, key, code, keyCode, text, modifiers, repeat }
-        : undefined;
-    }
-    case 'text': {
-      const { text } = value;
-      return isString(text) ? { kind: 'text', text } : undefined;
+    case 'failed': {
+      const { message } = value;
+      return isString(message) ? { kind: 'failed', message } : undefined;
     }
     default:
       return undefined;
   }
-}
-
-function parseViewport(value: unknown): Viewport | undefined {
-  if (!isRecord(value)) return undefined;
-  const { width, height, deviceScaleFactor } = value;
-  return isPositive(width) && isPositive(height) && isPositive(deviceScaleFactor)
-    ? { width, height, deviceScaleFactor }
-    : undefined;
-}
-
-function parsePageState(value: unknown): PageState | undefined {
-  if (!isRecord(value)) return undefined;
-  const { id, url, title, loading, browserLabel, openedBy, openerId } = value;
-  const dialog = value['dialog'] === null ? null : parseDialog(value['dialog']);
-  return isString(id) &&
-    isString(url) &&
-    isString(title) &&
-    typeof loading === 'boolean' &&
-    isString(browserLabel) &&
-    (openedBy === 'agent' || openedBy === 'user' || openedBy === 'page' || openedBy === null) &&
-    (openerId === null || isString(openerId)) &&
-    dialog !== undefined
-    ? { id, url, title, loading, browserLabel, openedBy, openerId, dialog }
-    : undefined;
-}
-
-function parseDialog(value: unknown): PageDialogState | undefined {
-  if (!isRecord(value)) return undefined;
-  const { kind, message, defaultPrompt } = value;
-  return (kind === 'alert' || kind === 'confirm' || kind === 'prompt' || kind === 'beforeunload') &&
-    isString(message) &&
-    isString(defaultPrompt)
-    ? { kind, message, defaultPrompt }
-    : undefined;
-}
-
-function isDedicatedDisplay(value: unknown): value is DedicatedDisplay {
-  return value === 'virtual' || value === 'desktop';
-}
-
-function parseFrameHeader(value: unknown): FrameHeader | undefined {
-  if (!isRecord(value)) return undefined;
-  const { seq, width, height } = value;
-  return isNumber(seq) && isPositive(width) && isPositive(height)
-    ? { seq, width, height }
-    : undefined;
 }
 
 function safeJson(text: string): unknown {
@@ -476,10 +207,6 @@ function safeJson(text: string): unknown {
   } catch {
     return undefined;
   }
-}
-
-function isMouseButton(value: unknown): value is MouseButton {
-  return value === 'none' || value === 'left' || value === 'middle' || value === 'right';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -494,10 +221,6 @@ function isString(value: unknown): value is string {
   return typeof value === 'string';
 }
 
-function isNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
-}
-
 function isPositive(value: unknown): value is number {
-  return isNumber(value) && value > 0;
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }

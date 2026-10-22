@@ -3,12 +3,13 @@
 ## Setting up
 
 ```console
-nix develop          # Node 24, pnpm, and Xvfb for the browser tests
+nix develop          # Node 24, pnpm, and Xvnc and Openbox for dsh-chrome's Chrome
 pnpm install
 ```
 
 Without Nix, install Node.js 24 and the pnpm version `packageManager` in `package.json`
-names; the browser tests also need Google Chrome and Xvfb.
+names; dsh-chrome, in `pnpm dev` and in the browser tests, also needs Google Chrome,
+TigerVNC's Xvnc and Openbox.
 
 ## Trying plugins in DSH
 
@@ -33,7 +34,7 @@ Tests that drive a real browser run separately:
 
 ```console
 pnpm build
-pnpm test:integration    # needs Chrome (or DSH_CHROME_TEST_EXECUTABLE) and Xvfb
+pnpm test:integration    # needs Chrome (or DSH_CHROME_TEST_EXECUTABLE), Xvnc and Openbox
 ```
 
 `nix build .#<plugin>` runs the same checks in a sandbox before packing the tarball.
@@ -80,8 +81,8 @@ fails when a bundle depends on something DSH would not provide at run time.
   concept everywhere, and rename instead of explaining a misleading name in a comment.
 - **Parse what crosses a process boundary.** Messages from another process are parsed into
   fresh values with the protocol's fields only; never cast them.
-- **One definition.** Derive what can be derived (the bundle patch, the extension
-  manifest's version, the list of plugins) instead of keeping a second copy by hand.
+- **One definition.** Derive what can be derived (the bundle patch, the list of plugins)
+  instead of keeping a second copy by hand.
 - **Comments explain why**, or what a reader cannot see from the code: a platform limit,
   a protocol rule, a decision and its reason.
 - **Tests state behavior.** A test's name is a sentence about what the code does.

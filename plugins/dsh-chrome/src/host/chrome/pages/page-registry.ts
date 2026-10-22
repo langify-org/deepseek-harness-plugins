@@ -1,95 +1,132 @@
 import { createHash } from 'node:crypto';
-import type { PageSnapshot, TabId } from '../../../protocol/connector.ts';
-import type { PageOpener } from '../../../protocol/viewer.ts';
+import { setTimeout as sleep } from 'node:timers/promises';
+import type { Protocol } from 'devtools-protocol';
+import type { CdpConnection } from '../cdp/cdp-connection.ts';
 import type {
   CdpArgs,
   CdpCommand,
   CdpEventName,
   CdpEventParams,
   CdpResult,
-} from '../connector/cdp.ts';
-import type { ConnectedBrowser, RequestOptions } from '../connector/connected-browser.ts';
-import type { ChromePage, PageDialog, PageEnding, PageId, PageOrigin } from './page.ts';
+} from '../cdp/cdp-methods.ts';
+import type {
+  ChromePage,
+  PageDialog,
+  PageEnding,
+  PageId,
+  PageOpener,
+  RequestOptions,
+} from './page.ts';
 
-/** A page of a session opened another: a popup, or a link's new tab. */
+/** A page opened another: a popup, or a link's new tab. */
 export interface PageOpening {
   readonly page: ChromePage;
   readonly opener: ChromePage;
-  /** Whether Chrome put the new page in front of its opener, as it does a popup. */
-  readonly foreground: boolean;
 }
+
+/** Whose a page is, and who opened it, as the command that created it says. */
+interface Claim {
+  readonly sessionId: string;
+  readonly openedBy: PageOpener;
+}
+
+/** How often, and how many times, bringing a page to the front checks that it has the focus. */
+const FOCUS_CHECK_MS = 25;
+const FOCUS_CHECKS = 40;
+/** How long a page may take to say whether it is in view before it counts as not. */
+const VIEW_CHECK_MS = 1000;
+/** How long Chrome may take to report the page of a target it created. */
+const ADOPTION_TIMEOUT_MS = 10_000;
+/** How long Chrome may take to end a page it was asked to close. */
+const CLOSE_WAIT_MS = 5000;
 
 class Page implements ChromePage {
   readonly id: PageId;
-  readonly sessionId: string;
-  readonly browser: ConnectedBrowser;
-  readonly tabId: TabId;
-  readonly openedBy: PageOpener | undefined;
+  readonly targetId: string;
   readonly openerId: PageId | undefined;
-  #snapshot: PageSnapshot;
+  readonly #connection: CdpConnection;
+  /** The CDP session Chrome attached for this page. */
+  readonly #cdpSession: string;
+  #sessionId: string | undefined;
+  #openedBy: PageOpener;
+  #url: string;
+  #title: string;
   #dialog: PageDialog | undefined;
   #ending: PageEnding | undefined;
-  readonly #eventListeners = new Map<string, Set<(params: unknown) => void>>();
   readonly #changeListeners = new Set<(page: ChromePage) => void>();
   readonly #endListeners = new Set<(ending: PageEnding) => void>();
+  readonly #eventSubscriptions = new Set<() => void>();
 
   constructor(
     id: PageId,
-    sessionId: string,
-    browser: ConnectedBrowser,
-    snapshot: PageSnapshot,
-    origin: PageOrigin,
+    target: Protocol.Target.TargetInfo,
+    cdpSession: string,
+    connection: CdpConnection,
+    origin: { sessionId: string | undefined; openedBy: PageOpener; openerId: PageId | undefined },
   ) {
     this.id = id;
-    this.sessionId = sessionId;
-    this.browser = browser;
-    this.tabId = snapshot.tabId;
-    this.openedBy = origin.openedBy;
+    this.targetId = target.targetId;
     this.openerId = origin.openerId;
-    this.#snapshot = snapshot;
+    this.#connection = connection;
+    this.#cdpSession = cdpSession;
+    this.#sessionId = origin.sessionId;
+    this.#openedBy = origin.openedBy;
+    this.#url = target.url;
+    this.#title = target.title;
+  }
+
+  get cdpSession(): string {
+    return this.#cdpSession;
+  }
+
+  get sessionId(): string | undefined {
+    return this.#sessionId;
+  }
+
+  get openedBy(): PageOpener {
+    return this.#openedBy;
+  }
+
+  get url(): string {
+    return this.#url;
+  }
+
+  get title(): string {
+    return this.#title;
   }
 
   get dialog(): PageDialog | undefined {
     return this.#dialog;
   }
 
-  get url(): string {
-    return this.#snapshot.url;
-  }
-
-  get title(): string {
-    return this.#snapshot.title;
-  }
-
-  get loading(): boolean {
-    return this.#snapshot.loading;
-  }
-
   get ending(): PageEnding | undefined {
     return this.#ending;
   }
 
-  async send<M extends CdpCommand>(
+  send<M extends CdpCommand>(
     method: M,
     ...[params, options]: CdpArgs<M, RequestOptions>
   ): Promise<CdpResult<M>> {
-    const result = await this.browser.sendCdp(this.tabId, method, params ?? {}, options);
-    // Chrome defines the result shape (see cdp.ts); the plugin does not re-validate it.
-    return result as CdpResult<M>;
+    // The same command, for this page's session; TypeScript cannot follow the tuple through.
+    const args = [params, { ...options, sessionId: this.#cdpSession }] as unknown as CdpArgs<
+      M,
+      RequestOptions
+    >;
+    return this.#connection.send(method, ...args);
   }
 
   on<E extends CdpEventName>(
     event: E,
     listener: (...params: CdpEventParams<E>) => void,
   ): () => void {
-    const wrapped = (params: unknown) => (listener as (params: unknown) => void)(params);
-    let listeners = this.#eventListeners.get(event);
-    if (listeners === undefined) {
-      listeners = new Set();
-      this.#eventListeners.set(event, listeners);
-    }
-    listeners.add(wrapped);
-    return () => listeners.delete(wrapped);
+    const stop = this.#connection.on(event, (params, sessionId) => {
+      if (sessionId === this.#cdpSession) (listener as (params: unknown) => void)(params);
+    });
+    this.#eventSubscriptions.add(stop);
+    return () => {
+      stop();
+      this.#eventSubscriptions.delete(stop);
+    };
   }
 
   onChanged(listener: (page: ChromePage) => void): () => void {
@@ -106,160 +143,288 @@ class Page implements ChromePage {
     return () => this.#endListeners.delete(listener);
   }
 
-  activate(): Promise<void> {
-    return this.browser.activatePage(this.tabId);
-  }
-
   async bringToFront(): Promise<void> {
-    if (this.browser.visibleWindows || this.browser.isInFront(this.tabId)) return;
-    await this.browser.activatePage(this.tabId);
+    await this.#connection.send('Target.activateTarget', { targetId: this.targetId });
+    // The window manager grants the focus after the request; until then, Chrome would answer
+    // the page's dialogs itself.
+    for (let check = 0; check < FOCUS_CHECKS; check += 1) {
+      if ((await this.inView()) === 'focused') return;
+      await sleep(FOCUS_CHECK_MS);
+    }
   }
 
-  close(): Promise<void> {
-    return this.browser.closePage(this.tabId);
+  /** Closes the page, and returns once Chrome ended it, or after a while. */
+  async close(): Promise<void> {
+    if (this.#ending !== undefined) return;
+    let stopWaiting = () => {};
+    const ended = new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, CLOSE_WAIT_MS);
+      const stop = this.onEnded(() => resolve());
+      stopWaiting = () => {
+        clearTimeout(timer);
+        stop();
+      };
+    });
+    try {
+      await this.#connection.send('Target.closeTarget', { targetId: this.targetId });
+      await ended;
+    } finally {
+      stopWaiting();
+    }
   }
 
-  dispatchEvent(method: string, params: unknown): void {
-    for (const listener of this.#eventListeners.get(method) ?? []) listener(params);
+  /**
+   * Whether Chrome shows the page: in its window's front with the focus, in front, or not.
+   * The page is asked in a world of dsh-chrome's own, whose `document` the page's scripts
+   * cannot redefine to claim the user's eyes.
+   */
+  async inView(): Promise<'focused' | 'visible' | 'hidden'> {
+    try {
+      const { result } = await this.#evaluateInOwnWorld(
+        "document.visibilityState !== 'visible' ? 'hidden' : document.hasFocus() ? 'focused' : 'visible'",
+      );
+      return result.value === 'focused' || result.value === 'visible' ? result.value : 'hidden';
+    } catch {
+      // A page that does not answer, because it shows a dialog or is closing, is not looked at.
+      return 'hidden';
+    }
   }
 
-  update(snapshot: PageSnapshot): void {
-    this.#snapshot = snapshot;
-    for (const listener of this.#changeListeners) listener(this);
+  /** The world of dsh-chrome's own in the page's document, once made; a navigation ends it. */
+  #ownWorld: number | undefined;
+
+  async #evaluateInOwnWorld(expression: string) {
+    const evaluate = (contextId: number) =>
+      this.send(
+        'Runtime.evaluate',
+        { expression, contextId, returnByValue: true },
+        { timeoutMs: VIEW_CHECK_MS },
+      );
+    if (this.#ownWorld !== undefined) {
+      try {
+        return await evaluate(this.#ownWorld);
+      } catch {
+        // The document it was made in is gone: make one in this one.
+        this.#ownWorld = undefined;
+      }
+    }
+    const { executionContextId } = await this.send(
+      'Page.createIsolatedWorld',
+      { frameId: this.targetId, worldName: 'dsh-chrome' },
+      { timeoutMs: VIEW_CHECK_MS },
+    );
+    this.#ownWorld = executionContextId;
+    return evaluate(executionContextId);
+  }
+
+  /** Takes the target's address and title; says whether they changed. */
+  update(target: Protocol.Target.TargetInfo): boolean {
+    if (target.url === this.#url && target.title === this.#title) return false;
+    this.#url = target.url;
+    this.#title = target.title;
+    this.#changed();
+    return true;
   }
 
   updateDialog(dialog: PageDialog | undefined): void {
     this.#dialog = dialog;
-    for (const listener of this.#changeListeners) listener(this);
+    this.#changed();
+  }
+
+  /** Gives the page to a session, unless it already belongs to one; says whether it did. */
+  claim({ sessionId, openedBy }: Claim): boolean {
+    if (this.#sessionId !== undefined) return false;
+    this.#sessionId = sessionId;
+    this.#openedBy = openedBy;
+    this.#changed();
+    return true;
   }
 
   end(ending: PageEnding): void {
     if (this.#ending !== undefined) return;
     this.#ending = ending;
-    for (const listener of this.#endListeners) listener(ending);
+    for (const stop of this.#eventSubscriptions) stop();
+    this.#eventSubscriptions.clear();
+    for (const listener of [...this.#endListeners]) listener(ending);
     this.#endListeners.clear();
     this.#changeListeners.clear();
-    this.#eventListeners.clear();
+  }
+
+  #changed(): void {
+    for (const listener of [...this.#changeListeners]) listener(this);
   }
 }
 
 /**
- * All pages the plugin controls, across connected browsers, with their owning sessions.
- * It routes each browser's events to the page they concern, and remembers which pages
- * were used last and which the user is looking at.
+ * The pages of the Chrome dsh-chrome runs, as they come and go, with the sessions they
+ * belong to and the dialogs they show. It follows Chrome's page targets over the CDP
+ * connection: Chrome attaches a session for each, through which the page is operated, and
+ * reports each end and each change of address. Chrome does not report every change of a
+ * title, so titles are brought up to date when they are about to be shown ({@link refresh}).
  *
- * It follows each page's JavaScript dialogs, which block the page until someone answers:
- * Chrome reports them once the page's `Page` domain is on, which adopting a page turns on.
+ * Chrome holds each new page at its start until the registry follows its dialogs, then lets
+ * it run. A page that opens at once with a dialog is thus not missed; and Chrome, which
+ * otherwise stalls a page that a click opens in a window of its own, together with the input
+ * that made the click, goes on.
  */
 export class PageRegistry {
+  /** The connection of the browser whose pages these are, while it is open. */
+  #connection: CdpConnection | undefined;
   readonly #pages = new Map<PageId, Page>();
-  readonly #byTab = new Map<ConnectedBrowser, Map<TabId, Page>>();
+  readonly #byTarget = new Map<string, Page>();
+  readonly #byCdpSession = new Map<string, Page>();
+  /** Claims for targets Chrome has not reported yet. */
+  readonly #claims = new Map<string, Claim>();
+  readonly #adoptionWaiters = new Map<string, Set<(page: Page) => void>>();
   readonly #listeners = new Set<() => void>();
   readonly #openingListeners = new Set<(opening: PageOpening) => void>();
   /** The order of last use: a larger number is more recent. */
   readonly #lastUse = new Map<PageId, number>();
-  /** How many visible viewers show each page. */
-  readonly #shownBy = new Map<PageId, number>();
   #useCount = 0;
 
-  /** Starts routing a browser's events; its pages end when it disconnects. */
-  track(browser: ConnectedBrowser): void {
-    const tabs = new Map<TabId, Page>();
-    this.#byTab.set(browser, tabs);
-    browser.onEvent((event) => {
-      switch (event.type) {
-        case 'cdp-event': {
-          const page = tabs.get(event.tabId);
-          if (page === undefined) return;
-          if (event.method === 'Page.javascriptDialogOpening') {
-            page.updateDialog(dialogOf(event.params));
-            this.#notify();
-          } else if (event.method === 'Page.javascriptDialogClosed') {
-            page.updateDialog(undefined);
-            this.#notify();
-          }
-          page.dispatchEvent(event.method, event.params);
-          return;
+  /**
+   * Follows the pages of the browser behind the connection, those it has and those to come,
+   * until the connection closes, when they end.
+   */
+  async track(connection: CdpConnection): Promise<void> {
+    this.#connection = connection;
+    const stops = [
+      connection.on('Target.attachedToTarget', ({ sessionId, targetInfo, waitingForDebugger }) => {
+        if (targetInfo.type === 'page') {
+          this.#adopt(connection, targetInfo, sessionId, waitingForDebugger);
         }
-        case 'page-changed': {
-          const page = tabs.get(event.page.tabId);
-          if (page === undefined) return;
-          page.update(event.page);
-          this.#notify();
-          return;
-        }
-        case 'page-ended': {
-          const page = tabs.get(event.tabId);
-          if (page !== undefined) this.#remove(page, event.reason);
-          return;
-        }
-        case 'page-opened': {
-          // The opened page belongs to the opener's session, as the connector's group says.
-          const opener = tabs.get(event.openerTabId);
-          const page = this.adopt(opener?.sessionId ?? event.page.groupKey, browser, event.page, {
-            openedBy: 'page',
-            ...(opener === undefined ? {} : { openerId: opener.id }),
-          });
-          if (opener === undefined) return;
-          const opening = { page, opener, foreground: event.foreground };
-          for (const listener of [...this.#openingListeners]) listener(opening);
-          return;
-        }
+      }),
+      connection.on('Target.targetInfoChanged', ({ targetInfo }) => {
+        if (this.#byTarget.get(targetInfo.targetId)?.update(targetInfo)) this.#notify();
+      }),
+      connection.on('Target.targetDestroyed', ({ targetId }) => {
+        const page = this.#byTarget.get(targetId);
+        if (page !== undefined) this.#remove(page, 'closed');
+      }),
+      connection.on('Target.detachedFromTarget', ({ sessionId }) => {
+        const page = this.#byCdpSession.get(sessionId);
+        if (page !== undefined) this.#remove(page, 'closed');
+      }),
+      connection.on('Page.javascriptDialogOpening', (params, sessionId) =>
+        this.#dialogChanged(sessionId, dialogOf(params)),
+      ),
+      connection.on('Page.javascriptDialogClosed', (_params, sessionId) =>
+        this.#dialogChanged(sessionId, undefined),
+      ),
+    ];
+    connection.onClose(() => {
+      if (this.#connection === connection) this.#connection = undefined;
+      for (const stop of stops) stop();
+      for (const page of [...this.#pages.values()]) this.#remove(page, 'chrome-stopped');
+      this.#claims.clear();
+    });
+    const pages = [{ type: 'page', exclude: false }];
+    await connection.send('Target.setDiscoverTargets', { discover: true, filter: pages });
+    await connection.send('Target.setAutoAttach', {
+      autoAttach: true,
+      waitForDebuggerOnStart: true,
+      flatten: true,
+      filter: pages,
+    });
+  }
+
+  /**
+   * Says whose the page of a target is that a command just created, and who opened it,
+   * whether Chrome has reported the target yet or not. A page that already belongs to a
+   * session keeps it.
+   */
+  claim(targetId: string, sessionId: string, openedBy: PageOpener): void {
+    const page = this.#byTarget.get(targetId);
+    if (page === undefined) this.#claims.set(targetId, { sessionId, openedBy });
+    else if (page.claim({ sessionId, openedBy })) this.#notify();
+  }
+
+  /** The page of a target, once Chrome reports it. */
+  whenAdopted(targetId: string, options: RequestOptions = {}): Promise<ChromePage> {
+    const known = this.#byTarget.get(targetId);
+    if (known !== undefined) return Promise.resolve(known);
+    const { signal, timeoutMs = ADOPTION_TIMEOUT_MS } = options;
+    if (signal?.aborted) return Promise.reject(signal.reason);
+    return new Promise((resolve, reject) => {
+      let waiters = this.#adoptionWaiters.get(targetId);
+      if (waiters === undefined) {
+        waiters = new Set();
+        this.#adoptionWaiters.set(targetId, waiters);
       }
+      const settle = () => {
+        waiters.delete(adopted);
+        if (waiters.size === 0) this.#adoptionWaiters.delete(targetId);
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+      };
+      const adopted = (page: Page) => {
+        settle();
+        resolve(page);
+      };
+      const onAbort = () => {
+        settle();
+        reject(signal?.reason);
+      };
+      const timer = setTimeout(() => {
+        settle();
+        reject(new Error(`Chrome did not report the page it opened within ${timeoutMs} ms`));
+      }, timeoutMs);
+      waiters.add(adopted);
+      signal?.addEventListener('abort', onAbort, { once: true });
     });
-    browser.onClose(() => {
-      for (const page of [...tabs.values()]) this.#remove(page, 'disconnected');
-      this.#byTab.delete(browser);
-    });
   }
 
-  /** Registers a page the browser reports, as owned by the session, and as its latest. */
-  adopt(
-    sessionId: string,
-    browser: ConnectedBrowser,
-    snapshot: PageSnapshot,
-    origin: PageOrigin = {},
-  ): ChromePage {
-    const tabs = this.#byTab.get(browser);
-    if (tabs === undefined) throw new Error('adopting a page of an untracked browser');
-    const existing = tabs.get(snapshot.tabId);
-    if (existing !== undefined) return existing;
-    const page = new Page(
-      this.#idFor(browser, snapshot.tabId),
-      sessionId,
-      browser,
-      snapshot,
-      origin,
-    );
-    tabs.set(page.tabId, page);
-    this.#pages.set(page.id, page);
-    this.#lastUse.set(page.id, ++this.#useCount);
-    // A page that cannot take it is one whose tab is closing; its ending follows.
-    void page.send('Page.enable').catch(() => {});
-    this.#notify();
-    return page;
-  }
-
-  /** Listens to pages of a session opening other pages. */
-  onPageOpened(listener: (opening: PageOpening) => void): () => void {
-    this.#openingListeners.add(listener);
-    return () => this.#openingListeners.delete(listener);
-  }
-
-  /** Ends every page of the browser, for a reason of the host's, before the browser leaves. */
-  endPagesOf(browser: ConnectedBrowser, ending: PageEnding): void {
-    for (const page of [...(this.#byTab.get(browser)?.values() ?? [])]) this.#remove(page, ending);
+  /** Brings every page's address and title up to date with what Chrome shows. */
+  async refresh(options: RequestOptions = {}): Promise<void> {
+    const connection = this.#connection;
+    if (connection === undefined || this.#pages.size === 0) return;
+    const { targetInfos } = await connection.send('Target.getTargets', undefined, options);
+    let changed = false;
+    for (const target of targetInfos) {
+      if (this.#byTarget.get(target.targetId)?.update(target)) changed = true;
+    }
+    if (changed) this.#notify();
   }
 
   get(id: PageId): ChromePage | undefined {
     return this.#pages.get(id);
   }
 
-  /** The session's pages, most recently used first. */
+  /** The session's own pages, most recently used first. */
   ofSession(sessionId: string): ChromePage[] {
-    return [...this.#pages.values()]
-      .filter((page) => page.sessionId === sessionId)
-      .sort((a, b) => (this.#lastUse.get(b.id) ?? 0) - (this.#lastUse.get(a.id) ?? 0));
+    return this.#byRecentUse().filter((page) => page.sessionId === sessionId);
+  }
+
+  /**
+   * The pages a session may use, most recently used first: its own, and those the user
+   * opened in Chrome, which belong to no session.
+   */
+  reachableBy(sessionId: string): ChromePage[] {
+    return this.#byRecentUse().filter(
+      (page) => page.sessionId === sessionId || page.sessionId === undefined,
+    );
+  }
+
+  /** Every page, most recently used first. */
+  all(): ChromePage[] {
+    return this.#byRecentUse();
+  }
+
+  /**
+   * The page Chrome shows in front: the one with the focus, or, while no window has it, the
+   * most recently used one in view.
+   */
+  async pageInFront(): Promise<ChromePage | undefined> {
+    const pages = this.#byRecentUse();
+    // Chrome shows a page's dialog only while the page is in front, and the page answers
+    // nothing else meanwhile.
+    const asking = pages.find((page) => page.dialog !== undefined);
+    if (asking !== undefined) return asking;
+    const views = await Promise.all(pages.map((page) => page.inView()));
+    return (
+      pages.find((_page, index) => views[index] === 'focused') ??
+      pages.find((_page, index) => views[index] === 'visible')
+    );
   }
 
   /** Records that the user or the agent worked with the page. */
@@ -269,42 +434,72 @@ export class PageRegistry {
     this.#notify();
   }
 
-  /** Records that a visible viewer shows the page, until the returned release is called. */
-  show(id: PageId): () => void {
-    this.#shownBy.set(id, (this.#shownBy.get(id) ?? 0) + 1);
-    this.touch(id);
-    this.#notify();
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      const count = (this.#shownBy.get(id) ?? 1) - 1;
-      if (count > 0) this.#shownBy.set(id, count);
-      else this.#shownBy.delete(id);
-      this.#notify();
-    };
-  }
-
-  /** Whether some visible viewer shows the page. */
-  isShown(id: PageId): boolean {
-    return (this.#shownBy.get(id) ?? 0) > 0;
-  }
-
-  /**
-   * Listens to pages being added, removed, used or shown, and to changes of their address,
-   * title or dialog.
-   */
+  /** Listens to pages being added, removed, used, claimed, or changing address, title or dialog. */
   onChange(listener: () => void): () => void {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
   }
 
-  /** The tab's page id; in the rare case another page holds it, the next free derivation. */
-  #idFor(browser: ConnectedBrowser, tabId: TabId): PageId {
+  /** Listens to pages opening other pages. */
+  onPageOpened(listener: (opening: PageOpening) => void): () => void {
+    this.#openingListeners.add(listener);
+    return () => this.#openingListeners.delete(listener);
+  }
+
+  #adopt(
+    connection: CdpConnection,
+    target: Protocol.Target.TargetInfo,
+    cdpSession: string,
+    waitingForDebugger: boolean,
+  ): void {
+    if (this.#byTarget.has(target.targetId)) return;
+    const opener = target.openerId === undefined ? undefined : this.#byTarget.get(target.openerId);
+    const claim = this.#claims.get(target.targetId);
+    this.#claims.delete(target.targetId);
+    const origin =
+      claim ??
+      (opener === undefined
+        ? { sessionId: undefined, openedBy: 'user' as const }
+        : { sessionId: opener.sessionId, openedBy: 'page' as const });
+    const page = new Page(this.#idFor(target.targetId), target, cdpSession, connection, {
+      ...origin,
+      openerId: opener?.id,
+    });
+    this.#pages.set(page.id, page);
+    this.#byTarget.set(page.targetId, page);
+    this.#byCdpSession.set(cdpSession, page);
+    this.#lastUse.set(page.id, ++this.#useCount);
+    // Chrome reports a page's dialogs once its Page domain is on; a new page then runs. A page
+    // that cannot take either is closing, and its ending follows.
+    void page
+      .send('Page.enable')
+      .catch(() => {})
+      .then(() => (waitingForDebugger ? page.send('Runtime.runIfWaitingForDebugger') : undefined))
+      .catch(() => {});
+    for (const adopted of [...(this.#adoptionWaiters.get(page.targetId) ?? [])]) adopted(page);
+    if (opener !== undefined && claim === undefined) {
+      for (const listener of [...this.#openingListeners]) listener({ page, opener });
+    }
+    this.#notify();
+  }
+
+  #dialogChanged(cdpSession: string | undefined, dialog: PageDialog | undefined): void {
+    const page = cdpSession === undefined ? undefined : this.#byCdpSession.get(cdpSession);
+    if (page === undefined) return;
+    page.updateDialog(dialog);
+    this.#notify();
+  }
+
+  #byRecentUse(): Page[] {
+    return [...this.#pages.values()].sort(
+      (a, b) => (this.#lastUse.get(b.id) ?? 0) - (this.#lastUse.get(a.id) ?? 0),
+    );
+  }
+
+  /** The target's page id; in the rare case another page holds it, the next free derivation. */
+  #idFor(targetId: string): PageId {
     for (let attempt = 0; ; attempt++) {
-      const digest = createHash('sha256')
-        .update(`${browser.identity.browserId}\0${tabId}\0${attempt}`)
-        .digest('hex');
+      const digest = createHash('sha256').update(`${targetId}\0${attempt}`).digest('hex');
       const id = `p${digest.slice(0, 6)}`;
       if (!this.#pages.has(id)) return id;
     }
@@ -312,25 +507,21 @@ export class PageRegistry {
 
   #remove(page: Page, ending: PageEnding): void {
     this.#pages.delete(page.id);
+    this.#byTarget.delete(page.targetId);
+    this.#byCdpSession.delete(page.cdpSession);
     this.#lastUse.delete(page.id);
-    this.#byTab.get(page.browser)?.delete(page.tabId);
     page.end(ending);
     this.#notify();
   }
 
   #notify(): void {
-    for (const listener of this.#listeners) listener();
+    for (const listener of [...this.#listeners]) listener();
   }
 }
 
 /** The dialog a `Page.javascriptDialogOpening` event announces. */
-function dialogOf(params: unknown): PageDialog {
-  const { type, message, defaultPrompt, url } = (params ?? {}) as {
-    type?: unknown;
-    message?: unknown;
-    defaultPrompt?: unknown;
-    url?: unknown;
-  };
+function dialogOf(params: Protocol.Page.JavascriptDialogOpeningEvent): PageDialog {
+  const { type, message, defaultPrompt, url } = params;
   return {
     kind:
       type === 'alert' || type === 'confirm' || type === 'prompt' || type === 'beforeunload'

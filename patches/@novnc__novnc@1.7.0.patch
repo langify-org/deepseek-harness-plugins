@@ -1,0 +1,18 @@
+diff --git a/core/util/browser.js b/core/util/browser.js
+index 63596d211bc3f2ac0c1853d58488dcbb18bd8949..dae9ebf1b5b74ae6313a67c9fa1619020172d189 100644
+--- a/core/util/browser.js
++++ b/core/util/browser.js
+@@ -149,7 +149,12 @@ async function _checkWebCodecsH264DecodeSupport() {
+ 
+     return true;
+ }
+-supportsWebCodecsH264Decode = await _checkWebCodecsH264DecodeSupport();
++// Patched for dsh-chrome: bundles loaded as module factories cannot await at the top
++// level. Decoding stays off until the check answers, a moment after loading.
++_checkWebCodecsH264DecodeSupport().then(
++    (supported) => { supportsWebCodecsH264Decode = supported; },
++    () => { supportsWebCodecsH264Decode = false; },
++);
+ 
+ /*
+  * The functions for detection of platforms and browsers below are exported

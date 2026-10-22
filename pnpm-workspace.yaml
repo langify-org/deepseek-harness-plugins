@@ -6,3 +6,8 @@ packages:
 # install script only verifies that binary, so it is not run.
 allowBuilds:
   esbuild: false
+
+# Dependencies patched as they are installed, each for a reason its patch states.
+patchedDependencies:
+  # noVNC awaits at the top level of a module, which a DSH client module cannot.
+  '@novnc/novnc@1.7.0': patches/@novnc__novnc@1.7.0.patch

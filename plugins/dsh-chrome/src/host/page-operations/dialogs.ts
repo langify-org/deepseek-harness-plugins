@@ -9,21 +9,22 @@ import { clipText } from './clip-text.ts';
  */
 
 /** How an operation that a dialog may interrupt ended. */
-export type UntilDialog<T> =
-  | { readonly completed: T; readonly dialog?: undefined }
-  | { readonly completed?: undefined; readonly dialog: PageDialog };
+export type OperationOutcome<T> =
+  | { readonly kind: 'completed'; readonly value: T }
+  /** The page shows a dialog, whose answer the operation would wait for. */
+  | { readonly kind: 'dialog'; readonly dialog: PageDialog };
 
 /**
  * Runs an operation that may make the page open a dialog, such as a click. It ends when the
  * operation does, or as soon as the page shows a dialog, whose answer it would wait for; a
  * dialog already open ends it before it starts. The operation works on the page it is given,
- * which takes no more commands once a dialog interrupts it, so that the rest of it (the second
- * press of a double-click, say) is not done after the answer.
+ * which takes no more commands once a dialog interrupted it, so that the rest of it (the
+ * second press of a double-click, say) is not done after the answer.
  */
 export function untilDialog<T>(
   page: ChromePage,
   operation: (page: ChromePage) => Promise<T>,
-): Promise<UntilDialog<T>> {
+): Promise<OperationOutcome<T>> {
   return new Promise((resolve, reject) => {
     const interruption = new AbortController();
     const endOnDialog = (): boolean => {
@@ -31,15 +32,15 @@ export function untilDialog<T>(
       if (dialog === undefined) return false;
       stop();
       interruption.abort();
-      resolve({ dialog });
+      resolve({ kind: 'dialog', dialog });
       return true;
     };
     const stop = page.onChanged(endOnDialog);
     if (endOnDialog()) return;
     operation(boundToSignal(page, interruption.signal)).then(
-      (completed) => {
+      (value) => {
         stop();
-        resolve({ completed });
+        resolve({ kind: 'completed', value });
       },
       (error: unknown) => {
         stop();

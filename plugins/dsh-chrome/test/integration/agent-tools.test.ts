@@ -2,9 +2,10 @@
  * The agent's tools, run the way DSH's tool runtime runs them: arguments checked against
  * each tool's parameter schema, the value it returns checked against its output schema
  * (both with DSH's own validator), then rendered for the model. The built host plugin and
- * its tools row drive a real page in the dedicated profile on a private display.
+ * its tools row drive a real Chrome, in a temporary profile, on a screen of its own.
  *
- * Needs a build (`pnpm build`), Google Chrome (or DSH_CHROME_TEST_EXECUTABLE) and Xvfb.
+ * Needs a build (`pnpm build`), Google Chrome (or DSH_CHROME_TEST_EXECUTABLE), Xvnc and
+ * Openbox.
  */
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -28,7 +29,13 @@ import {
 } from '@deepseek-ai/dsh-tools';
 import type { ChromeService } from '../../src/host/chrome/chrome-service.ts';
 import { type DshHost, startDshHost } from '../support/dsh-host.ts';
-import { chromeExecutable, distDir, missingRequirements } from '../support/environment.ts';
+import {
+  chromeExecutable,
+  distDir,
+  missingRequirements,
+  windowManagerExecutable,
+  xvncExecutable,
+} from '../support/environment.ts';
 import { jpegSize } from '../support/jpeg.ts';
 import { RecordingTools } from '../support/recording-tools.ts';
 import {
@@ -102,23 +109,15 @@ before(async () => {
   await root.plugin(RecordingAttachments);
   await root.plugin(VisionModels);
   await root.plugin(await import(pathToFileURL(join(distDir, 'host', 'index.js')).href), {
-    dailyProfile: { enabled: false },
-    dedicatedProfile: {
-      enabled: true,
-      executable: chromeExecutable,
-      userDataDir: join(workDir, 'dedicated'),
-      display: 'virtual',
-    },
-    defaultProfile: 'dedicated',
+    executable: chromeExecutable,
+    xvncExecutable,
+    windowManagerExecutable,
+    profileDir: join(workDir, 'chrome-profile'),
+    userChromeDir: join(workDir, 'user-chrome'),
     dataDir: join(workDir, 'data'),
-    connectorSocketPath: join(workDir, 'connector.sock'),
+    runtimeDir: join(workDir, 'run'),
   });
   await root.plugin(await import(pathToFileURL(join(distDir, 'host', 'tools.js')).href));
-  await waitFor(
-    () => root.get('chrome')?.extensionDir !== undefined,
-    10_000,
-    'the plugin to start',
-  );
   chrome = root.get('chrome');
   // The services registered above, under the names DSH declares for its own.
   tools = root.get('tools') as unknown as RecordingTools;
@@ -151,16 +150,24 @@ test('the agent opens a page, reads it, and operates it by ref', { skip }, async
   assert.deepEqual(empty.value, { pages: [] });
   assert.match(text(empty.content), /no Chrome pages/);
 
-  // The dedicated Chrome starts on first use.
+  // Chrome starts on first use, and the page opens in a new tab, in front.
   const opened = await run('chrome_open', { url: pageUrl });
   const pageId = (opened.value as { page: { id: string } }).page.id;
   assert.match(text(opened.content), new RegExp(`Opened page ${pageId}`));
   await waitFor(async () => (await evaluate<string>('document.readyState')) === 'complete');
 
-  const listed = await run('chrome_pages', {});
+  // The tab Chrome started with is the user's, and the session may use it too.
+  const listed = (await run('chrome_pages', {})).value as {
+    pages: { id: string; url: string; inFront: boolean }[];
+  };
   assert.deepEqual(
-    (listed.value as { pages: { id: string; title: string }[] }).pages.map((page) => page.id),
-    [pageId],
+    listed.pages.map(({ id, inFront }) => ({ id, inFront })),
+    [
+      { id: pageId, inFront: true },
+      ...listed.pages
+        .filter((page) => page.id !== pageId)
+        .map(({ id }) => ({ id, inFront: false })),
+    ],
   );
 
   const snapshot = await run('chrome_snapshot', {});
@@ -191,25 +198,13 @@ test('the agent opens a page, reads it, and operates it by ref', { skip }, async
 });
 
 test('a screenshot is stored as an attachment at the page’s CSS size', { skip }, async () => {
-  // The visible part of the page, scrollbars aside, at its CSS size: the test Chrome's
-  // display has a pixel density of its own, so the rendering is larger.
-  assert.notEqual(await evaluate<number>('devicePixelRatio'), 1);
-  const viewportNow = () =>
-    evaluate<{ width: number; height: number }>(
-      '({ width: visualViewport.width, height: visualViewport.height })',
-    );
-  // Chrome's debugging bar may still be sliding in and resizing the window: measure a
-  // screenshot taken while the viewport held still.
-  let shot: Awaited<ReturnType<typeof run>> | undefined;
-  let viewport: { width: number; height: number } | undefined;
-  for (let attempt = 0; attempt < 5 && viewport === undefined; attempt += 1) {
-    const before = await viewportNow();
-    shot = await run('chrome_screenshot', {});
-    const after = await viewportNow();
-    if (before.width === after.width && before.height === after.height) viewport = after;
-    else await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-  assert.ok(shot !== undefined && viewport !== undefined, 'the viewport did not hold still');
+  // The visible part of the page, scrollbars aside, at its CSS size: Chrome draws two of the
+  // screen's pixels per CSS pixel, so the rendering is larger.
+  assert.equal(await evaluate<number>('devicePixelRatio'), 2);
+  const viewport = await evaluate<{ width: number; height: number }>(
+    '({ width: visualViewport.width, height: visualViewport.height })',
+  );
+  const shot = await run('chrome_screenshot', {});
   const saved = attachments?.saved.at(-1);
   assert.ok(saved, 'no image was stored');
   assert.equal(saved.mediaType, 'image/jpeg');
@@ -232,14 +227,12 @@ test('a screenshot is stored as an attachment at the page’s CSS size', { skip 
 test('the agent asks the user for help and hears the answer', { skip }, async () => {
   const page = sharedPage();
   const asked = run('chrome_ask_user', { message: 'Please sign in.' });
-  await waitFor(
-    () => requireChrome().helpRequests.current(page.id) !== undefined,
-    5000,
-    'the request',
-  );
-  const request = requireChrome().helpRequests.current(page.id);
-  assert.equal(request?.message, 'Please sign in.');
-  requireChrome().helpRequests.answer(page.id, request?.id ?? '', 'done');
+  const help = requireChrome().helpRequests;
+  await waitFor(() => help.ofSession(SESSION_ID) !== undefined, 5000, 'the request');
+  const request = help.ofSession(SESSION_ID);
+  assert.deepEqual([request?.message, request?.pageId], ['Please sign in.', page.id]);
+  assert.equal(help.ofSession(OTHER_SESSION_ID), undefined);
+  help.answer(request?.id ?? '', 'done');
   const answered = await asked;
   assert.equal((answered.value as { outcome: string }).outcome, 'done');
   assert.match(text(answered.content), /The user says it is done/);
@@ -248,7 +241,7 @@ test('the agent asks the user for help and hears the answer', { skip }, async ()
 test("a session's tools cannot reach another session's pages", { skip }, async () => {
   const theirs = await requireChrome().openPage(OTHER_SESSION_ID, pageUrl, { openedBy: 'user' });
   await assert.rejects(run('chrome_snapshot', { page: theirs.id }), {
-    message: new RegExp(`there is no page ${theirs.id} in this session`),
+    message: new RegExp(`there is no page ${theirs.id} this session can use`),
   });
   const ours = await run('chrome_pages', {});
   assert.equal(
@@ -264,7 +257,11 @@ test('the agent may not open DSH itself, nor operate a page that shows it', { sk
   for (const address of [`${dsh}/`, `http://localhost:${port}/settings`]) {
     await assert.rejects(run('chrome_open', { url: address }), { message: /DSH itself/ }, address);
   }
-  await assert.rejects(run('chrome_navigate', { url: `${dsh}/` }), { message: /DSH itself/ });
+  const web = (await run('chrome_open', { url: pageUrl })).value as { page: { id: string } };
+  await assert.rejects(run('chrome_navigate', { page: web.page.id, url: `${dsh}/` }), {
+    message: /DSH itself/,
+  });
+  await run('chrome_close', { page: web.page.id });
 
   // The user may take a page there; the tools then leave it alone, except to close it.
   const shown = await requireChrome().openPage(SESSION_ID, `${dsh}/`, { openedBy: 'user' });
@@ -287,6 +284,22 @@ test('the agent may not open DSH itself, nor operate a page that shows it', { sk
     'the framed DSH to be refused',
   );
   await run('chrome_close', { page: framingId });
+});
+
+test("the agent may not read or operate Chrome's own pages, even those the user opened", {
+  skip,
+}, async () => {
+  const settings = await requireChrome().openPage(SESSION_ID, 'chrome://settings/', {
+    openedBy: 'user',
+  });
+  for (const [tool, args] of [
+    ['chrome_snapshot', { page: settings.id }],
+    ['chrome_screenshot', { page: settings.id }],
+    ['chrome_click', { page: settings.id, ref: 'e1' }],
+  ] as const) {
+    await assert.rejects(run(tool, args), { message: /one of Chrome's own pages/ }, tool);
+  }
+  await run('chrome_close', { page: settings.id });
 });
 
 test("the agent's actions report the pages they open and the dialogs they lead to", {
@@ -328,10 +341,13 @@ test("the agent's actions report the pages they open and the dialogs they lead t
   await run('chrome_close', { page: openerId });
 });
 
-test('closing a page removes it from the session', { skip }, async () => {
-  await run('chrome_close', {});
-  assert.deepEqual((await run('chrome_pages', {})).value, { pages: [] });
-  await assert.rejects(run('chrome_snapshot', {}), { message: /has no Chrome page yet/ });
+test("closing the session's pages leaves it only the user's", { skip }, async () => {
+  for (const page of requireChrome().pages.ofSession(SESSION_ID)) {
+    await run('chrome_close', { page: page.id });
+  }
+  const listed = (await run('chrome_pages', {})).value as { pages: { id: string }[] };
+  assert.deepEqual(requireChrome().pages.ofSession(SESSION_ID), []);
+  for (const { id } of listed.pages) assert.equal(requireChrome().page(id)?.sessionId, undefined);
 });
 
 /** Runs a tool as DSH's runtime would, for a turn of the agent's session. */
@@ -379,7 +395,7 @@ function requireChrome(): ChromeService {
 }
 
 function sharedPage() {
-  const page = requireChrome().pagesOf(SESSION_ID)[0];
+  const page = requireChrome().pages.ofSession(SESSION_ID)[0];
   assert.ok(page, 'the session has no page');
   return page;
 }

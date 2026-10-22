@@ -1,6 +1,7 @@
 /**
- * Tools that let the agent read and operate the session's Chrome pages: the same pages the
- * user sees in the sidebar, in the Chrome dsh-chrome runs or in the user's own.
+ * Tools that let the agent read and operate Chrome's pages: the Chrome the user sees in the
+ * right sidebar. A session's agent uses the pages it opened, the pages those opened, and the
+ * pages the user opened in Chrome itself; a page of another session's agent is not its own.
  *
  * Mounted as its own Loader row (`dsh-chrome-tools`), so a profile can turn the tools
  * off and keep the shared view.
@@ -11,11 +12,11 @@ import type { AttachmentId, ImageAttachmentRef, ImageMediaType } from '@deepseek
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
 import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools';
 import type { Protocol } from 'devtools-protocol';
-import { normalizeAddress } from '../../protocol/address.ts';
 import type {} from '../chrome/chrome-service.ts';
 import type { ChromePage, PageDialog } from '../chrome/pages/page.ts';
 import { boundToSignal } from '../chrome/pages/signal-bound-page.ts';
 import { click, navigate, press, scroll, type } from '../page-operations/actions.ts';
+import { isWebPage, normalizeAddress } from '../page-operations/address.ts';
 import { answerDialog, describeDialog, untilDialog } from '../page-operations/dialogs.ts';
 import { ElementRefs } from '../page-operations/element-refs.ts';
 import { parseKeyCombo } from '../page-operations/keys.ts';
@@ -34,9 +35,13 @@ const MAX_SNAPSHOT_CHARS = 100_000;
  * action, measured at under 50 ms.
  */
 const OPENING_SETTLE_MS = 200;
+
 /** How long the agent waits for the user's help unless it says otherwise. */
 const DEFAULT_HELP_MINUTES = 10;
 const MAX_HELP_MINUTES = 60;
+
+const CHROME_PAGE_REFUSAL =
+  "that is one of Chrome's own pages, an extension's, or a local file, which the agent may not read or operate; open a web page with chrome_open, or ask the user";
 
 const DSH_REFUSAL =
   'that is or shows DSH itself, which the agent may not open or operate through Chrome; ask the user instead';
@@ -46,7 +51,9 @@ const UNTRUSTED_NOTE =
 
 const PAGE_PARAMETER = {
   type: 'string',
-  description: 'Page id from chrome_pages or chrome_open. Defaults to the page used most recently.',
+  description:
+    'Page id from chrome_pages or chrome_open. Defaults to the page the user is looking at, ' +
+    'else the page this session used last.',
 } as const;
 
 const REF_DESCRIPTION = 'Element ref from chrome_snapshot, such as e42.';
@@ -117,29 +124,47 @@ export function apply(ctx: Context): void {
     return url;
   };
 
-  /** The page a call names, or the session's most recently used page. */
-  const sessionPage = (exec: ToolRunContext, pageId: string | undefined): ChromePage => {
+  /**
+   * The page a call names; without a name, the page the user is looking at, if the session
+   * may use it, else the page the session used last. A page the user opened in Chrome becomes
+   * the session's once its agent uses it, so that another session's agent does not.
+   */
+  const sessionPage = async (
+    exec: ToolRunContext,
+    pageId: string | undefined,
+  ): Promise<ChromePage> => {
     const sessionId = sessionOf(exec);
-    const page = pageId === undefined ? chrome.pagesOf(sessionId)[0] : chrome.page(pageId);
-    if (page === undefined || page.sessionId !== sessionId) {
-      throw new Error(
-        pageId === undefined
-          ? 'this session has no Chrome page yet; open one with chrome_open'
-          : `there is no page ${pageId} in this session; see chrome_pages`,
-      );
+    const usable = (page: ChromePage | undefined): page is ChromePage =>
+      page !== undefined && (page.sessionId === undefined || page.sessionId === sessionId);
+    let page: ChromePage | undefined;
+    if (pageId !== undefined) {
+      page = chrome.page(pageId);
+      if (!usable(page))
+        throw new Error(`there is no page ${pageId} this session can use; see chrome_pages`);
+    } else {
+      const inFront = await chrome.pages.pageInFront();
+      page = usable(inFront) ? inFront : chrome.pages.ofSession(sessionId)[0];
+      if (page === undefined) {
+        throw new Error('this session has no Chrome page yet; open one with chrome_open');
+      }
     }
+    if (page.sessionId === undefined) chrome.pages.claim(page.targetId, sessionId, page.openedBy);
     chrome.pages.touch(page.id);
     return page;
   };
 
   /**
-   * Refuses a page that shows DSH in any of its frames, however it got there (a link, a
-   * redirect). A page of the same site can frame DSH signed in, since DSH's cookie reaches
-   * same-site frames. The frames' own addresses count: the page's last reported one lags
-   * behind navigation.
+   * Refuses a page the agent may not read or operate, however it got there (a link, a
+   * redirect, the user): one that is not a web page, such as Chrome's settings, and one that
+   * shows DSH in any of its frames, since a page of the same site can frame DSH signed in
+   * (DSH's cookie reaches same-site frames). The frames' own addresses count: the page's last
+   * reported one lags behind navigation.
    */
-  const refuseDsh = async (page: ChromePage): Promise<void> => {
+  const refuseOffLimits = async (page: ChromePage): Promise<void> => {
     const { frameTree } = await page.send('Page.getFrameTree');
+    if (!isWebPage(page.url) || !isWebPage(frameTree.frame.url)) {
+      throw new Error(CHROME_PAGE_REFUSAL);
+    }
     if (isDsh(page.url) || framesOf(frameTree).some((frame) => isDsh(frame.url))) {
       throw new Error(DSH_REFUSAL);
     }
@@ -152,12 +177,12 @@ export function apply(ctx: Context): void {
 
   /**
    * The page a call reads or operates, as the call sees it: its commands end when the call
-   * is stopped. A page showing DSH, or a dialog, is refused.
+   * is stopped. A page the agent may not use, or one showing a dialog, is refused.
    */
   const pageFor = async (exec: ToolRunContext, pageId: string | undefined): Promise<ChromePage> => {
-    const page = boundToSignal(sessionPage(exec, pageId), exec.signal);
+    const page = boundToSignal(await sessionPage(exec, pageId), exec.signal);
     refuseWhileDialog(page);
-    await refuseDsh(page);
+    await refuseOffLimits(page);
     return page;
   };
 
@@ -167,8 +192,14 @@ export function apply(ctx: Context): void {
     reading: (page: ChromePage) => Promise<T>,
   ): Promise<T> => {
     const outcome = await untilDialog(page, reading);
-    if (outcome.dialog === undefined) return outcome.completed;
-    throw dialogRefusal(page, outcome.dialog);
+    if (outcome.kind === 'dialog') throw dialogRefusal(page, outcome.dialog);
+    return outcome.value;
+  };
+
+  /** The page as tool results describe it, with the title Chrome shows now. */
+  const currentValue = async (page: ChromePage): Promise<PageValue> => {
+    await chrome.pages.refresh();
+    return pageValue(page);
   };
 
   /**
@@ -188,12 +219,13 @@ export function apply(ctx: Context): void {
     });
     try {
       const outcome = await untilDialog(page, action);
-      if (outcome.dialog === undefined) await sleep(OPENING_SETTLE_MS);
+      if (outcome.kind === 'completed') await sleep(OPENING_SETTLE_MS);
+      await chrome.pages.refresh();
       return {
-        completed: outcome.completed,
+        completed: outcome.kind === 'completed' ? outcome.value : undefined,
         report: {
           page: pageValue(page),
-          ...(outcome.dialog === undefined ? {} : { dialog: describeDialog(outcome.dialog) }),
+          ...(outcome.kind === 'dialog' ? { dialog: describeDialog(outcome.dialog) } : {}),
           ...(opened.length === 0 ? {} : { opened: opened.map(pageValue) }),
         },
       };
@@ -206,8 +238,8 @@ export function apply(ctx: Context): void {
     defineTool({
       name: 'chrome_pages',
       description:
-        "List this session's Chrome pages, which the user also sees in the Chrome tab of the right " +
-        'sidebar.',
+        'List the Chrome pages this session can use: those it opened, and those the user opened ' +
+        "in Chrome. The user sees Chrome in the Chrome tab of DSH's right sidebar.",
       parameters: {},
       output: {
         schema: {
@@ -222,7 +254,11 @@ export function apply(ctx: Context): void {
                 additionalProperties: false,
                 properties: {
                   ...PAGE_VALUE.properties,
-                  shown: { type: 'boolean', required: true },
+                  inFront: {
+                    type: 'boolean',
+                    required: true,
+                    description: 'Whether the user is looking at it.',
+                  },
                   openerId: { type: 'string', description: 'The page that opened it.' },
                   dialog: { type: 'string', description: 'The dialog it shows.' },
                 },
@@ -233,13 +269,13 @@ export function apply(ctx: Context): void {
         render: (_args, { pages }) =>
           text(
             pages.length === 0
-              ? 'This session has no Chrome pages. Open one with chrome_open.'
+              ? 'There are no Chrome pages this session can use. Open one with chrome_open.'
               : pages
                   .map((page) =>
                     [
                       `- ${describePage(page)}`,
                       page.openerId === undefined ? '' : `, opened by page ${page.openerId}`,
-                      page.shown ? ', the user is looking at it' : '',
+                      page.inFront ? ', the user is looking at it' : '',
                       page.dialog === undefined ? '' : `, shows ${page.dialog} (${UNTRUSTED_NOTE})`,
                     ].join(''),
                   )
@@ -247,49 +283,61 @@ export function apply(ctx: Context): void {
           ),
       },
       isConcurrencySafe: () => true,
-      execute: async (_args, exec) => ({
-        pages: chrome.pagesOf(sessionOf(exec)).map((page) => ({
-          ...pageValue(page),
-          shown: chrome.pages.isShown(page.id),
-          ...(page.openerId === undefined ? {} : { openerId: page.openerId }),
-          ...(page.dialog === undefined ? {} : { dialog: describeDialog(page.dialog) }),
-        })),
-      }),
+      execute: async (_args, exec) => {
+        await chrome.pages.refresh();
+        const inFront = await chrome.pages.pageInFront();
+        return {
+          pages: chrome.pages.reachableBy(sessionOf(exec)).map((page) => ({
+            ...pageValue(page),
+            inFront: page.id === inFront?.id,
+            ...(page.openerId === undefined ? {} : { openerId: page.openerId }),
+            ...(page.dialog === undefined ? {} : { dialog: describeDialog(page.dialog) }),
+          })),
+        };
+      },
     }),
 
     defineTool({
       name: 'chrome_open',
       description:
-        'Open a web page in Chrome and show it in the sidebar. Chrome keeps the sign-ins the user ' +
-        "made in it, so use it for sites that need the user's accounts; when a site asks to sign " +
-        'in, ask the user with chrome_ask_user. Plain public pages are cheaper to read with web_fetch.',
+        'Open a web page in a new tab of Chrome, in front, where the user sees it. Chrome keeps ' +
+        "the sign-ins the user made in it, so use it for sites that need the user's accounts; " +
+        'when a site asks to sign in, ask the user with chrome_ask_user. Plain public pages are ' +
+        'cheaper to read with web_fetch.',
       parameters: {
         url: {
           type: 'string',
           required: true,
           description: 'The address to open (http or https).',
         },
-        profile: {
-          type: 'string',
-          enum: ['daily', 'dedicated'],
-          description:
-            "Which Chrome profile: 'dedicated' is the Chrome dsh-chrome runs for DSH; 'daily' is " +
-            "the user's own Chrome, if the user connected it. Defaults to the configured profile.",
-        },
       },
       output: {
-        schema: PAGE_RESULT,
-        render: (_args, { page }) =>
-          text(`Opened ${describePage(page)}. Read it with chrome_snapshot.`),
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            page: { ...PAGE_VALUE, required: true },
+            loaded: { type: 'boolean', required: true },
+          },
+        },
+        render: (_args, { page, loaded }) =>
+          text(
+            `Opened ${describePage(page)}${loaded ? '' : ', still loading'}. Read it with chrome_snapshot.`,
+          ),
       },
       timeoutMs: 60_000,
       execute: async (args, exec) => {
-        const page = await chrome.openPage(sessionOf(exec), addressFor(args.url), {
-          signal: exec.signal,
-          profile: args.profile,
-          openedBy: 'agent',
-        });
-        return { page: pageValue(page) };
+        const url = addressFor(args.url);
+        // A blank tab first, so that the wait for the page's load starts before the load.
+        const page = boundToSignal(
+          await chrome.openPage(sessionOf(exec), 'about:blank', {
+            signal: exec.signal,
+            openedBy: 'agent',
+          }),
+          exec.signal,
+        );
+        const loaded = await navigate(page, { url }, exec.signal);
+        return { page: await currentValue(page), loaded };
       },
     }),
 
@@ -371,9 +419,13 @@ export function apply(ctx: Context): void {
           MAX_SNAPSHOT_CHARS,
         );
         const snapshot = await read(page, (reading) => refs.snapshot(reading, maxChars));
-        // The page may have gone on to DSH while it was read.
-        await refuseDsh(page);
-        return { page: pageValue(page), snapshot: snapshot.text, truncated: snapshot.truncated };
+        // The page may have gone on to DSH, or to one of Chrome's pages, while it was read.
+        await refuseOffLimits(page);
+        return {
+          page: await currentValue(page),
+          snapshot: snapshot.text,
+          truncated: snapshot.truncated,
+        };
       },
     }),
 
@@ -426,13 +478,13 @@ export function apply(ctx: Context): void {
           throw new Error('this model cannot see images here; read the page with chrome_snapshot');
         }
         const data = await read(page, (reading) => captureViewport(reading));
-        await refuseDsh(page);
+        await refuseOffLimits(page);
         const image = await attachments.saveImage({
           data,
           mediaType: 'image/jpeg',
           name: `chrome-${page.id}.jpg`,
         });
-        return { page: pageValue(page), image: imageValue(image) };
+        return { page: await currentValue(page), image: imageValue(image) };
       },
     }),
 
@@ -568,14 +620,16 @@ export function apply(ctx: Context): void {
       },
       timeoutMs: 30_000,
       execute: async (args, exec) => {
-        const page = boundToSignal(sessionPage(exec, args.page), exec.signal);
+        const page = boundToSignal(await sessionPage(exec, args.page), exec.signal);
         const { dialog } = page;
         if (dialog === undefined)
           throw new Error(`${describePage(pageValue(page))} shows no dialog`);
-        // A dialog DSH's own web UI asks, in the page or a frame of it, is the user's to answer.
+        // A dialog Chrome's own pages or DSH's web UI ask, in the page or a frame of it, is the
+        // user's to answer.
+        if (!isWebPage(page.url)) throw new Error(CHROME_PAGE_REFUSAL);
         if (isDsh(page.url) || isDsh(dialog.url)) throw new Error(DSH_REFUSAL);
         await answerDialog(page, { accept: args.accept, promptText: args.text });
-        return { page: pageValue(page) };
+        return { page: await currentValue(page) };
       },
     }),
 
@@ -588,7 +642,7 @@ export function apply(ctx: Context): void {
         render: (_args, { page }) => text(`Closed ${describePage(page)}.`),
       },
       execute: async (args, exec) => {
-        const page = boundToSignal(sessionPage(exec, args.page), exec.signal);
+        const page = boundToSignal(await sessionPage(exec, args.page), exec.signal);
         await page.close();
         return { page: pageValue(page) };
       },
@@ -599,7 +653,8 @@ export function apply(ctx: Context): void {
       description:
         'Ask the user to do something on a page themselves, and wait until they say it is done: ' +
         'sign in, enter a password or one-time code, solve a CAPTCHA, unlock their password ' +
-        'manager, or confirm a payment. The request appears on the page in the sidebar.',
+        'manager, or confirm a payment. The page comes to the front, and the request appears ' +
+        'above Chrome in the sidebar.',
       parameters: {
         page: PAGE_PARAMETER,
         message: {
@@ -635,13 +690,17 @@ export function apply(ctx: Context): void {
           MAX_HELP_MINUTES,
         );
         const timeout = AbortSignal.timeout(minutes * 60_000);
+        await page.bringToFront();
+        // The sidebar shows the request with the page's title.
+        await chrome.pages.refresh();
         try {
           const outcome = await chrome.helpRequests.ask(
             page,
+            sessionOf(exec),
             args.message,
             AbortSignal.any([exec.signal, timeout]),
           );
-          return { page: pageValue(page), outcome };
+          return { page: await currentValue(page), outcome };
         } catch (error) {
           if (timeout.aborted && !exec.signal.aborted)
             return { page: pageValue(page), outcome: 'timed-out' as const };

@@ -37,6 +37,11 @@ behavior behind it, so that a later DSH release can be checked against it.
   socket, by the home.
 - `dsh web` does not print what plugins log with `ctx.logger`. Tell the user what they need
   to do in the plugin's own UI, or in the error a request returns.
+- **DSH exits on an unhandled promise rejection.** Give every promise a handler, and listen
+  to a child process's `error` event, which a missing executable raises.
+- Child processes outlive a DSH that crashes: Node cannot have them end with it. Record
+  what you start in the plugin's runtime directory, and end what is left at the next start,
+  after checking that the pid still belongs to your process.
 - Authenticate every network route the way DSH authenticates `/api`: call
   `ctx.connection.requestRejection(request)` before upgrading or answering. Remote clients
   (a phone over a tunnel) then work with no extra configuration, and nothing else can reach
@@ -59,7 +64,12 @@ behavior behind it, so that a later DSH release can be checked against it.
   them in one place in the plugin.
 - Right-sidebar tabs: register the type with `ctx.sidebarRightTabs.register` and its body
   in the `sidebar.right.pane.tab` slot under the same id. `keepMounted: true` keeps a tab
-  alive in the background; tell the host when it is hidden instead of streaming to it.
+  alive in the background; stop streaming to it while it is hidden.
+- The browser module is one CommonJS factory, which cannot hold a top-level `await`, and
+  the build cannot bundle a dependency that has one. Patch the dependency
+  (`patchedDependencies` in `pnpm-workspace.yaml`), as this workspace does for noVNC.
+- In the web client, `ctx.connection.openWebSocket` returns the browser's own
+  `WebSocket`, so a module can carry binary messages over DSH's authenticated channel.
 - Session-scope slot components receive the session's `inputActions` (the message
   composer) as a prop when DSH's conversation UI is composed.
 

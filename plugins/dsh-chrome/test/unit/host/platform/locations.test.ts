@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { type TestContext, test } from 'node:test';
 import {
-  defaultConnectorSocketPath,
   defaultDataDir,
-  defaultDedicatedUserDataDir,
+  defaultProfileDir,
+  defaultRuntimeDir,
+  defaultUserChromeDir,
+  earlierProfileDirs,
 } from '../../../../src/host/platform/locations.ts';
 
 /** Sets environment variables for one test. */
@@ -19,22 +21,29 @@ function withEnv(t: TestContext, values: Readonly<Record<string, string>>): void
   });
 }
 
-test('keeps its files in the DSH home', (t) => {
+test('keeps its profile and records in the DSH home, and knows where 0.2 kept the profile', (t) => {
   withEnv(t, { DSH_HOME: '/srv/dsh-home' });
   assert.equal(defaultDataDir(), join('/srv/dsh-home', 'dsh-chrome'));
-  assert.equal(
-    defaultDedicatedUserDataDir(),
+  assert.equal(defaultProfileDir(), join('/srv/dsh-home', 'dsh-chrome', 'chrome-profile'));
+  assert.deepEqual(earlierProfileDirs(), [
     join('/srv/dsh-home', 'dsh-chrome', 'profiles', 'dedicated'),
-  );
+  ]);
 });
 
-test('gives each DSH home a connector socket of its own in the runtime directory', (t) => {
+test('gives each DSH home a runtime directory of its own, for its screen', (t) => {
   withEnv(t, { XDG_RUNTIME_DIR: '/run/user/1000', DSH_HOME: '/srv/a' });
-  const first = defaultConnectorSocketPath();
+  const first = defaultRuntimeDir();
   withEnv(t, { DSH_HOME: '/srv/b' });
-  const second = defaultConnectorSocketPath();
-  assert.match(first, /^\/run\/user\/1000\/dsh-chrome\/[0-9a-f]{12}\.sock$/);
+  const second = defaultRuntimeDir();
+  assert.match(first, /^\/run\/user\/1000\/dsh-chrome\/[0-9a-f]{12}$/);
   assert.notEqual(first, second);
   withEnv(t, { DSH_HOME: '/srv/a' });
-  assert.equal(defaultConnectorSocketPath(), first);
+  assert.equal(defaultRuntimeDir(), first);
+});
+
+test("finds the user's own Chrome where Chrome keeps it on Linux", (t) => {
+  withEnv(t, { XDG_CONFIG_HOME: '/home/someone/.config' });
+  if (process.platform !== 'darwin') {
+    assert.equal(defaultUserChromeDir(), join('/home/someone/.config', 'google-chrome'));
+  }
 });

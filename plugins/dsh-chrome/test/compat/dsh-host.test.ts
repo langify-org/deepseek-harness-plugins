@@ -115,6 +115,25 @@ test('a signed-in viewer watches its session and hears why a page cannot open', 
   socket.close();
 });
 
+test('the host row finishes starting only once ctx.chrome is available', { skip }, async () => {
+  // DSH reports the rows that inject `chrome` (tools, context) as not activated when the
+  // service is still starting at the moment the host row counts as started.
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-chrome-compat-start-'));
+  const separate = await startDshHost();
+  try {
+    const plugin = await import(pathToFileURL(join(distDir, 'host', 'index.js')).href);
+    await separate.root.plugin(plugin, {
+      dailyProfile: { userDataDir: join(dir, 'chrome') },
+      dataDir: join(dir, 'data'),
+      connectorSocketPath: join(dir, 'connector.sock'),
+    });
+    assert.notEqual(separate.root.get('chrome'), undefined);
+  } finally {
+    await separate.dispose();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('the tools row registers every chrome tool with a valid definition', { skip }, () => {
   const tools = root?.get('tools') as RecordingTools | undefined;
   assert.deepEqual(tools?.registered.map((tool) => tool.name).sort(), [

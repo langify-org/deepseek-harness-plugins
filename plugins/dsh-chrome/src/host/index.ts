@@ -118,8 +118,10 @@ export const Config: z<Config> = z.object({
     .default({}),
 });
 
-export function apply(ctx: Context, config: Config): void {
-  ctx.plugin(ChromeService, {
+export async function apply(ctx: Context, config: Config): Promise<void> {
+  // This row counts as started once `ctx.chrome` is: DSH reports the rows that use it
+  // (dsh-chrome-tools, dsh-chrome-context) as not activated if they are checked earlier.
+  await ctx.plugin(ChromeService, {
     dailyProfile: config.dailyProfile,
     dedicatedProfile: config.dedicatedProfile,
     defaultProfile: config.defaultProfile,

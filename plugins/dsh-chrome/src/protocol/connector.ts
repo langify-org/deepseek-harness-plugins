@@ -56,6 +56,7 @@ export const CONNECTOR_CDP_METHODS = [
   'Page.getFrameTree',
   'Page.getLayoutMetrics',
   'Page.getNavigationHistory',
+  'Page.handleJavaScriptDialog',
   'Page.navigate',
   'Page.navigateToHistoryEntry',
   'Page.reload',
@@ -67,6 +68,8 @@ export const CONNECTOR_CDP_METHODS = [
 
 export const CONNECTOR_CDP_EVENTS = [
   'Page.frameNavigated',
+  'Page.javascriptDialogClosed',
+  'Page.javascriptDialogOpening',
   'Page.loadEventFired',
   'Page.navigatedWithinDocument',
   'Page.screencastFrame',
@@ -119,6 +122,7 @@ const PARAMETER_RULES: { readonly [M in ConnectorCdpMethod]: ParameterRule } = {
   'Page.getFrameTree': only(),
   'Page.getLayoutMetrics': only(),
   'Page.getNavigationHistory': only(),
+  'Page.handleJavaScriptDialog': only('accept', 'promptText'),
   'Page.navigate': (params) =>
     only('url')(params) ??
     (typeof params['url'] === 'string' && normalizeAddress(params['url']) !== undefined
@@ -239,12 +243,25 @@ export interface PageEndedMessage {
   readonly reason: PageEndReason;
 }
 
+/**
+ * An owned page opened another tab, such as a popup (`window.open`) or a link that opens
+ * a new tab. The connector controls it from then on, in the opener's group.
+ */
+export interface PageOpenedMessage {
+  readonly type: 'page-opened';
+  readonly page: PageSnapshot;
+  readonly openerTabId: TabId;
+  /** Whether Chrome put it in front, as it does a popup or a link's new tab. */
+  readonly foreground: boolean;
+}
+
 export type ExtensionMessage =
   | HelloMessage
   | ResponseMessage
   | CdpEventMessage
   | PageChangedMessage
-  | PageEndedMessage;
+  | PageEndedMessage
+  | PageOpenedMessage;
 
 // Relay → host
 
@@ -278,6 +295,15 @@ export interface WelcomeMessage {
    * unpacked connector reloads itself from disk to pick it up.
    */
   readonly reloadTo: string | null;
+  /**
+   * Whether Chrome's windows are on a screen someone sees. Where they are not, as on the
+   * dedicated Chrome's virtual display, the connector gives each page a window of its own,
+   * and activating a page focuses its window: Chrome renders a window's active tab only,
+   * and shows a page's `confirm` and `prompt` only while it is the active tab of the last
+   * focused window. On a screen someone sees, pages share one window, and the connector
+   * never takes the focus, which would raise the window over what the user is doing.
+   */
+  readonly visibleWindows: boolean;
 }
 
 export interface RequestMessage<M extends ConnectorMethod> {
@@ -332,6 +358,13 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | undefi
         ? { type: 'page-ended', tabId, reason }
         : undefined;
     }
+    case 'page-opened': {
+      const page = parsePageSnapshot(value['page']);
+      const { openerTabId, foreground } = value;
+      return page !== undefined && isNumber(openerTabId) && typeof foreground === 'boolean'
+        ? { type: 'page-opened', page, openerTabId, foreground }
+        : undefined;
+    }
     default:
       return undefined;
   }
@@ -342,8 +375,10 @@ export function parseHostMessage(value: unknown): HostMessage | undefined {
   const { type, id, method, params } = value;
   if (type === 'welcome') {
     const { protocol, reloadTo } = value;
+    // A host from before `visibleWindows` arranged every Chrome as one someone sees.
+    const visibleWindows = value['visibleWindows'] !== false;
     return isNumber(protocol) && (reloadTo === null || isString(reloadTo))
-      ? { type: 'welcome', protocol, reloadTo }
+      ? { type: 'welcome', protocol, reloadTo, visibleWindows }
       : undefined;
   }
   if (type !== 'request' || !isNumber(id) || !isRecord(params)) return undefined;

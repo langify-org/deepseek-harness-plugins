@@ -8,19 +8,20 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import z from '@deepseek-ai/schemastery';
+import type { DedicatedDisplay } from '../protocol/viewer.ts';
 import {
   ChromeService,
   DAILY_PROFILE,
   DEDICATED_PROFILE,
   type ProfileName,
-} from './runtime/chrome-service.ts';
+} from './chrome/chrome-service.ts';
 import {
   defaultChromeUserDataDir,
   defaultConnectorSocketPath,
   defaultDataDir,
   defaultDedicatedUserDataDir,
-} from './runtime/locations.ts';
-import * as viewer from './view/index.ts';
+} from './platform/locations.ts';
+import * as viewer from './viewer/index.ts';
 
 export const name = 'dsh-chrome';
 
@@ -33,7 +34,8 @@ export interface Config {
     enabled: boolean;
     executable: string;
     userDataDir: string;
-    display: 'virtual' | 'desktop';
+    display: DedicatedDisplay;
+    shareNativeHosts: boolean;
   };
   defaultProfile: ProfileName;
   dataDir: string;
@@ -51,8 +53,11 @@ export const Config: z<Config> = z.object({
     .object({
       enabled: z
         .boolean()
-        .default(true)
-        .description('Let the connector in your own Chrome profile reach this DSH.'),
+        .default(false)
+        .description(
+          'Let the connector in your own Chrome profile reach this DSH. Its pages open in a ' +
+            'window of your Chrome, on your desktop.',
+        ),
       userDataDir: z
         .string()
         .default(defaultChromeUserDataDir())
@@ -63,9 +68,10 @@ export const Config: z<Config> = z.object({
     .object({
       enabled: z
         .boolean()
-        .default(false)
+        .default(true)
         .description(
-          'Start a separate Chrome profile that dsh-chrome owns, when a page asks for it.',
+          'Run a Chrome of its own for dsh-chrome, on a profile of its own, started when a page ' +
+            'opens. Its windows stay out of sight; the sidebar shows its pages.',
         ),
       executable: z.string().default('google-chrome-stable').description('The Chrome to start.'),
       userDataDir: z
@@ -76,14 +82,22 @@ export const Config: z<Config> = z.object({
         .union(['virtual', 'desktop'] as const)
         .default('virtual')
         .description(
-          "'virtual' runs it on a private Xvfb display that keeps working while the screen is locked; " +
-            "'desktop' shows its window, for signing in to sites the first time.",
+          "'virtual' keeps its windows on a private Xvfb display, which also works while the " +
+            "screen is locked; 'desktop' shows them. The sidebar can show them for a while, to " +
+            'set the profile up.',
+        ),
+      shareNativeHosts: z
+        .boolean()
+        .default(true)
+        .description(
+          "Let its extensions reach the native apps your own Chrome's reach, such as " +
+            "1Password's desktop app, by linking their native messaging manifests.",
         ),
     })
     .default({}),
   defaultProfile: z
     .union([DAILY_PROFILE, DEDICATED_PROFILE] as const)
-    .default(DAILY_PROFILE)
+    .default(DEDICATED_PROFILE)
     .description('The profile new pages open in.'),
   dataDir: z
     .string()

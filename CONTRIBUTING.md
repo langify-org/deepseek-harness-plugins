@@ -64,7 +64,11 @@ A plugin lives in `plugins/<name>/` and is one npm package. Its parts:
 | `docs/` | Design notes: the concepts, the decisions, and why. |
 
 Every process boundary gets its own TypeScript project (`tsconfig.<target>.json`), so
-code cannot use an API its runtime lacks.
+code cannot use an API its runtime lacks. Within a process, directories are the parts of the
+code, each named for what it is, and a part depends on others in one direction only. A
+plugin writes down which part may import which in a test that checks every import, as
+dsh-chrome's [`test/unit/dependencies.test.ts`](plugins/dsh-chrome/test/unit/dependencies.test.ts)
+does: the tree then says how the code depends on itself, and keeps saying it.
 
 The build tool holds `package.json` to the build declaration: exports must point at the
 build output, the bundle patch is generated from the declared host plugins, and a build

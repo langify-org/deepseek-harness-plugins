@@ -11,6 +11,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { normalizeAddress } from '../protocol/address.ts';
+import type { PageDialogState } from '../protocol/viewer.ts';
 import type { AddToMessageResult } from './message-attachments.ts';
 import { ViewerSession, type ViewerSnapshot } from './viewer/viewer-session.ts';
 import { ViewerSurface } from './viewer/viewer-surface.tsx';
@@ -119,6 +120,24 @@ function ChromePage({
         onAddScreenshot={addScreenshot}
         onAddText={addText}
       />
+      {snapshot.dedicatedChrome?.display === 'desktop' ? (
+        <p role="status" style={helpStyle}>
+          <span style={{ flex: 1 }}>
+            Chrome is on the screen of the computer DSH runs on, to set it up: sign in to sites or
+            to Chrome, add extensions such as 1Password.
+          </span>
+          <button
+            type="button"
+            style={buttonStyle}
+            onClick={() => session.setDedicatedDisplay('virtual')}
+          >
+            Done
+          </button>
+        </p>
+      ) : null}
+      {snapshot.page?.dialog == null ? null : (
+        <PageDialogBar session={session} dialog={snapshot.page.dialog} />
+      )}
       {snapshot.help === undefined ? null : (
         <div role="alert" style={helpStyle}>
           <span style={{ flex: 1 }}>
@@ -149,11 +168,57 @@ function ChromePage({
         </p>
       ) : null}
       {snapshot.page === undefined ? (
-        <p style={hintStyle}>Enter an address to open a page in your Chrome.</p>
+        <p style={hintStyle}>Enter an address to open a page in Chrome.</p>
       ) : (
         <ViewerSurface session={session} />
       )}
     </div>
+  );
+}
+
+/**
+ * The dialog the shown page opened. In Chrome it would stand in front of the page, which
+ * takes no input until it is answered; here it stands above it.
+ */
+function PageDialogBar({
+  session,
+  dialog,
+}: {
+  readonly session: ViewerSession;
+  readonly dialog: PageDialogState;
+}) {
+  const [promptText, setPromptText] = useState(dialog.defaultPrompt);
+  useEffect(() => setPromptText(dialog.defaultPrompt), [dialog]);
+  const answer = (accept: boolean) =>
+    session.answerDialog(accept, dialog.kind === 'prompt' ? promptText : null);
+  const leaving = dialog.kind === 'beforeunload';
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    answer(true);
+  };
+  return (
+    <form role="alertdialog" aria-label="The page asks" style={helpStyle} onSubmit={submit}>
+      <span style={{ flex: 1, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+        <strong>{leaving ? 'Leave this page?' : 'The page asks:'}</strong>{' '}
+        {leaving ? 'Changes you made may not be saved.' : dialog.message}
+      </span>
+      {dialog.kind === 'prompt' ? (
+        <input
+          style={addressStyle}
+          value={promptText}
+          onChange={(event) => setPromptText(event.target.value)}
+          aria-label="Your answer"
+        />
+      ) : null}
+      <button type="submit" style={buttonStyle}>
+        {leaving ? 'Leave' : 'OK'}
+      </button>
+      {dialog.kind === 'alert' ? null : (
+        <button type="button" style={buttonStyle} onClick={() => answer(false)}>
+          {leaving ? 'Stay' : 'Cancel'}
+        </button>
+      )}
+    </form>
   );
 }
 
@@ -228,9 +293,24 @@ function Toolbar({
       {action('Add a screenshot to your message', onAddScreenshot, '📷')}
       {action('Add the page text to your message', onAddText, '📄')}
       {action('Close page', () => session.closePage(), '✕')}
+      {snapshot.dedicatedChrome === undefined || snapshot.dedicatedChrome.state === 'off' ? null : (
+        <button
+          type="button"
+          style={buttonStyle}
+          disabled={snapshot.dedicatedChrome.display === 'desktop'}
+          onClick={() => session.setDedicatedDisplay('desktop')}
+          aria-label={SET_UP_LABEL}
+          title={SET_UP_LABEL}
+        >
+          ⚙
+        </button>
+      )}
     </form>
   );
 }
+
+const SET_UP_LABEL =
+  'Set up Chrome: show its window on the computer DSH runs on (Chrome starts again, and its pages close)';
 
 /** Whether the DSH page itself is on screen: not in a background browser tab or app. */
 function useDocumentVisible(): boolean {

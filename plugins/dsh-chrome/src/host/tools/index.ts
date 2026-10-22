@@ -1,6 +1,6 @@
 /**
- * Tools that let the agent read and operate the session's Chrome pages: the same pages
- * the user sees in the sidebar, in the user's own Chrome profile.
+ * Tools that let the agent read and operate the session's Chrome pages: the same pages the
+ * user sees in the sidebar, in the Chrome dsh-chrome runs or in the user's own.
  *
  * Mounted as its own Loader row (`dsh-chrome-tools`), so a profile can turn the tools
  * off and keep the shared view.
@@ -9,15 +9,17 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { AttachmentId, ImageAttachmentRef, ImageMediaType } from '@deepseek-ai/dsh-attachment';
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
 import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools';
+import type { Protocol } from 'devtools-protocol';
 import { normalizeAddress } from '../../protocol/address.ts';
-import { click, navigate, press, scroll, type } from '../page/actions.ts';
-import { ElementRefs } from '../page/element-refs.ts';
-import { parseKeyCombo } from '../page/keys.ts';
-import { quotedTitle } from '../page/quoted-title.ts';
-import { captureViewport } from '../page/screenshot.ts';
-import type { Protocol } from '../runtime/cdp.ts';
-import type {} from '../runtime/chrome-service.ts';
-import { boundToSignal, type ChromePage } from '../runtime/pages.ts';
+import type {} from '../chrome/chrome-service.ts';
+import type { ChromePage, PageDialog } from '../chrome/pages/page.ts';
+import { boundToSignal } from '../chrome/pages/signal-bound-page.ts';
+import { click, navigate, press, scroll, type } from '../page-operations/actions.ts';
+import { answerDialog, describeDialog, untilDialog } from '../page-operations/dialogs.ts';
+import { ElementRefs } from '../page-operations/element-refs.ts';
+import { parseKeyCombo } from '../page-operations/keys.ts';
+import { quotedTitle } from '../page-operations/quoted-title.ts';
+import { captureViewport } from '../page-operations/screenshot.ts';
 import { dshOriginTest } from './dsh-origins.ts';
 
 export const name = 'dsh-chrome-tools';
@@ -60,6 +62,21 @@ const PAGE_RESULT = {
   properties: { page: { ...PAGE_VALUE, required: true } },
 } as const;
 
+/** What an action on a page reports besides the page: a dialog it led to, pages it opened. */
+const ACTION_PROPERTIES = {
+  dialog: {
+    type: 'string',
+    description: 'The dialog the page opened, which now waits for an answer.',
+  },
+  opened: { type: 'array', items: PAGE_VALUE, description: 'The pages the action opened.' },
+} as const;
+
+const ACTION_RESULT = {
+  type: 'object',
+  additionalProperties: false,
+  properties: { page: { ...PAGE_VALUE, required: true }, ...ACTION_PROPERTIES },
+} as const;
+
 /** Every image media type, checked against the attachment store's by the compiler. */
 const IMAGE_MEDIA_TYPES: Readonly<Record<ImageMediaType, true>> = {
   'image/png': true,
@@ -72,6 +89,13 @@ interface PageValue {
   readonly id: string;
   readonly url: string;
   readonly title: string;
+}
+
+/** An action's report on what it led to. */
+interface ActionReport {
+  readonly page: PageValue;
+  readonly dialog?: string;
+  readonly opened?: PageValue[];
 }
 
 export function apply(ctx: Context): void {
@@ -115,22 +139,65 @@ export function apply(ctx: Context): void {
     }
   };
 
+  /** Refuses a page that shows a dialog: it answers nothing else until the dialog is answered. */
+  const refuseWhileDialog = (page: ChromePage): void => {
+    if (page.dialog !== undefined) throw dialogRefusal(page, page.dialog);
+  };
+
   /**
    * The page a call reads or operates, as the call sees it: its commands end when the call
-   * is stopped. A page showing DSH is refused.
+   * is stopped. A page showing DSH, or a dialog, is refused.
    */
   const pageFor = async (exec: ToolRunContext, pageId: string | undefined): Promise<ChromePage> => {
     const page = boundToSignal(sessionPage(exec, pageId), exec.signal);
+    refuseWhileDialog(page);
     await refuseDsh(page);
     return page;
+  };
+
+  /** Reads a page, unless it opens a dialog meanwhile, which would leave the read unanswered. */
+  const read = async <T>(page: ChromePage, reading: () => Promise<T>): Promise<T> => {
+    const outcome = await untilDialog(page, reading);
+    if (outcome.dialog === undefined) return outcome.completed;
+    throw dialogRefusal(page, outcome.dialog);
+  };
+
+  /**
+   * Acts on a page as the user would on the page in front of them: the page comes to the
+   * front first, since Chrome shows the dialogs of that page only and answers the others'
+   * itself. A dialog the action leads to ends it, and the report names the dialog, and the
+   * pages the action opened.
+   */
+  const act = async <T>(
+    page: ChromePage,
+    action: () => Promise<T>,
+  ): Promise<{ readonly completed: T | undefined; readonly report: ActionReport }> => {
+    await page.bringToFront();
+    const opened: ChromePage[] = [];
+    const stop = chrome.pages.onPageOpened((opening) => {
+      if (opening.opener.id === page.id) opened.push(opening.page);
+    });
+    try {
+      const outcome = await untilDialog(page, action);
+      return {
+        completed: outcome.completed,
+        report: {
+          page: pageValue(page),
+          ...(outcome.dialog === undefined ? {} : { dialog: describeDialog(outcome.dialog) }),
+          ...(opened.length === 0 ? {} : { opened: opened.map(pageValue) }),
+        },
+      };
+    } finally {
+      stop();
+    }
   };
 
   const tools = [
     defineTool({
       name: 'chrome_pages',
       description:
-        "List this session's Chrome pages. They live in the user's own Chrome, with the user's " +
-        'logins, and the user sees them in the Chrome tab of the right sidebar.',
+        "List this session's Chrome pages, which the user also sees in the Chrome tab of the right " +
+        'sidebar.',
       parameters: {},
       output: {
         schema: {
@@ -146,6 +213,8 @@ export function apply(ctx: Context): void {
                 properties: {
                   ...PAGE_VALUE.properties,
                   shown: { type: 'boolean', required: true },
+                  openedBy: { type: 'string', description: 'The page that opened it.' },
+                  dialog: { type: 'string', description: 'The dialog it shows.' },
                 },
               },
             },
@@ -156,9 +225,13 @@ export function apply(ctx: Context): void {
             pages.length === 0
               ? 'This session has no Chrome pages. Open one with chrome_open.'
               : pages
-                  .map(
-                    (page) =>
-                      `- ${describePage(page)}${page.shown ? ' (the user is looking at it)' : ''}`,
+                  .map((page) =>
+                    [
+                      `- ${describePage(page)}`,
+                      page.openedBy === undefined ? '' : `, opened by page ${page.openedBy}`,
+                      page.shown ? ', the user is looking at it' : '',
+                      page.dialog === undefined ? '' : `, shows ${page.dialog} (${UNTRUSTED_NOTE})`,
+                    ].join(''),
                   )
                   .join('\n'),
           ),
@@ -168,6 +241,8 @@ export function apply(ctx: Context): void {
         pages: chrome.pagesOf(sessionOf(exec)).map((page) => ({
           ...pageValue(page),
           shown: chrome.pages.isShown(page.id),
+          ...(page.openerId === undefined ? {} : { openedBy: page.openerId }),
+          ...(page.dialog === undefined ? {} : { dialog: describeDialog(page.dialog) }),
         })),
       }),
     }),
@@ -175,9 +250,9 @@ export function apply(ctx: Context): void {
     defineTool({
       name: 'chrome_open',
       description:
-        "Open a web page in a new tab of the user's own Chrome, signed in as the user, and show it " +
-        'in the sidebar. Use it for sites that need the user’s logins; plain public pages are ' +
-        'cheaper to read with web_fetch.',
+        'Open a web page in Chrome and show it in the sidebar. Chrome keeps the sign-ins the user ' +
+        "made in it, so use it for sites that need the user's accounts; when a site asks to sign " +
+        'in, ask the user with chrome_ask_user. Plain public pages are cheaper to read with web_fetch.',
       parameters: {
         url: {
           type: 'string',
@@ -188,8 +263,8 @@ export function apply(ctx: Context): void {
           type: 'string',
           enum: ['daily', 'dedicated'],
           description:
-            "Which Chrome profile: 'daily' is the user's own; 'dedicated' is a separate profile, " +
-            'if the user set one up. Defaults to the configured profile.',
+            "Which Chrome profile: 'dedicated' is the Chrome dsh-chrome runs for DSH; 'daily' is " +
+            "the user's own Chrome, if the user connected it. Defaults to the configured profile.",
         },
       },
       output: {
@@ -228,10 +303,11 @@ export function apply(ctx: Context): void {
           properties: {
             page: { ...PAGE_VALUE, required: true },
             loaded: { type: 'boolean', required: true },
+            ...ACTION_PROPERTIES,
           },
         },
-        render: (_args, { page, loaded }) =>
-          text(`${loaded ? 'Loaded' : 'Still loading'}: ${describePage(page)}.`),
+        render: (_args, { loaded, ...report }) =>
+          actionText(`${loaded ? 'Loaded' : 'Still loading'}:`, report),
       },
       timeoutMs: 60_000,
       execute: async (args, exec) => {
@@ -239,13 +315,13 @@ export function apply(ctx: Context): void {
         if ((args.url === undefined) === (args.history === undefined)) {
           throw new Error('give either url or history');
         }
-        let loaded: boolean;
-        if (args.url !== undefined) {
-          loaded = await navigate(page, { url: addressFor(args.url) }, exec.signal);
-        } else {
-          loaded = await navigate(page, { history: args.history ?? 'reload' }, exec.signal);
-        }
-        return { page: pageValue(page), loaded };
+        const target =
+          args.url !== undefined
+            ? { url: addressFor(args.url) }
+            : { history: args.history ?? ('reload' as const) };
+        // Leaving a page can ask whether to leave it.
+        const { completed, report } = await act(page, () => navigate(page, target, exec.signal));
+        return { ...report, loaded: completed ?? false };
       },
     }),
 
@@ -282,7 +358,7 @@ export function apply(ctx: Context): void {
           Math.max(args.maxChars ?? DEFAULT_SNAPSHOT_CHARS, 1000),
           MAX_SNAPSHOT_CHARS,
         );
-        const snapshot = await refs.snapshot(page, maxChars);
+        const snapshot = await read(page, () => refs.snapshot(page, maxChars));
         // The page may have gone on to DSH while it was read.
         await refuseDsh(page);
         return { page: pageValue(page), snapshot: snapshot.text, truncated: snapshot.truncated };
@@ -337,7 +413,7 @@ export function apply(ctx: Context): void {
         if (attachments === undefined || !(await acceptsImages(ctx, exec))) {
           throw new Error('this model cannot see images here; read the page with chrome_snapshot');
         }
-        const data = await captureViewport(page);
+        const data = await read(page, () => captureViewport(page));
         await refuseDsh(page);
         const image = await attachments.saveImage({
           data,
@@ -357,15 +433,16 @@ export function apply(ctx: Context): void {
         doubleClick: { type: 'boolean', description: 'Double-click instead.' },
       },
       output: {
-        schema: PAGE_RESULT,
-        render: (args, { page }) =>
-          text(`Clicked ${args.ref} on ${describePage(page)}. Take a snapshot to see the result.`),
+        schema: ACTION_RESULT,
+        render: (args, report) =>
+          actionText(`Clicked ${args.ref} on`, report, 'Take a snapshot to see the result.'),
       },
       timeoutMs: 30_000,
       execute: async (args, exec) => {
         const page = await pageFor(exec, args.page);
-        await click(page, await refs.resolve(page, args.ref), args.doubleClick === true ? 2 : 1);
-        return { page: pageValue(page) };
+        const element = await refs.resolve(page, args.ref);
+        const clicks = args.doubleClick === true ? 2 : 1;
+        return (await act(page, () => click(page, element, clicks))).report;
       },
     }),
 
@@ -385,18 +462,15 @@ export function apply(ctx: Context): void {
         submit: { type: 'boolean', description: 'Press Enter afterwards.' },
       },
       output: {
-        schema: PAGE_RESULT,
-        render: (_args, { page }) => text(`Typed into ${describePage(page)}.`),
+        schema: ACTION_RESULT,
+        render: (_args, report) => actionText('Typed into', report),
       },
       timeoutMs: 30_000,
       execute: async (args, exec) => {
         const page = await pageFor(exec, args.page);
-        await type(page, args.text, {
-          element: args.ref === undefined ? undefined : await refs.resolve(page, args.ref),
-          replace: args.replace ?? true,
-          submit: args.submit === true,
-        });
-        return { page: pageValue(page) };
+        const element = args.ref === undefined ? undefined : await refs.resolve(page, args.ref);
+        const options = { element, replace: args.replace ?? true, submit: args.submit === true };
+        return (await act(page, () => type(page, args.text, options))).report;
       },
     }),
 
@@ -409,14 +483,14 @@ export function apply(ctx: Context): void {
         keys: { type: 'string', required: true, description: 'The key or shortcut.' },
       },
       output: {
-        schema: PAGE_RESULT,
-        render: (args, { page }) => text(`Pressed ${args.keys} on ${describePage(page)}.`),
+        schema: ACTION_RESULT,
+        render: (args, report) => actionText(`Pressed ${args.keys} on`, report),
       },
       timeoutMs: 30_000,
       execute: async (args, exec) => {
         const page = await pageFor(exec, args.page);
-        await press(page, parseKeyCombo(args.keys));
-        return { page: pageValue(page) };
+        const keys = parseKeyCombo(args.keys);
+        return (await act(page, () => press(page, keys))).report;
       },
     }),
 
@@ -432,16 +506,49 @@ export function apply(ctx: Context): void {
         },
       },
       output: {
-        schema: PAGE_RESULT,
-        render: (_args, { page }) => text(`Scrolled ${describePage(page)}.`),
+        schema: ACTION_RESULT,
+        render: (_args, report) => actionText('Scrolled', report),
       },
       timeoutMs: 30_000,
       execute: async (args, exec) => {
         const page = await pageFor(exec, args.page);
-        await scroll(page, {
-          element: args.ref === undefined ? undefined : await refs.resolve(page, args.ref),
-          deltaY: args.pixels,
-        });
+        const element = args.ref === undefined ? undefined : await refs.resolve(page, args.ref);
+        return (await act(page, () => scroll(page, { element, deltaY: args.pixels }))).report;
+      },
+    }),
+
+    defineTool({
+      name: 'chrome_answer_dialog',
+      description:
+        'Answer the dialog a page shows: an alert, a confirmation, a question, or whether to leave ' +
+        'the page. It blocks the page until it is answered. Answer as the user would want; when ' +
+        'unsure, ask the user.',
+      parameters: {
+        page: PAGE_PARAMETER,
+        accept: {
+          type: 'boolean',
+          required: true,
+          description: 'OK (true) or Cancel (false). An alert has OK only.',
+        },
+        text: {
+          type: 'string',
+          description: "A question's answer; without it, the suggested text.",
+        },
+      },
+      output: {
+        schema: PAGE_RESULT,
+        render: (args, { page }) =>
+          text(
+            `Answered the dialog of ${describePage(page)} with ${args.accept ? 'OK' : 'Cancel'}.`,
+          ),
+      },
+      timeoutMs: 30_000,
+      execute: async (args, exec) => {
+        const page = boundToSignal(sessionPage(exec, args.page), exec.signal);
+        if (page.dialog === undefined) {
+          throw new Error(`${describePage(pageValue(page))} shows no dialog`);
+        }
+        await answerDialog(page, { accept: args.accept, promptText: args.text });
         return { page: pageValue(page) };
       },
     }),
@@ -557,6 +664,31 @@ function imageValue(ref: ImageAttachmentRef) {
 
 function describePage(page: PageValue): string {
   return `page ${page.id} ${quotedTitle(page.title)} ${page.url}`;
+}
+
+/** Why a page that shows a dialog cannot be read or operated, and what to do. */
+function dialogRefusal(page: ChromePage, dialog: PageDialog): Error {
+  return new Error(
+    `${describePage(pageValue(page))} shows ${describeDialog(dialog)}, and answers nothing ` +
+      `else until it is answered: answer it with chrome_answer_dialog. ${UNTRUSTED_NOTE}`,
+  );
+}
+
+/** An action's result: what was done, the pages it opened, and a dialog it led to. */
+function actionText(done: string, report: ActionReport, next?: string): ContentBlock[] {
+  const sentences = [`${done} ${describePage(report.page)}.`];
+  if (report.opened !== undefined) {
+    sentences.push(`It opened ${report.opened.map(describePage).join(', ')}.`);
+  }
+  if (report.dialog !== undefined) {
+    sentences.push(
+      `The page now shows ${report.dialog}, and waits: answer it with chrome_answer_dialog.`,
+      UNTRUSTED_NOTE,
+    );
+  } else if (next !== undefined) {
+    sentences.push(next);
+  }
+  return text(sentences.join(' '));
 }
 
 function text(value: string): ContentBlock[] {

@@ -18,3 +18,16 @@ export const TEST_PAGE_HTML = `<!doctype html>
   setInterval(() => { document.getElementById('clock').textContent = String(++ticks); }, 50);
 </script>
 </body>`;
+
+/** A page that opens others and asks questions: a link's new tab, a popup, a confirmation. */
+export const OPENER_PAGE_PATH = '/opener';
+
+export const OPENER_PAGE_HTML = `<!doctype html>
+<meta charset="utf-8">
+<title>dsh-chrome opener page</title>
+<body style="margin:0;background:#fff">
+<a id="tab" href="/" target="_blank" style="position:absolute;left:20px;top:20px">New tab</a>
+<button id="popup" style="position:absolute;left:20px;top:80px" onclick="window.open('/', 'popup', 'popup,width=400,height=300')">Popup</button>
+<button id="ask" style="position:absolute;left:20px;top:140px" onclick="document.getElementById('answer').textContent = String(confirm('Proceed?'))">Ask</button>
+<p id="answer" style="position:absolute;left:20px;top:200px"></p>
+</body>`;

@@ -108,6 +108,13 @@ test('accepts a page end with either reason', () => {
   );
 });
 
+test('accepts a page that an owned page opened, and whether it came to the front', () => {
+  const opened = { type: 'page-opened', page: snapshot, openerTabId: 4, foreground: true };
+  assert.deepEqual(parseExtensionMessage(opened), opened);
+  assert.equal(parseExtensionMessage({ ...opened, foreground: 'yes' }), undefined);
+  assert.equal(parseExtensionMessage({ ...opened, openerTabId: undefined }), undefined);
+});
+
 test('rejects extension messages that do not match the protocol', () => {
   const malformed: readonly unknown[] = [
     null,
@@ -134,17 +141,28 @@ test('rejects extension messages that do not match the protocol', () => {
 
 test('accepts a welcome with no reload and with a version to reload to', () => {
   assert.deepEqual(
-    parseHostMessage({ type: 'welcome', protocol: 1, reloadTo: null, extra: 'drop' }),
-    {
+    parseHostMessage({
       type: 'welcome',
       protocol: 1,
       reloadTo: null,
-    },
+      visibleWindows: false,
+      extra: 'drop',
+    }),
+    { type: 'welcome', protocol: 1, reloadTo: null, visibleWindows: false },
   );
-  assert.deepEqual(parseHostMessage({ type: 'welcome', protocol: 1, reloadTo: '1.3.0' }), {
+  assert.deepEqual(
+    parseHostMessage({ type: 'welcome', protocol: 1, reloadTo: '1.3.0', visibleWindows: true }),
+    { type: 'welcome', protocol: 1, reloadTo: '1.3.0', visibleWindows: true },
+  );
+});
+
+test('takes a welcome that does not say how to arrange windows as one for windows someone sees', () => {
+  // A host from before the arrangement existed; never taking the focus is the safe guess.
+  assert.deepEqual(parseHostMessage({ type: 'welcome', protocol: 1, reloadTo: null }), {
     type: 'welcome',
     protocol: 1,
-    reloadTo: '1.3.0',
+    reloadTo: null,
+    visibleWindows: true,
   });
 });
 

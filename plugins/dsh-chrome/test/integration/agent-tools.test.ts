@@ -26,7 +26,7 @@ import {
   type ToolRunContext,
   validateJsonSchemaValue,
 } from '@deepseek-ai/dsh-tools';
-import type { ChromeService } from '../../src/host/runtime/chrome-service.ts';
+import type { ChromeService } from '../../src/host/chrome/chrome-service.ts';
 import { type DshHost, startDshHost } from '../support/dsh-host.ts';
 import { chromeExecutable, distDir, missingRequirements } from '../support/environment.ts';
 import { jpegSize } from '../support/jpeg.ts';

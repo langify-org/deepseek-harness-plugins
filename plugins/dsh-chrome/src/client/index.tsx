@@ -38,7 +38,7 @@ export function apply(ctx: Context): void {
             id: 'open',
             order: 31,
             title: () => 'Chrome',
-            description: () => 'A page in your own Chrome, shared with the agent',
+            description: () => 'A Chrome page, shared with the agent',
           },
         ],
       }),

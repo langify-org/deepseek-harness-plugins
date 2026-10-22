@@ -97,7 +97,11 @@ export type ViewerRequest =
   /** The user's answer to the agent's request for help on the shown page. */
   | { readonly type: 'answer-help'; readonly requestId: string; readonly answer: HelpAnswer }
   /** Asks for the shown page's text, to add it to the user's message. */
-  | { readonly type: 'read-text'; readonly requestId: string };
+  | { readonly type: 'read-text'; readonly requestId: string }
+  /** The user's answer to the dialog the shown page opened. */
+  | { readonly type: 'answer-dialog'; readonly accept: boolean; readonly promptText: string | null }
+  /** Moves the dedicated Chrome to a display: its window on the desktop, to set it up, or hidden. */
+  | { readonly type: 'set-dedicated-display'; readonly display: DedicatedDisplay };
 
 export type ViewerRequestType = ViewerRequest['type'];
 
@@ -116,10 +120,23 @@ const VIEWER_REQUEST_TYPES: Readonly<Record<ViewerRequestType, true>> = {
   'frame-drawn': true,
   'answer-help': true,
   'read-text': true,
+  'answer-dialog': true,
+  'set-dedicated-display': true,
 };
 
-/** Who opened a page: the agent with its tools, or the user from a viewer. */
-export type PageOpener = 'agent' | 'user';
+/**
+ * Who opened a page: the agent with its tools, the user from a viewer, or another page of
+ * the session (a sign-in popup, a link that opens a new tab).
+ */
+export type PageOpener = 'agent' | 'user' | 'page';
+
+/** A JavaScript dialog a page opened, which blocks it until it is answered. */
+export interface PageDialogState {
+  readonly kind: 'alert' | 'confirm' | 'prompt' | 'beforeunload';
+  readonly message: string;
+  /** The text a `prompt` offers; empty for the other kinds. */
+  readonly defaultPrompt: string;
+}
 
 /** What a viewer shows about a page besides its pixels. */
 export interface PageState {
@@ -131,6 +148,22 @@ export interface PageState {
   readonly browserLabel: string;
   /** `null` for a page the host adopted from a connector that outlived it. */
   readonly openedBy: PageOpener | null;
+  /** The page that opened this one, when `openedBy` is `page`. */
+  readonly openerId: string | null;
+  readonly dialog: PageDialogState | null;
+}
+
+/**
+ * Where the dedicated Chrome shows its windows: on a virtual display no one sees, or on
+ * the desktop of the computer DSH runs on, for setting the profile up.
+ */
+export type DedicatedDisplay = 'virtual' | 'desktop';
+
+/** The Chrome dsh-chrome starts on a profile of its own. */
+export interface DedicatedChromeState {
+  /** `off` when the dedicated profile is turned off in the settings. */
+  readonly state: 'off' | 'stopped' | 'starting' | 'running';
+  readonly display: DedicatedDisplay;
 }
 
 /** The agent asks the user to do something on the page, and waits. */
@@ -148,6 +181,8 @@ export type ViewerEvent =
   | { readonly type: 'ended'; readonly reason: string }
   /** The agent's open request for help on the shown page, or `null` when there is none. */
   | { readonly type: 'help'; readonly request: HelpRequestState | null }
+  /** The dedicated Chrome's state. Sent after `watch` and on every change. */
+  | { readonly type: 'dedicated-chrome'; readonly chrome: DedicatedChromeState }
   | {
       readonly type: 'page-text';
       readonly requestId: string;
@@ -265,6 +300,16 @@ export function parseViewerRequest(value: unknown): ViewerRequest | undefined {
       const { requestId } = value;
       return isString(requestId) ? { type: 'read-text', requestId } : undefined;
     }
+    case 'answer-dialog': {
+      const { accept, promptText } = value;
+      return typeof accept === 'boolean' && (promptText === null || isString(promptText))
+        ? { type: 'answer-dialog', accept, promptText }
+        : undefined;
+    }
+    case 'set-dedicated-display': {
+      const { display } = value;
+      return isDedicatedDisplay(display) ? { type: 'set-dedicated-display', display } : undefined;
+    }
     default:
       return undefined;
   }
@@ -300,6 +345,18 @@ export function parseViewerEvent(value: unknown): ViewerEvent | undefined {
       const { id, message } = request;
       return isString(id) && isString(message)
         ? { type: 'help', request: { id, message } }
+        : undefined;
+    }
+    case 'dedicated-chrome': {
+      const chrome = value['chrome'];
+      if (!isRecord(chrome)) return undefined;
+      const { state, display } = chrome;
+      return (state === 'off' ||
+        state === 'stopped' ||
+        state === 'starting' ||
+        state === 'running') &&
+        isDedicatedDisplay(display)
+        ? { type: 'dedicated-chrome', chrome: { state, display } }
         : undefined;
     }
     case 'page-text': {
@@ -377,15 +434,32 @@ function parseViewport(value: unknown): Viewport | undefined {
 
 function parsePageState(value: unknown): PageState | undefined {
   if (!isRecord(value)) return undefined;
-  const { id, url, title, loading, browserLabel, openedBy } = value;
+  const { id, url, title, loading, browserLabel, openedBy, openerId } = value;
+  const dialog = value['dialog'] === null ? null : parseDialog(value['dialog']);
   return isString(id) &&
     isString(url) &&
     isString(title) &&
     typeof loading === 'boolean' &&
     isString(browserLabel) &&
-    (openedBy === 'agent' || openedBy === 'user' || openedBy === null)
-    ? { id, url, title, loading, browserLabel, openedBy }
+    (openedBy === 'agent' || openedBy === 'user' || openedBy === 'page' || openedBy === null) &&
+    (openerId === null || isString(openerId)) &&
+    dialog !== undefined
+    ? { id, url, title, loading, browserLabel, openedBy, openerId, dialog }
     : undefined;
+}
+
+function parseDialog(value: unknown): PageDialogState | undefined {
+  if (!isRecord(value)) return undefined;
+  const { kind, message, defaultPrompt } = value;
+  return (kind === 'alert' || kind === 'confirm' || kind === 'prompt' || kind === 'beforeunload') &&
+    isString(message) &&
+    isString(defaultPrompt)
+    ? { kind, message, defaultPrompt }
+    : undefined;
+}
+
+function isDedicatedDisplay(value: unknown): value is DedicatedDisplay {
+  return value === 'virtual' || value === 'desktop';
 }
 
 function parseFrameHeader(value: unknown): FrameHeader | undefined {

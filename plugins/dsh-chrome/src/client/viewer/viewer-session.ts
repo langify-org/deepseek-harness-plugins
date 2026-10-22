@@ -1,5 +1,7 @@
 import type { ConnectionWebSocket } from '@deepseek-ai/dsh-client-connection/client';
 import type {
+  DedicatedChromeState,
+  DedicatedDisplay,
   FrameHeader,
   HelpAnswer,
   HelpRequestState,
@@ -24,6 +26,8 @@ export interface ViewerSnapshot {
   readonly help: HelpRequestState | undefined;
   /** A message for the user: why a page ended, or why a request failed. */
   readonly notice: string | undefined;
+  /** The Chrome dsh-chrome runs for DSH, once the host told. */
+  readonly dedicatedChrome: DedicatedChromeState | undefined;
 }
 
 export type FrameSink = (header: FrameHeader, image: Uint8Array<ArrayBuffer>) => void;
@@ -73,8 +77,11 @@ export class ViewerSession {
     pages: [],
     help: undefined,
     notice: undefined,
+    dedicatedChrome: undefined,
   };
   #socket: ViewerSocket | undefined;
+  /** The display the user asked the dedicated Chrome to move to, until it runs there. */
+  #movingTo: DedicatedDisplay | undefined;
   #pageId: string | undefined;
   #pendingUrl: string | undefined;
   #viewport: Viewport = { width: 800, height: 600, deviceScaleFactor: 1 };
@@ -159,6 +166,21 @@ export class ViewerSession {
 
   frameDrawn(seq: number): void {
     this.#send({ type: 'frame-drawn', seq });
+  }
+
+  /** Answers the shown page's dialog: OK or Cancel, and a prompt's text. */
+  answerDialog(accept: boolean, promptText: string | null): void {
+    if (this.#snapshot.page?.dialog == null) return;
+    this.#send({ type: 'answer-dialog', accept, promptText });
+  }
+
+  /**
+   * Moves the dedicated Chrome to a display: onto the screen of the computer DSH runs on, to
+   * set it up, or back out of sight. Chrome starts again there, and its pages close.
+   */
+  setDedicatedDisplay(display: DedicatedDisplay): void {
+    this.#movingTo = display;
+    this.#send({ type: 'set-dedicated-display', display });
   }
 
   answerHelp(answer: HelpAnswer): void {
@@ -268,11 +290,24 @@ export class ViewerSession {
         this.#pageId = undefined;
         this.#lastImage = undefined;
         this.#options.rememberPage(undefined);
-        this.#update({ page: undefined, help: undefined, notice: endedNotice(event.reason) });
+        this.#update({
+          page: undefined,
+          help: undefined,
+          notice:
+            event.reason === 'disconnected' && this.#movingTo !== undefined
+              ? movedNotice(this.#movingTo)
+              : endedNotice(event.reason),
+        });
         this.#showLatestIfIdle();
         return;
       case 'help':
         this.#update({ help: event.request ?? undefined });
+        return;
+      case 'dedicated-chrome':
+        if (event.chrome.state === 'running' && event.chrome.display === this.#movingTo) {
+          this.#movingTo = undefined;
+        }
+        this.#update({ dedicatedChrome: event.chrome });
         return;
       case 'page-text':
         this.#pendingTexts.get(event.requestId)?.({
@@ -315,6 +350,12 @@ export class ViewerSession {
     this.#snapshot = { ...this.#snapshot, ...change };
     for (const listener of this.#listeners) listener();
   }
+}
+
+function movedNotice(display: DedicatedDisplay): string {
+  return display === 'desktop'
+    ? 'Chrome is starting again on the screen of the computer DSH runs on; its pages closed.'
+    : 'Chrome is out of sight again; its pages closed.';
 }
 
 function endedNotice(reason: string): string {

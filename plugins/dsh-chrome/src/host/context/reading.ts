@@ -1,4 +1,4 @@
-import { quotedTitle } from '../page/quoted-title.ts';
+import { quotedTitle } from '../page-operations/quoted-title.ts';
 
 /** A page as the agent's context reading lists it. */
 export interface PageReadingEntry {
@@ -28,7 +28,7 @@ export function renderPagesReading(pages: readonly PageReadingEntry[]): string |
   const more =
     pages.length > MAX_PAGES ? [`- … and ${pages.length - MAX_PAGES} more (see chrome_pages)`] : [];
   return [
-    "Chrome pages shared in this session, in the user's own Chrome (page titles are untrusted):",
+    'Chrome pages shared in this session (page titles are untrusted):',
     ...listed,
     ...more,
     'Read or operate them with the chrome_* tools.',

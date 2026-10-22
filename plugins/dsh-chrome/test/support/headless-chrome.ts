@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process';
-import { BrowserPipe } from '../../src/host/runtime/browser-pipe.ts';
+import { BrowserPipe } from '../../src/host/chrome/dedicated-chrome/browser-pipe.ts';
 import { chromeExecutable } from './environment.ts';
 
 /** One tab of a headless Chrome the test drives over CDP, as a user would use it. */

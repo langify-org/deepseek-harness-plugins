@@ -9,7 +9,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-agent';
 import { type ContextFormed, createUserMessage } from '@deepseek-ai/dsh-llm';
-import type {} from '../runtime/chrome-service.ts';
+import type {} from '../chrome/chrome-service.ts';
 import { NO_PAGES_READING, renderPagesReading } from './reading.ts';
 
 export const name = 'dsh-chrome-context';

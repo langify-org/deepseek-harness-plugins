@@ -74,3 +74,8 @@ behavior behind it, so that a later DSH release can be checked against it.
 
 Keep fakes at the edges: a fake stands in for a whole DSH service only when the real one
 needs the full agent composition, and says which checks it reduces.
+
+Give each test process a DSH home of its own (dsh-chrome preloads
+`test/support/isolated-dsh-home.ts` with `--import`). Defaults that come from the DSH home
+are read when a module loads, so a test that leaves one at its default writes into the home
+of whoever runs it: DSH Desktop's own, when the tests run in its terminal.

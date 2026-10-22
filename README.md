@@ -6,7 +6,7 @@ packages, and reproducible builds.
 
 | Plugin | What it does |
 | --- | --- |
-| [dsh-chrome](plugins/dsh-chrome/README.md) | Shares a page of your own Chrome, with your logins and extensions, between you and the agent in DSH's right sidebar. |
+| [dsh-chrome](plugins/dsh-chrome/README.md) | Shares a real Chrome page between you and the agent in DSH's right sidebar: in a Chrome it runs out of sight on a profile of its own, or in your own Chrome. |
 
 ## Using a plugin
 

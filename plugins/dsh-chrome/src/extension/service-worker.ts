@@ -27,6 +27,8 @@ const RECONNECT_ALARM = 'reconnect';
 const pages = new OwnedPages({
   onChanged: (page) => port.send({ type: 'page-changed', page }),
   onEnded: (tabId, reason) => port.send({ type: 'page-ended', tabId, reason }),
+  onOpened: (page, openerTabId, foreground) =>
+    port.send({ type: 'page-opened', page, openerTabId, foreground }),
 });
 const restored = pages.restore();
 
@@ -43,6 +45,7 @@ const port: NativePort = new NativePort(NATIVE_HOST_NAME, {
     }
     if (message.type === 'welcome') {
       port.confirmHost();
+      pages.setVisibleWindows(message.visibleWindows);
       if (message.reloadTo !== null) void reloadTo(message.reloadTo);
       return;
     }

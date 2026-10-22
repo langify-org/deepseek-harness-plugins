@@ -6,7 +6,7 @@
  * Needs a build (`pnpm build`). Everything it writes stays in a temporary directory.
  */
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readlink, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -25,6 +25,23 @@ import { waitFor } from '../support/wait.ts';
 
 const skip = await missingRequirements({});
 
+/** The manifest of a native app, as the user's own Chrome would list it. */
+const NATIVE_APP_MANIFEST = 'com.example.desktop_app.json';
+
+/**
+ * The plugin's configuration with every place it keeps files in the directory. Both profiles
+ * are turned on, and the user's own Chrome is left at its defaults otherwise.
+ */
+function configIn(dir: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    dailyProfile: { enabled: true, userDataDir: join(dir, 'chrome') },
+    dedicatedProfile: { userDataDir: join(dir, 'dedicated') },
+    dataDir: join(dir, 'data'),
+    connectorSocketPath: join(dir, 'connector.sock'),
+    ...overrides,
+  };
+}
+
 let workDir = '';
 let host: DshHost | undefined;
 let root: Context | undefined;
@@ -37,12 +54,11 @@ before(async () => {
   const started = host.root;
   root = started;
   await started.plugin(RecordingTools);
+  // A native app the user's own Chrome reaches, such as a password manager's desktop app.
+  await mkdir(join(workDir, 'chrome', 'NativeMessagingHosts'), { recursive: true });
+  await writeFile(join(workDir, 'chrome', 'NativeMessagingHosts', NATIVE_APP_MANIFEST), '{}\n');
   const plugin = await import(pathToFileURL(join(distDir, 'host', 'index.js')).href);
-  await started.plugin(plugin, {
-    dailyProfile: { userDataDir: join(workDir, 'chrome') },
-    dataDir: join(workDir, 'data'),
-    connectorSocketPath: join(workDir, 'connector.sock'),
-  });
+  await started.plugin(plugin, configIn(workDir, { defaultProfile: 'daily' }));
   await started.plugin(await import(pathToFileURL(join(distDir, 'host', 'tools.js')).href));
   await started.plugin(await import(pathToFileURL(join(distDir, 'host', 'context.js')).href));
   await waitFor(
@@ -65,17 +81,27 @@ test('the declared DSH range accepts this DSH release and refuses the next minor
   assert.notEqual(evaluatePluginCompatibility(packageJson, {}, '0.2.1-alpha.4'), undefined);
 });
 
-test('starting installs the connector and a native host manifest for the daily profile', {
+test('starting installs the connector and a native host manifest for each profile turned on', {
   skip,
 }, async () => {
-  const manifest = JSON.parse(
-    await readFile(
-      join(workDir, 'chrome', 'NativeMessagingHosts', `${NATIVE_HOST_NAME}.json`),
-      'utf8',
-    ),
+  for (const [profile, userDataDir] of [
+    ['daily', 'chrome'],
+    ['dedicated', 'dedicated'],
+  ] as const) {
+    const manifest = JSON.parse(
+      await readFile(
+        join(workDir, userDataDir, 'NativeMessagingHosts', `${NATIVE_HOST_NAME}.json`),
+        'utf8',
+      ),
+    );
+    assert.deepEqual(manifest.allowed_origins, [`chrome-extension://${CONNECTOR_EXTENSION_ID}/`]);
+    assert.equal(manifest.path, join(workDir, 'data', `native-host-${profile}`));
+  }
+  // The dedicated profile's extensions reach the native apps the user's own Chrome's do.
+  assert.equal(
+    await readlink(join(workDir, 'dedicated', 'NativeMessagingHosts', NATIVE_APP_MANIFEST)),
+    join(workDir, 'chrome', 'NativeMessagingHosts', NATIVE_APP_MANIFEST),
   );
-  assert.deepEqual(manifest.allowed_origins, [`chrome-extension://${CONNECTOR_EXTENSION_ID}/`]);
-  assert.equal(manifest.path, join(workDir, 'data', 'native-host-daily'));
   const extension = JSON.parse(
     await readFile(join(workDir, 'data', 'extension', 'manifest.json'), 'utf8'),
   );
@@ -101,6 +127,10 @@ test('a signed-in viewer watches its session and hears why a page cannot open', 
   await new Promise((resolve, reject) => socket.once('open', resolve).once('error', reject));
   socket.send(JSON.stringify({ type: 'watch', sessionId: 'session-1' }));
   assert.deepEqual(await events.next(), { type: 'pages', pages: [] });
+  assert.deepEqual(await events.next(), {
+    type: 'dedicated-chrome',
+    chrome: { state: 'stopped', display: 'virtual' },
+  });
   socket.send(
     JSON.stringify({
       type: 'open',
@@ -122,11 +152,7 @@ test('the host row finishes starting only once ctx.chrome is available', { skip 
   const separate = await startDshHost();
   try {
     const plugin = await import(pathToFileURL(join(distDir, 'host', 'index.js')).href);
-    await separate.root.plugin(plugin, {
-      dailyProfile: { userDataDir: join(dir, 'chrome') },
-      dataDir: join(dir, 'data'),
-      connectorSocketPath: join(dir, 'connector.sock'),
-    });
+    await separate.root.plugin(plugin, configIn(dir));
     assert.notEqual(separate.root.get('chrome'), undefined);
   } finally {
     await separate.dispose();
@@ -137,6 +163,7 @@ test('the host row finishes starting only once ctx.chrome is available', { skip 
 test('the tools row registers every chrome tool with a valid definition', { skip }, () => {
   const tools = root?.get('tools') as RecordingTools | undefined;
   assert.deepEqual(tools?.registered.map((tool) => tool.name).sort(), [
+    'chrome_answer_dialog',
     'chrome_ask_user',
     'chrome_click',
     'chrome_close',

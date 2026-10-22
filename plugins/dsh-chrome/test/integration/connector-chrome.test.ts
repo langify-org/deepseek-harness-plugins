@@ -12,26 +12,37 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { click, navigate, press, type } from '../../src/host/page/actions.ts';
-import { ElementRefError, ElementRefs } from '../../src/host/page/element-refs.ts';
-import { parseKeyCombo } from '../../src/host/page/keys.ts';
-import { readPageText } from '../../src/host/page/text.ts';
-import type { CdpCommand } from '../../src/host/runtime/cdp.ts';
-import type { ConnectedBrowser } from '../../src/host/runtime/connected-browser.ts';
-import { installConnector } from '../../src/host/runtime/connector-install.ts';
-import { ConnectorServer } from '../../src/host/runtime/connector-server.ts';
+import { setTimeout as sleep } from 'node:timers/promises';
+import type { CdpCommand } from '../../src/host/chrome/connector/cdp.ts';
+import type { ConnectedBrowser } from '../../src/host/chrome/connector/connected-browser.ts';
+import { installConnector } from '../../src/host/chrome/connector/install.ts';
+import { ConnectorServer } from '../../src/host/chrome/connector/server.ts';
 import {
   type DedicatedChrome,
   launchDedicatedChrome,
-} from '../../src/host/runtime/dedicated-chrome.ts';
-import { silentLog } from '../../src/host/runtime/log.ts';
-import { PLUGIN_VERSION } from '../../src/host/runtime/package-files.ts';
-import { type ChromePage, type PageEnding, PageRegistry } from '../../src/host/runtime/pages.ts';
-import { PageInput } from '../../src/host/view/page-input.ts';
-import { PageScreen, type ScreenFrame } from '../../src/host/view/page-screen.ts';
+} from '../../src/host/chrome/dedicated-chrome/launch.ts';
+import type { ChromePage, PageEnding } from '../../src/host/chrome/pages/page.ts';
+import { type PageOpening, PageRegistry } from '../../src/host/chrome/pages/page-registry.ts';
+import { click, navigate, press, type } from '../../src/host/page-operations/actions.ts';
+import { ElementRefError, ElementRefs } from '../../src/host/page-operations/element-refs.ts';
+import { parseKeyCombo } from '../../src/host/page-operations/keys.ts';
+import { readPageText } from '../../src/host/page-operations/text.ts';
+import { silentLog } from '../../src/host/platform/log.ts';
+import { PLUGIN_VERSION } from '../../src/host/platform/package-files.ts';
+import { PageInput } from '../../src/host/viewer/page-input.ts';
+import {
+  frameShowsLayout,
+  PageScreen,
+  type ScreenFrame,
+} from '../../src/host/viewer/page-screen.ts';
 import { LASTING_CONNECTION_MS } from '../../src/protocol/connector.ts';
 import { chromeExecutable, distDir, missingRequirements } from '../support/environment.ts';
-import { TEST_PAGE_HTML, TEST_PAGE_TITLE } from '../support/test-page.ts';
+import {
+  OPENER_PAGE_HTML,
+  OPENER_PAGE_PATH,
+  TEST_PAGE_HTML,
+  TEST_PAGE_TITLE,
+} from '../support/test-page.ts';
 import { waitFor, withTimeout } from '../support/wait.ts';
 
 let workDir = '';
@@ -46,14 +57,20 @@ const pages = new PageRegistry();
 const connectionWaiters: ((browser: ConnectedBrowser) => void)[] = [];
 /** When the latest browser connected. */
 let connectedAt = 0;
+/**
+ * Whether the host tells the connector that someone sees Chrome's windows. The first tests
+ * run Chrome as a user's own; later ones as DSH runs the dedicated Chrome, out of sight.
+ */
+let visibleWindows = true;
 
 const missing = await missingRequirements({ chrome: true });
 
 before(async () => {
   if (missing) return;
   workDir = await mkdtemp(join(tmpdir(), 'dsh-chrome-it-'));
-  pageServer = createServer((_request, response) => {
-    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(TEST_PAGE_HTML);
+  pageServer = createServer((request, response) => {
+    const html = request.url?.startsWith(OPENER_PAGE_PATH) ? OPENER_PAGE_HTML : TEST_PAGE_HTML;
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(html);
   });
   await new Promise<void>((resolve) => pageServer?.listen(0, '127.0.0.1', resolve));
   pageUrl = `http://127.0.0.1:${(pageServer.address() as AddressInfo).port}/`;
@@ -298,6 +315,126 @@ test('the agent reads page text and navigates', { skip: missing }, async () => {
   await page.close();
 });
 
+test('a viewer of the hidden dedicated Chrome gets frames at its layout only, steadily', {
+  skip: missing,
+}, async () => {
+  await arrangeWindows({ visible: false });
+  const page = await openTestPage('session-s');
+  const frames: { readonly width: number; readonly height: number; readonly at: number }[] = [];
+  let viewport = { width: 640, height: 400, deviceScaleFactor: 1 };
+  const viewer = {
+    get viewport() {
+      return viewport;
+    },
+    visible: true,
+    showFrame: (frame: ScreenFrame) =>
+      frames.push({ width: frame.width, height: frame.height, at: performance.now() }),
+  };
+  const screen = new PageScreen(
+    page,
+    { jpegQuality: 60, hiddenFrameIntervalMs: 250, maxDeviceScaleFactor: 2 },
+    silentLog,
+  );
+  const sizeOf = (frame: { width: number; height: number }) =>
+    `${Math.round(frame.width)}x${Math.round(frame.height)}`;
+  let start = 0;
+  /** The frames from the first that shows the layout on, over three seconds. */
+  const streamAt = async (layout: { width: number; height: number }) => {
+    const shows = (frame: (typeof frames)[number], index: number) =>
+      index >= start && frameShowsLayout(frame, layout);
+    await waitFor(() => frames.some(shows));
+    const first = frames.findIndex(shows);
+    await sleep(3000);
+    return frames.slice(first);
+  };
+  /** The sizes of the frames that do not show the layout: those a viewer would flicker to. */
+  const otherSizes = (streamed: typeof frames, layout: { width: number; height: number }) =>
+    streamed.filter((frame) => !frameShowsLayout(frame, layout)).map(sizeOf);
+  screen.addViewer(viewer);
+  try {
+    const streamed = await streamAt(viewport);
+    // The page's clock repaints every 50 ms, and each repaint is a frame.
+    assert.ok(streamed.length >= 30, `${streamed.length} frames in 3 s`);
+    assert.deepEqual(otherSizes(streamed, viewport), []);
+    const gaps = streamed.slice(1).map((frame, index) => frame.at - (streamed[index]?.at ?? 0));
+    assert.ok(Math.max(...gaps) < 500, `the longest wait for a frame was ${Math.max(...gaps)} ms`);
+
+    start = frames.length;
+    viewport = { width: 900, height: 560, deviceScaleFactor: 1 };
+    screen.viewportChanged(viewer);
+    assert.deepEqual(otherSizes(await streamAt(viewport), viewport), []);
+  } finally {
+    screen.dispose();
+    await page.close();
+  }
+});
+
+test('pages a page opens join its session, in front or behind as Chrome opened them', {
+  skip: missing,
+}, async () => {
+  await arrangeWindows({ visible: false });
+  const opener = await openTestPage('session-o', `${pageUrl}${OPENER_PAGE_PATH.slice(1)}`);
+  await waitFor(async () => (await evaluate<string>(opener, 'document.readyState')) === 'complete');
+  const openings: PageOpening[] = [];
+  const stop = pages.onPageOpened((opening) => openings.push(opening));
+  try {
+    await clickElement(opener, 'popup');
+    await waitFor(() => openings.length === 1, 10_000, 'the popup');
+    // Ctrl+click opens a link's tab behind the page; a plain click, in front of it.
+    await clickElement(opener, 'tab', CTRL);
+    await waitFor(() => openings.length === 2, 10_000, 'the background tab');
+    await clickElement(opener, 'tab');
+    await waitFor(() => openings.length === 3, 10_000, 'the new tab');
+    assert.deepEqual(
+      openings.map(({ opener: by, foreground }) => ({ by: by.id, foreground })),
+      [
+        { by: opener.id, foreground: true },
+        { by: opener.id, foreground: false },
+        { by: opener.id, foreground: true },
+      ],
+    );
+    // Each page has a window of its own, so the opener is still its window's active tab.
+    await waitFor(
+      async () => (await evaluate<string>(opener, 'document.visibilityState')) === 'visible',
+      10_000,
+      'the opener to stay in view',
+    );
+    for (const { page } of openings) {
+      assert.equal(page.sessionId, 'session-o');
+      assert.equal(page.openedBy, 'page');
+      assert.equal(page.openerId, opener.id);
+      await waitFor(() => page.url === pageUrl, 10_000, `${page.id} to load`);
+    }
+  } finally {
+    stop();
+    for (const { page } of openings) await page.close().catch(() => {});
+    await opener.close();
+  }
+});
+
+test('a dialog of a page brought to the front is reported until it is answered', {
+  skip: missing,
+}, async () => {
+  await arrangeWindows({ visible: false });
+  const page = await openTestPage('session-d', `${pageUrl}${OPENER_PAGE_PATH.slice(1)}`);
+  await waitFor(async () => (await evaluate<string>(page, 'document.readyState')) === 'complete');
+  // Chrome answers the dialogs of a page that is not in front itself; the popups of the test
+  // before took the focus.
+  await page.bringToFront();
+  // The click returns once the page has handled it, which waits for the answer.
+  const clicked = clickElement(page, 'ask');
+  await waitFor(() => page.dialog !== undefined, 10_000, 'the dialog');
+  assert.deepEqual(page.dialog, { kind: 'confirm', message: 'Proceed?', defaultPrompt: '' });
+  await page.send('Page.handleJavaScriptDialog', { accept: true });
+  await clicked;
+  await waitFor(() => page.dialog === undefined, 10_000, 'the dialog to close');
+  assert.equal(
+    await evaluate<string>(page, "document.getElementById('answer').textContent"),
+    'true',
+  );
+  await page.close();
+});
+
 test('a page keeps its id when the host restarts while Chrome keeps running', {
   skip: missing,
 }, async () => {
@@ -331,6 +468,7 @@ function listen(registry: PageRegistry): Promise<ConnectorServer> {
     // The built connector's version: another version would make it reload.
     connectorVersion: PLUGIN_VERSION,
     log: silentLog,
+    visibleWindows: () => visibleWindows,
     onBrowser: (connected) => {
       connectedAt = Date.now();
       registry.track(connected);
@@ -339,14 +477,40 @@ function listen(registry: PageRegistry): Promise<ConnectorServer> {
   });
 }
 
+/** Has the connector arrange Chrome's windows anew: it reconnects, and the welcome says how. */
+async function arrangeWindows({ visible }: { visible: boolean }): Promise<void> {
+  if (browser?.visibleWindows === visible) return;
+  visibleWindows = visible;
+  // The connector reconnects at once only after a connection that lasted.
+  const lasting = connectedAt + LASTING_CONNECTION_MS + 500 - Date.now();
+  if (lasting > 0) await sleep(lasting);
+  const reconnected = nextConnection();
+  browser?.disconnect();
+  browser = await withTimeout(reconnected, 20_000, 'the connector did not reconnect');
+}
+
 function nextConnection(): Promise<ConnectedBrowser> {
   return new Promise((resolve) => connectionWaiters.push(resolve));
 }
 
-async function openTestPage(sessionId: string): Promise<ChromePage> {
+async function openTestPage(sessionId: string, url = pageUrl): Promise<ChromePage> {
   assert.ok(browser, 'no browser connected');
-  const snapshot = await browser.openPage(pageUrl, { key: sessionId, title: sessionId });
+  const snapshot = await browser.openPage(url, { key: sessionId, title: sessionId });
   return pages.adopt(sessionId, browser, snapshot);
+}
+
+/** CDP's modifier bit for Ctrl. */
+const CTRL = 2;
+
+/** Clicks the middle of an element as a user would, so the page sees a user gesture. */
+async function clickElement(page: ChromePage, id: string, modifiers = 0): Promise<void> {
+  const { x, y } = await evaluate<{ x: number; y: number }>(
+    page,
+    `(() => { const r = document.getElementById(${JSON.stringify(id)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`,
+  );
+  const mouse = { x, y, button: 'left', clickCount: 1, modifiers } as const;
+  await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...mouse });
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...mouse });
 }
 
 async function evaluate<T>(page: ChromePage, expression: string): Promise<T> {

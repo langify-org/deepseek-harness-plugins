@@ -9,15 +9,17 @@
  * Needs a build (`pnpm build`), Google Chrome (or DSH_CHROME_TEST_EXECUTABLE) and Xvfb.
  */
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Readable } from 'node:stream';
 import { after, before, test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import packageJson from '../../package.json' with { type: 'json' };
 import { fitFrame } from '../../src/client/viewer/frame-fit.ts';
-import type { ChromeService } from '../../src/host/runtime/chrome-service.ts';
-import type { ChromePage } from '../../src/host/runtime/pages.ts';
+import type { ChromeService } from '../../src/host/chrome/chrome-service.ts';
+import type { ChromePage } from '../../src/host/chrome/pages/page.ts';
 import { type DshHost, startDshHost } from '../support/dsh-host.ts';
 import { chromeExecutable, distDir, missingRequirements } from '../support/environment.ts';
 import { type HeadlessTab, openHeadlessTab } from '../support/headless-chrome.ts';
@@ -284,5 +286,68 @@ async function viewerPointFor(
   return {
     x: canvas.left + area.x + (pagePoint.x * area.width) / frame.width,
     y: canvas.top + area.y + (pagePoint.y * area.height) / frame.height,
+  };
+}
+
+test('the dedicated Chrome moves to the desktop to be set up, and back out of sight', {
+  skip,
+}, async () => {
+  assert.ok(chrome && host);
+  // The desktop is a display of the test's own: nothing appears on the screen of whoever runs it.
+  const desktop = await startTestDisplay();
+  const environment = {
+    DISPLAY: process.env['DISPLAY'],
+    WAYLAND_DISPLAY: process.env['WAYLAND_DISPLAY'],
+  };
+  process.env['DISPLAY'] = desktop.display;
+  delete process.env['WAYLAND_DISPLAY'];
+  try {
+    const page = await chrome.openPage(SESSION_ID, `${host.origin}${TEST_PAGE_PATH}`, {
+      openedBy: 'user',
+    });
+    await chrome.setDedicatedDisplay('desktop');
+    assert.deepEqual(chrome.dedicated, { state: 'running', display: 'desktop' });
+    // Someone sees its windows now: pages share one, and the focus is not taken.
+    assert.equal(chrome.browserFor('dedicated')?.visibleWindows, true);
+    // Chrome started again there, and the page it showed closed.
+    assert.equal(page.ending, 'disconnected');
+
+    await chrome.setDedicatedDisplay('virtual');
+    assert.deepEqual(chrome.dedicated, { state: 'running', display: 'virtual' });
+    assert.equal(chrome.browserFor('dedicated')?.visibleWindows, false);
+  } finally {
+    for (const [name, value] of Object.entries(environment)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    await desktop.stop();
+  }
+});
+
+/** An Xvfb server of the test's own, standing in for the desktop. */
+async function startTestDisplay(): Promise<{ readonly display: string; stop(): Promise<void> }> {
+  const xvfb = spawn(
+    'Xvfb',
+    ['-displayfd', '3', '-screen', '0', '1280x800x24', '-nolisten', 'tcp'],
+    {
+      stdio: ['ignore', 'ignore', 'ignore', 'pipe'],
+    },
+  );
+  const reported = xvfb.stdio[3] as Readable;
+  const display = await new Promise<string>((resolve, reject) => {
+    let text = '';
+    reported.setEncoding('utf8').on('data', (chunk: string) => {
+      text += chunk;
+      if (text.includes('\n')) resolve(`:${text.trim()}`);
+    });
+    xvfb.once('error', reject);
+  });
+  return {
+    display,
+    stop: () =>
+      new Promise((resolve) => {
+        xvfb.once('exit', () => resolve());
+        xvfb.kill('SIGTERM');
+      }),
   };
 }

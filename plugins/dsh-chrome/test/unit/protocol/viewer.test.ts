@@ -16,6 +16,8 @@ const page = {
   loading: false,
   browserLabel: 'Work Chrome',
   openedBy: 'agent',
+  openerId: null,
+  dialog: null,
 };
 
 function frameWithRawHeader(headerText: string): ArrayBuffer {
@@ -305,6 +307,62 @@ test('decodes a pages event from JSON text', () => {
     type: 'pages',
     pages,
   });
+});
+
+test('decodes a page opened by another page, showing a dialog', () => {
+  const popup = {
+    ...page,
+    id: 'page-2',
+    openedBy: 'page',
+    openerId: 'page-1',
+    dialog: { kind: 'prompt', message: 'Your name?', defaultPrompt: 'Ada' },
+  };
+  assert.deepEqual(decodeViewerEvent(JSON.stringify({ type: 'page', page: popup })), {
+    type: 'page',
+    page: popup,
+  });
+  for (const dialog of [{ kind: 'toast', message: '', defaultPrompt: '' }, { kind: 'alert' }]) {
+    const event = { type: 'page', page: { ...popup, dialog } };
+    assert.equal(decodeViewerEvent(JSON.stringify(event)), undefined, JSON.stringify(dialog));
+  }
+});
+
+test("decodes the dedicated Chrome's state", () => {
+  const chrome = { state: 'running', display: 'desktop' };
+  assert.deepEqual(decodeViewerEvent(JSON.stringify({ type: 'dedicated-chrome', chrome })), {
+    type: 'dedicated-chrome',
+    chrome,
+  });
+  for (const malformed of [
+    { state: 'paused', display: 'virtual' },
+    { state: 'off', display: 'window' },
+  ]) {
+    const text = JSON.stringify({ type: 'dedicated-chrome', chrome: malformed });
+    assert.equal(decodeViewerEvent(text), undefined, text);
+  }
+});
+
+test("parses a dialog's answer and a move of the dedicated Chrome to a display", () => {
+  assert.deepEqual(
+    parseViewerRequest({ type: 'answer-dialog', accept: true, promptText: 'Ada', extra: 1 }),
+    { type: 'answer-dialog', accept: true, promptText: 'Ada' },
+  );
+  assert.deepEqual(parseViewerRequest({ type: 'answer-dialog', accept: false, promptText: null }), {
+    type: 'answer-dialog',
+    accept: false,
+    promptText: null,
+  });
+  assert.deepEqual(parseViewerRequest({ type: 'set-dedicated-display', display: 'desktop' }), {
+    type: 'set-dedicated-display',
+    display: 'desktop',
+  });
+  for (const malformed of [
+    { type: 'answer-dialog', accept: 'yes', promptText: null },
+    { type: 'answer-dialog', accept: true },
+    { type: 'set-dedicated-display', display: 'window' },
+  ]) {
+    assert.equal(parseViewerRequest(malformed), undefined, JSON.stringify(malformed));
+  }
 });
 
 test('decodes ended and failed events from JSON text', () => {

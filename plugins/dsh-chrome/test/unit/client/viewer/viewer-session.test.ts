@@ -580,19 +580,13 @@ test("answers the shown page's dialog, and nothing when it shows none", () => {
   );
 });
 
-test('says the pages closed because Chrome moved, when the user moved it', () => {
+test('asks the host to move the dedicated Chrome, and says why its pages then ended', () => {
   const viewer = startViewer(undefined);
   const socket = lastSocket(viewer);
   socket.fireOpen();
   socket.fireEvent({ type: 'attached', page: pageA });
   viewer.session.setDedicatedDisplay('desktop');
   assert.deepEqual(socket.sent.at(-1), { type: 'set-dedicated-display', display: 'desktop' });
-  socket.fireEvent({ type: 'ended', reason: 'disconnected' });
-  assert.match(viewer.session.getSnapshot().notice ?? '', /starting again on the screen/);
-
-  // Once it runs there, a later disconnection is just that.
-  socket.fireEvent({ type: 'dedicated-chrome', chrome: { state: 'running', display: 'desktop' } });
-  socket.fireEvent({ type: 'attached', page: pageB });
-  socket.fireEvent({ type: 'ended', reason: 'disconnected' });
-  assert.match(viewer.session.getSnapshot().notice ?? '', /^Chrome disconnected/);
+  socket.fireEvent({ type: 'ended', reason: 'restarted' });
+  assert.match(viewer.session.getSnapshot().notice ?? '', /^Chrome started again/);
 });

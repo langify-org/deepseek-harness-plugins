@@ -246,6 +246,11 @@ export class PageRegistry {
     return () => this.#openingListeners.delete(listener);
   }
 
+  /** Ends every page of the browser, for a reason of the host's, before the browser leaves. */
+  endPagesOf(browser: ConnectedBrowser, ending: PageEnding): void {
+    for (const page of [...(this.#byTab.get(browser)?.values() ?? [])]) this.#remove(page, ending);
+  }
+
   get(id: PageId): ChromePage | undefined {
     return this.#pages.get(id);
   }
@@ -320,10 +325,11 @@ export class PageRegistry {
 
 /** The dialog a `Page.javascriptDialogOpening` event announces. */
 function dialogOf(params: unknown): PageDialog {
-  const { type, message, defaultPrompt } = (params ?? {}) as {
+  const { type, message, defaultPrompt, url } = (params ?? {}) as {
     type?: unknown;
     message?: unknown;
     defaultPrompt?: unknown;
+    url?: unknown;
   };
   return {
     kind:
@@ -332,5 +338,6 @@ function dialogOf(params: unknown): PageDialog {
         : 'alert',
     message: typeof message === 'string' ? message : '',
     defaultPrompt: typeof defaultPrompt === 'string' ? defaultPrompt : '',
+    url: typeof url === 'string' ? url : '',
   };
 }

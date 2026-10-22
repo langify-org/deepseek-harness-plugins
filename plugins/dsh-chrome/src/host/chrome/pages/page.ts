@@ -16,8 +16,11 @@ import type { ConnectedBrowser, RequestOptions } from '../connector/connected-br
  */
 export type PageId = string;
 
-/** Why a page is no longer controlled: the connector's reasons, or its browser left. */
-export type PageEnding = PageEndReason | 'disconnected';
+/**
+ * Why a page is no longer controlled: the connector's reasons; its browser left; or the
+ * Chrome dsh-chrome runs started again, as it does to move to another display.
+ */
+export type PageEnding = PageEndReason | 'disconnected' | 'restarted';
 
 /** How a page came to be, as far as the host knows; what it does not know is left out. */
 export interface PageOrigin {
@@ -27,7 +30,10 @@ export interface PageOrigin {
 }
 
 /** A JavaScript dialog the page opened (`alert`, `confirm`, …), blocking it until answered. */
-export type PageDialog = PageDialogState;
+export interface PageDialog extends PageDialogState {
+  /** The address of the frame that opened it. */
+  readonly url: string;
+}
 
 /** A Chrome tab the plugin opened, owned by one DSH session. */
 export interface ChromePage {

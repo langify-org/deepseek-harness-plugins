@@ -44,7 +44,7 @@ The Host is split by what each part is, in one direction of use:
 | `host/chrome/dedicated-chrome/` | Starting the dedicated profile's Chrome, on its display. | `platform` |
 | `host/chrome/pages/` | The pages the plugin controls: the page model and the registry. | `connector` |
 | `host/page-operations/` | What can be done with a page: snapshots and refs, actions, text, screenshots, dialogs. | `chrome/pages`, `chrome/connector` |
-| `host/viewer/`, `host/tools/`, `host/context/` | What the user's sidebar, the agent's tools and the turn-start reading do with pages. | `chrome`, `page-operations` |
+| `host/viewer/`, `host/tools/`, `host/context/` | What the user's sidebar, the agent's tools and the turn-start reading do with pages. | `chrome` and its pages, `page-operations`; the viewer also `platform` |
 | `host/index.ts` | The main Loader row: the configuration, `ctx.chrome` and the viewer. | `chrome`, `viewer` |
 
 [test/unit/dependencies.test.ts](../test/unit/dependencies.test.ts) defines which part may
@@ -136,7 +136,9 @@ Tools act on the session's most recently used page unless they name one, and the
 commands end when the tool call is stopped. An action brings its page to the front, and ends
 as soon as the page opens a dialog: the command that caused the dialog gets no answer until
 someone answers it. The result names the dialog, and the pages the action opened; the agent
-answers with `chrome_answer_dialog`, and a page showing a dialog refuses every other tool. The agent reads a page as an accessibility tree
+answers with `chrome_answer_dialog`, and a page showing a dialog refuses the tools that read
+or operate it until then. An action waits a moment after it for the pages it opened, which
+Chrome hands over shortly after the action itself. The agent reads a page as an accessibility tree
 with refs (`e42`, Chrome's backend DOM node ids) and acts by ref with trusted input, like
 the user's hands. Backend node ids are unique only within a renderer process, so refs
 belong to the document their snapshot was read from: once the page shows another document,
@@ -169,6 +171,11 @@ agent asked for and may need.
   every request's size is checked before it is sent.
 * Each side parses the other's connector and viewer messages into fresh values with the
   protocol's fields only. CDP results are typed by `devtools-protocol` and trusted as Chrome's.
+* A host and a connector of different versions still work together, as one does until the
+  connector reloads to the host's version: a welcome without `visibleWindows` arranges
+  windows as on a screen someone sees, a host that does not know `page-opened` drops it and
+  adopts the page when the connector next lists its pages, and a connector that does not know
+  the dialog commands refuses them.
 
 ## Decisions to revisit
 

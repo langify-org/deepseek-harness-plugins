@@ -5,6 +5,7 @@
  * Mounted as its own Loader row (`dsh-chrome-tools`), so a profile can turn the tools
  * off and keep the shared view.
  */
+import { setTimeout as sleep } from 'node:timers/promises';
 import type { Context } from '@deepseek-ai/cordis';
 import type { AttachmentId, ImageAttachmentRef, ImageMediaType } from '@deepseek-ai/dsh-attachment';
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
@@ -28,6 +29,11 @@ export const inject = ['chrome', 'tools'];
 /** The most snapshot text one call returns unless the agent asks for more. */
 const DEFAULT_SNAPSHOT_CHARS = 20_000;
 const MAX_SNAPSHOT_CHARS = 100_000;
+/**
+ * How long an action waits for the pages it opens: Chrome hands them over a moment after the
+ * action, measured at under 50 ms.
+ */
+const OPENING_SETTLE_MS = 200;
 /** How long the agent waits for the user's help unless it says otherwise. */
 const DEFAULT_HELP_MINUTES = 10;
 const MAX_HELP_MINUTES = 60;
@@ -156,7 +162,10 @@ export function apply(ctx: Context): void {
   };
 
   /** Reads a page, unless it opens a dialog meanwhile, which would leave the read unanswered. */
-  const read = async <T>(page: ChromePage, reading: () => Promise<T>): Promise<T> => {
+  const read = async <T>(
+    page: ChromePage,
+    reading: (page: ChromePage) => Promise<T>,
+  ): Promise<T> => {
     const outcome = await untilDialog(page, reading);
     if (outcome.dialog === undefined) return outcome.completed;
     throw dialogRefusal(page, outcome.dialog);
@@ -170,7 +179,7 @@ export function apply(ctx: Context): void {
    */
   const act = async <T>(
     page: ChromePage,
-    action: () => Promise<T>,
+    action: (page: ChromePage) => Promise<T>,
   ): Promise<{ readonly completed: T | undefined; readonly report: ActionReport }> => {
     await page.bringToFront();
     const opened: ChromePage[] = [];
@@ -179,6 +188,7 @@ export function apply(ctx: Context): void {
     });
     try {
       const outcome = await untilDialog(page, action);
+      if (outcome.dialog === undefined) await sleep(OPENING_SETTLE_MS);
       return {
         completed: outcome.completed,
         report: {
@@ -213,7 +223,7 @@ export function apply(ctx: Context): void {
                 properties: {
                   ...PAGE_VALUE.properties,
                   shown: { type: 'boolean', required: true },
-                  openedBy: { type: 'string', description: 'The page that opened it.' },
+                  openerId: { type: 'string', description: 'The page that opened it.' },
                   dialog: { type: 'string', description: 'The dialog it shows.' },
                 },
               },
@@ -228,7 +238,7 @@ export function apply(ctx: Context): void {
                   .map((page) =>
                     [
                       `- ${describePage(page)}`,
-                      page.openedBy === undefined ? '' : `, opened by page ${page.openedBy}`,
+                      page.openerId === undefined ? '' : `, opened by page ${page.openerId}`,
                       page.shown ? ', the user is looking at it' : '',
                       page.dialog === undefined ? '' : `, shows ${page.dialog} (${UNTRUSTED_NOTE})`,
                     ].join(''),
@@ -241,7 +251,7 @@ export function apply(ctx: Context): void {
         pages: chrome.pagesOf(sessionOf(exec)).map((page) => ({
           ...pageValue(page),
           shown: chrome.pages.isShown(page.id),
-          ...(page.openerId === undefined ? {} : { openedBy: page.openerId }),
+          ...(page.openerId === undefined ? {} : { openerId: page.openerId }),
           ...(page.dialog === undefined ? {} : { dialog: describeDialog(page.dialog) }),
         })),
       }),
@@ -320,7 +330,9 @@ export function apply(ctx: Context): void {
             ? { url: addressFor(args.url) }
             : { history: args.history ?? ('reload' as const) };
         // Leaving a page can ask whether to leave it.
-        const { completed, report } = await act(page, () => navigate(page, target, exec.signal));
+        const { completed, report } = await act(page, (acting) =>
+          navigate(acting, target, exec.signal),
+        );
         return { ...report, loaded: completed ?? false };
       },
     }),
@@ -358,7 +370,7 @@ export function apply(ctx: Context): void {
           Math.max(args.maxChars ?? DEFAULT_SNAPSHOT_CHARS, 1000),
           MAX_SNAPSHOT_CHARS,
         );
-        const snapshot = await read(page, () => refs.snapshot(page, maxChars));
+        const snapshot = await read(page, (reading) => refs.snapshot(reading, maxChars));
         // The page may have gone on to DSH while it was read.
         await refuseDsh(page);
         return { page: pageValue(page), snapshot: snapshot.text, truncated: snapshot.truncated };
@@ -413,7 +425,7 @@ export function apply(ctx: Context): void {
         if (attachments === undefined || !(await acceptsImages(ctx, exec))) {
           throw new Error('this model cannot see images here; read the page with chrome_snapshot');
         }
-        const data = await read(page, () => captureViewport(page));
+        const data = await read(page, (reading) => captureViewport(reading));
         await refuseDsh(page);
         const image = await attachments.saveImage({
           data,
@@ -440,9 +452,11 @@ export function apply(ctx: Context): void {
       timeoutMs: 30_000,
       execute: async (args, exec) => {
         const page = await pageFor(exec, args.page);
-        const element = await refs.resolve(page, args.ref);
         const clicks = args.doubleClick === true ? 2 : 1;
-        return (await act(page, () => click(page, element, clicks))).report;
+        const { report } = await act(page, async (acting) =>
+          click(acting, await refs.resolve(acting, args.ref), clicks),
+        );
+        return report;
       },
     }),
 
@@ -468,9 +482,14 @@ export function apply(ctx: Context): void {
       timeoutMs: 30_000,
       execute: async (args, exec) => {
         const page = await pageFor(exec, args.page);
-        const element = args.ref === undefined ? undefined : await refs.resolve(page, args.ref);
-        const options = { element, replace: args.replace ?? true, submit: args.submit === true };
-        return (await act(page, () => type(page, args.text, options))).report;
+        const { report } = await act(page, async (acting) =>
+          type(acting, args.text, {
+            element: args.ref === undefined ? undefined : await refs.resolve(acting, args.ref),
+            replace: args.replace ?? true,
+            submit: args.submit === true,
+          }),
+        );
+        return report;
       },
     }),
 
@@ -490,7 +509,7 @@ export function apply(ctx: Context): void {
       execute: async (args, exec) => {
         const page = await pageFor(exec, args.page);
         const keys = parseKeyCombo(args.keys);
-        return (await act(page, () => press(page, keys))).report;
+        return (await act(page, (acting) => press(acting, keys))).report;
       },
     }),
 
@@ -512,8 +531,13 @@ export function apply(ctx: Context): void {
       timeoutMs: 30_000,
       execute: async (args, exec) => {
         const page = await pageFor(exec, args.page);
-        const element = args.ref === undefined ? undefined : await refs.resolve(page, args.ref);
-        return (await act(page, () => scroll(page, { element, deltaY: args.pixels }))).report;
+        const { report } = await act(page, async (acting) =>
+          scroll(acting, {
+            element: args.ref === undefined ? undefined : await refs.resolve(acting, args.ref),
+            deltaY: args.pixels,
+          }),
+        );
+        return report;
       },
     }),
 
@@ -545,9 +569,11 @@ export function apply(ctx: Context): void {
       timeoutMs: 30_000,
       execute: async (args, exec) => {
         const page = boundToSignal(sessionPage(exec, args.page), exec.signal);
-        if (page.dialog === undefined) {
+        const { dialog } = page;
+        if (dialog === undefined)
           throw new Error(`${describePage(pageValue(page))} shows no dialog`);
-        }
+        // A dialog DSH's own web UI asks, in the page or a frame of it, is the user's to answer.
+        if (isDsh(page.url) || isDsh(dialog.url)) throw new Error(DSH_REFUSAL);
         await answerDialog(page, { accept: args.accept, promptText: args.text });
         return { page: pageValue(page) };
       },

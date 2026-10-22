@@ -31,7 +31,12 @@ import { type DshHost, startDshHost } from '../support/dsh-host.ts';
 import { chromeExecutable, distDir, missingRequirements } from '../support/environment.ts';
 import { jpegSize } from '../support/jpeg.ts';
 import { RecordingTools } from '../support/recording-tools.ts';
-import { TEST_PAGE_HTML, TEST_PAGE_TITLE } from '../support/test-page.ts';
+import {
+  OPENER_PAGE_HTML,
+  OPENER_PAGE_PATH,
+  TEST_PAGE_HTML,
+  TEST_PAGE_TITLE,
+} from '../support/test-page.ts';
 import { waitFor } from '../support/wait.ts';
 
 const SESSION_ID = 'agent-session';
@@ -123,7 +128,9 @@ before(async () => {
     const body =
       request.url === FRAMING_PATH
         ? `<!doctype html><title>Framing</title><iframe src="${host?.origin}/"></iframe>`
-        : TALL_PAGE_HTML;
+        : request.url === OPENER_PAGE_PATH
+          ? OPENER_PAGE_HTML
+          : TALL_PAGE_HTML;
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(body);
   });
   pageServer = server;
@@ -280,6 +287,45 @@ test('the agent may not open DSH itself, nor operate a page that shows it', { sk
     'the framed DSH to be refused',
   );
   await run('chrome_close', { page: framingId });
+});
+
+test("the agent's actions report the pages they open and the dialogs they lead to", {
+  skip,
+}, async () => {
+  const opened = await run('chrome_open', { url: new URL(OPENER_PAGE_PATH, pageUrl).href });
+  const openerId = (opened.value as { page: { id: string } }).page.id;
+  await waitFor(async () => (await evaluate<string>('document.readyState')) === 'complete');
+  const read = text((await run('chrome_snapshot', {})).content);
+  const popupRef = /button "Popup" \[ref=(e\d+)\]/.exec(read)?.[1];
+  const askRef = /button "Ask" \[ref=(e\d+)\]/.exec(read)?.[1];
+  assert.ok(popupRef !== undefined && askRef !== undefined, read);
+
+  const popup = await run('chrome_click', { page: openerId, ref: popupRef });
+  const [popupPage] = (popup.value as { opened?: { id: string }[] }).opened ?? [];
+  assert.ok(popupPage, text(popup.content));
+  assert.match(text(popup.content), new RegExp(`It opened page ${popupPage.id}`));
+  const pages = (await run('chrome_pages', {})).value as {
+    pages: { id: string; openerId?: string }[];
+  };
+  assert.equal(pages.pages.find((page) => page.id === popupPage.id)?.openerId, openerId);
+  await run('chrome_close', { page: popupPage.id });
+
+  const asked = await run('chrome_click', { page: openerId, ref: askRef });
+  assert.equal((asked.value as { dialog?: string }).dialog, 'a confirmation asking "Proceed?"');
+  assert.match(text(asked.content), /chrome_answer_dialog/);
+  await assert.rejects(run('chrome_snapshot', { page: openerId }), {
+    message: /shows a confirmation asking "Proceed\?"/,
+  });
+  await run('chrome_answer_dialog', { page: openerId, accept: true });
+  await waitFor(
+    async () => /\btrue\b/.test(text((await run('chrome_snapshot', { page: openerId })).content)),
+    10_000,
+    'the page to take the answer',
+  );
+  await assert.rejects(run('chrome_answer_dialog', { page: openerId, accept: true }), {
+    message: /shows no dialog/,
+  });
+  await run('chrome_close', { page: openerId });
 });
 
 test('closing a page removes it from the session', { skip }, async () => {

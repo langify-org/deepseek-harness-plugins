@@ -1,4 +1,5 @@
 import type { ChromePage, PageDialog } from '../chrome/pages/page.ts';
+import { boundToSignal } from '../chrome/pages/signal-bound-page.ts';
 import { clipText } from './clip-text.ts';
 
 /**
@@ -14,23 +15,28 @@ export type UntilDialog<T> =
 
 /**
  * Runs an operation that may make the page open a dialog, such as a click. It ends when the
- * operation does, or as soon as the page opens a dialog, whose answer it would wait for. The
- * interrupted operation finishes once the dialog is answered, and its outcome is dropped.
+ * operation does, or as soon as the page shows a dialog, whose answer it would wait for; a
+ * dialog already open ends it before it starts. The operation works on the page it is given,
+ * which takes no more commands once a dialog interrupts it, so that the rest of it (the second
+ * press of a double-click, say) is not done after the answer.
  */
 export function untilDialog<T>(
   page: ChromePage,
-  operation: () => Promise<T>,
+  operation: (page: ChromePage) => Promise<T>,
 ): Promise<UntilDialog<T>> {
   return new Promise((resolve, reject) => {
+    const interruption = new AbortController();
     const endOnDialog = (): boolean => {
       const { dialog } = page;
       if (dialog === undefined) return false;
       stop();
+      interruption.abort();
       resolve({ dialog });
       return true;
     };
     const stop = page.onChanged(endOnDialog);
-    operation().then(
+    if (endOnDialog()) return;
+    operation(boundToSignal(page, interruption.signal)).then(
       (completed) => {
         stop();
         resolve({ completed });

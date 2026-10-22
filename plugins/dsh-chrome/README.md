@@ -39,6 +39,13 @@ dsh-chrome keeps its files in the DSH home, with the rest of DSH's data: `~/.dsh
 `dsh-chrome/profiles/dedicated` there. Each home has its own, so DSH installations with
 different homes can run at once.
 
+### From 0.1
+
+0.1 shared pages of your own Chrome; 0.2 runs a Chrome of its own instead. On its first
+start, 0.2 removes the relay registration 0.1 wrote into your Chrome, so the connector you
+loaded there no longer connects: remove it in `chrome://extensions`, or turn your own Chrome
+back on as described in [Your own Chrome](#your-own-chrome).
+
 ## Set it up
 
 The Chrome starts with an empty profile. Press **⚙** in the Chrome tab's toolbar to show

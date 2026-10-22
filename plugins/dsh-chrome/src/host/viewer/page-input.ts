@@ -20,9 +20,10 @@ export class PageInput {
   }
 
   dispatch(input: ViewerInput): void {
-    // A dialog stands in front of the page, as in Chrome: the page takes no input until it is
-    // answered, and input sent meanwhile would wait for the answer.
-    if (this.#page.dialog !== undefined) return;
+    // A dialog stands in front of the page, as in Chrome: the page takes no new input until it
+    // is answered, and input sent meanwhile would wait for the answer. Releases still go, after
+    // the answer, so that no button or key the page saw pressed stays held down.
+    if (this.#page.dialog !== undefined && !isRelease(input)) return;
     if (input.kind === 'mouse' && input.action === 'move') {
       const alreadyWaiting = this.#waitingMove !== undefined;
       this.#waitingMove = input;
@@ -107,3 +108,8 @@ const MOUSE_EVENT_TYPES = {
   down: 'mousePressed',
   up: 'mouseReleased',
 } as const;
+
+/** Whether the input lets go of a mouse button or a key. */
+function isRelease(input: ViewerInput): boolean {
+  return (input.kind === 'mouse' || input.kind === 'key') && input.action === 'up';
+}

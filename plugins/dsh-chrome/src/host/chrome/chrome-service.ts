@@ -82,6 +82,10 @@ export class ChromeService extends Service {
   /** Where the dedicated Chrome shows its windows, now. */
   private dedicatedDisplay: DedicatedDisplay;
   private readonly dedicatedListeners = new Set<(state: DedicatedChromeState) => void>();
+  /** The moves of the dedicated Chrome between displays, one after another. */
+  private dedicatedMoves: Promise<void> = Promise.resolve();
+  /** Set once the plugin stops: no Chrome may start after its closing. */
+  private stopped = false;
 
   constructor(ctx: Context, config: ChromeServiceConfig) {
     super(ctx, 'chrome');
@@ -126,11 +130,20 @@ export class ChromeService extends Service {
       log: this.log,
     });
     this.ctx.effect(() => () => server.close(), 'dsh-chrome: connector server');
-    this.ctx.effect(() => () => this.closeDedicated(), 'dsh-chrome: dedicated Chrome');
-    this.log.info(
-      `dsh-chrome: waiting for Chrome; its connector is ${installed.extensionDir} ` +
-        '(chrome://extensions, Developer mode, "Load unpacked")',
+    this.ctx.effect(
+      () => () => {
+        this.stopped = true;
+        return this.closeDedicated();
+      },
+      'dsh-chrome: dedicated Chrome',
     );
+    for (const warning of installed.warnings) this.log.warn(`dsh-chrome: ${warning}`);
+    if (this.config.dailyProfile.enabled) {
+      this.log.info(
+        `dsh-chrome: waiting for your Chrome; its connector is ${installed.extensionDir} ` +
+          '(chrome://extensions, Developer mode, "Load unpacked")',
+      );
+    }
   }
 
   /** The unpacked connector extension, for the user to load into Chrome. */
@@ -162,16 +175,28 @@ export class ChromeService extends Service {
    * move its windows between displays, so a running one starts again there, and its pages
    * close. On the desktop it starts at once, for the user to see.
    */
-  async setDedicatedDisplay(display: DedicatedDisplay): Promise<void> {
+  setDedicatedDisplay(display: DedicatedDisplay): Promise<void> {
+    // One move at a time: a move closes the Chrome that the one before started.
+    const move = this.dedicatedMoves.then(() => this.moveDedicated(display));
+    this.dedicatedMoves = move.catch(() => {});
+    return move;
+  }
+
+  private async moveDedicated(display: DedicatedDisplay): Promise<void> {
     if (!this.config.dedicatedProfile.enabled) {
       throw new NoBrowserError(DEDICATED_PROFILE, DEDICATED_TURNED_OFF);
     }
     if (display === this.dedicatedDisplay) return;
     const wasRunning = this.dedicatedChrome !== undefined;
     this.dedicatedDisplay = display;
-    this.notifyDedicated();
+    // Its pages end for this reason, rather than as if Chrome had gone away.
+    if (this.dedicatedBrowser !== undefined) {
+      this.pages.endPagesOf(this.dedicatedBrowser, 'restarted');
+    }
     await this.closeDedicated();
     if (wasRunning || display === 'desktop') await this.startDedicated(undefined);
+    // Nothing ran, and nothing starts: the display is all that changed.
+    else this.notifyDedicated();
   }
 
   /** Connected browsers, most recently connected first. */
@@ -248,6 +273,7 @@ export class ChromeService extends Service {
     if (!this.config.dedicatedProfile.enabled) {
       throw new NoBrowserError(DEDICATED_PROFILE, DEDICATED_TURNED_OFF);
     }
+    if (this.stopped) throw new NoBrowserError(DEDICATED_PROFILE, 'dsh-chrome is stopping');
     const extensionDir = this.installedExtensionDir;
     if (extensionDir === undefined) {
       throw new NoBrowserError(DEDICATED_PROFILE, 'dsh-chrome is still starting');

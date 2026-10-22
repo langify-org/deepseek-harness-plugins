@@ -309,8 +309,8 @@ test('the dedicated Chrome moves to the desktop to be set up, and back out of si
     assert.deepEqual(chrome.dedicated, { state: 'running', display: 'desktop' });
     // Someone sees its windows now: pages share one, and the focus is not taken.
     assert.equal(chrome.browserFor('dedicated')?.visibleWindows, true);
-    // Chrome started again there, and the page it showed closed.
-    assert.equal(page.ending, 'disconnected');
+    // Chrome started again there, and the page it showed closed, saying why.
+    assert.equal(page.ending, 'restarted');
 
     await chrome.setDedicatedDisplay('virtual');
     assert.deepEqual(chrome.dedicated, { state: 'running', display: 'virtual' });

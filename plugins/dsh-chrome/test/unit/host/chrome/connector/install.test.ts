@@ -98,3 +98,38 @@ test("lets a profile reach the native apps another's reach, keeping links the us
   const relay = JSON.parse(await readFile(manifestIn(dedicated), 'utf8'));
   assert.equal(relay.path, join(dir, 'data', 'native-host-dedicated'));
 });
+
+test('takes back the links it made once sharing is off, and leaves those it did not make', async () => {
+  const dir = await mkdtemp(join(scratch, 'unshare-'));
+  const distDir = await fakeDist(join(dir, 'dist'));
+  const own = join(dir, 'chrome', 'NativeMessagingHosts');
+  await mkdir(own, { recursive: true });
+  for (const app of ['com.example.passwords.json', 'org.example.notes.json']) {
+    await writeFile(join(own, app), '{}');
+  }
+  const dedicated = join(dir, 'dedicated');
+  const hosts = join(dedicated, 'NativeMessagingHosts');
+  const install = (sharing: boolean) =>
+    installConnector({
+      distDir,
+      dataDir: join(dir, 'data'),
+      socketPath: join(dir, 'connector.sock'),
+      nodePath: '/usr/bin/node',
+      profiles: [
+        {
+          name: 'dedicated',
+          userDataDir: dedicated,
+          ...(sharing ? { nativeHostsFrom: join(dir, 'chrome') } : {}),
+        },
+      ],
+    });
+
+  assert.deepEqual((await install(true)).warnings, []);
+  // The user points one of the links elsewhere.
+  await rm(join(hosts, 'org.example.notes.json'));
+  await symlink('/elsewhere.json', join(hosts, 'org.example.notes.json'));
+
+  assert.deepEqual((await install(false)).warnings, []);
+  assert.equal(await exists(join(hosts, 'com.example.passwords.json')), false);
+  assert.equal(await readlink(join(hosts, 'org.example.notes.json')), '/elsewhere.json');
+});

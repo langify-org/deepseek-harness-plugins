@@ -54,19 +54,20 @@ export class OwnedPages {
         listener.onChanged(snapshotOf(tab, owned.groupKey));
       }
     });
+    // Endings and adoptions wait for the change under way: a tab that closes while it is being
+    // adopted is then reported as ended once its adoption is recorded, and an opener is known
+    // once the state of an earlier service worker is restored.
     chrome.tabs.onRemoved.addListener((tabId) => {
-      void this.#end(tabId, 'closed');
+      void this.#exclusive(() => this.#end(tabId, 'closed'));
     });
     chrome.tabs.onCreated.addListener((tab) => {
-      const opener =
-        tab.openerTabId === undefined ? undefined : this.#state.pages[String(tab.openerTabId)];
-      if (opener !== undefined && tab.openerTabId !== undefined) {
-        void this.#adoptOpened(tab, opener.groupKey, tab.openerTabId);
-      }
+      void this.#exclusive(() => this.#adoptOpened(tab));
     });
     chrome.debugger.onDetach.addListener((source, reason) => {
-      if (source.tabId === undefined) return;
-      void this.#end(source.tabId, reason === 'canceled_by_user' ? 'released-by-user' : 'closed');
+      const { tabId } = source;
+      if (tabId === undefined) return;
+      const ending = reason === 'canceled_by_user' ? 'released-by-user' : 'closed';
+      void this.#exclusive(() => this.#end(tabId, ending));
     });
   }
 
@@ -164,30 +165,31 @@ export class OwnedPages {
     return pages;
   }
 
-  /** Takes control of a tab an owned page opened, in the opener's group. */
-  #adoptOpened(tab: chrome.tabs.Tab, groupKey: string, openerTabId: TabId): Promise<void> {
-    return this.#exclusive(async () => {
-      const tabId = tab.id;
-      if (tabId === undefined || this.owns(tabId)) return;
-      if (!this.#visibleWindows) {
-        // Every page has a window of its own: a link's new tab would leave its opener behind.
-        const sharing = await chrome.tabs.query({ windowId: tab.windowId });
-        if (sharing.length > 1) {
-          await chrome.windows.create({ tabId, focused: tab.active }).catch(() => undefined);
-        }
+  /** Takes control of a tab that an owned page opened, in the opener's group. Runs in turn. */
+  async #adoptOpened(tab: chrome.tabs.Tab): Promise<void> {
+    const { id: tabId, openerTabId } = tab;
+    const opener = openerTabId === undefined ? undefined : this.#state.pages[String(openerTabId)];
+    if (tabId === undefined || openerTabId === undefined || opener === undefined) return;
+    if (this.owns(tabId)) return;
+    if (!this.#visibleWindows) {
+      // Every page has a window of its own: a link's new tab would leave its opener behind.
+      const sharing = await chrome.tabs.query({ windowId: tab.windowId });
+      if (sharing.length > 1) {
+        await chrome.windows.create({ tabId, focused: tab.active }).catch(() => undefined);
       }
-      const attached = await chrome.debugger.attach({ tabId }, CDP_VERSION).then(
-        () => true,
-        () => false,
-      );
-      // A tab that closed at once, or one Chrome does not let extensions debug, stays as it is.
-      if (!attached) return;
-      this.#state.pages[String(tabId)] = { groupKey };
-      await this.#save();
-      const current = await chrome.tabs.get(tabId).catch(() => tab);
-      // Whether it came to the front is how Chrome opened it, not how it is now.
-      this.#listener.onOpened(snapshotOf(current, groupKey), openerTabId, tab.active);
-    });
+    }
+    const attached = await chrome.debugger.attach({ tabId }, CDP_VERSION).then(
+      () => true,
+      () => false,
+    );
+    // A tab that closed at once, or one Chrome does not let extensions debug, stays as it is.
+    if (!attached) return;
+    this.#state.pages[String(tabId)] = { groupKey: opener.groupKey };
+    await this.#save();
+    const current = await chrome.tabs.get(tabId).catch(() => tab);
+    // Whether it came to the front is how Chrome opened it, not how it is now. A tab that
+    // closed meanwhile is reported as ended right after, in turn.
+    this.#listener.onOpened(snapshotOf(current, opener.groupKey), openerTabId, tab.active);
   }
 
   /** Forgets the page and reports its ending, once. */

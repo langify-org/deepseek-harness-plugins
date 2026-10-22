@@ -382,7 +382,12 @@ test('follows a dialog from its opening to its closing, telling the page and the
       hasBrowserHandler: true,
     },
   });
-  assert.deepEqual(page.dialog, { kind: 'confirm', message: 'Leave?', defaultPrompt: '' });
+  assert.deepEqual(page.dialog, {
+    kind: 'confirm',
+    message: 'Leave?',
+    defaultPrompt: '',
+    url: 'https://example.com/4',
+  });
   fake.emit({
     type: 'cdp-event',
     tabId: 4,
@@ -433,4 +438,21 @@ test('adopts a page whose opener is gone into the group it opened in, announcing
   assert.equal(page?.openedBy, 'page');
   assert.equal(page?.openerId, undefined);
   assert.equal(openings, 0);
+});
+
+test("ends a browser's pages for a reason of the host's, and no other browser's", () => {
+  const restarting = fakeBrowser('Dedicated Chrome');
+  const other = fakeBrowser('Work Chrome');
+  const registry = new PageRegistry();
+  for (const fake of [restarting, other]) registry.track(fake as unknown as ConnectedBrowser);
+  const ended = registry.adopt('session-1', restarting as unknown as ConnectedBrowser, snapshot(4));
+  const kept = registry.adopt('session-1', other as unknown as ConnectedBrowser, snapshot(5));
+  const endings: PageEnding[] = [];
+  ended.onEnded((ending) => endings.push(ending));
+
+  registry.endPagesOf(restarting as unknown as ConnectedBrowser, 'restarted');
+  // The browser leaving afterwards ends nothing twice.
+  restarting.close();
+  assert.deepEqual(endings, ['restarted']);
+  assert.deepEqual(registry.ofSession('session-1'), [kept]);
 });

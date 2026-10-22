@@ -1,18 +1,8 @@
-import {
-  chmod,
-  cp,
-  lstat,
-  mkdir,
-  readdir,
-  readFile,
-  rename,
-  rm,
-  symlink,
-  writeFile,
-} from 'node:fs/promises';
+import { chmod, cp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { NATIVE_HOST_NAME } from '../../../protocol/connector.ts';
 import { CONNECTOR_EXTENSION_ID } from '../../../protocol/connector-identity.ts';
+import { shareNativeHosts } from './shared-native-hosts.ts';
 
 /** A Chrome user data directory in which the connector may run. */
 export interface ConnectorProfile {
@@ -44,6 +34,8 @@ export interface ConnectorInstallOptions {
 export interface InstalledConnector {
   /** The unpacked extension Chrome loads (chrome://extensions → Load unpacked). */
   readonly extensionDir: string;
+  /** What could not be done, for the log: a native app that could not be shared, say. */
+  readonly warnings: readonly string[];
 }
 
 /**
@@ -56,7 +48,8 @@ export interface InstalledConnector {
  *   connector's extension id start that profile's launcher.
  *
  * For a profile turned off, the launcher goes, and so does the manifest if it still points
- * at it: another DSH home may have written its own since.
+ * at it: another DSH home may have written its own since. A profile's shared native apps
+ * follow `nativeHostsFrom` (see shared-native-hosts.ts).
  */
 export async function installConnector(
   options: ConnectorInstallOptions,
@@ -90,9 +83,6 @@ export async function installConnector(
       join(manifestDir, `${NATIVE_HOST_NAME}.json`),
       `${JSON.stringify(nativeHostManifest(launcherPath), null, 2)}\n`,
     );
-    if (profile.nativeHostsFrom !== undefined) {
-      await linkNativeHosts(join(profile.nativeHostsFrom, 'NativeMessagingHosts'), manifestDir);
-    }
   }
   for (const profile of options.retiredProfiles ?? []) {
     const launcherPath = join(dataDir, `native-host-${profile.name}`);
@@ -105,24 +95,20 @@ export async function installConnector(
     if ((await manifestTarget(manifestPath)) === launcherPath)
       await rm(manifestPath, { force: true });
   }
-  return { extensionDir };
-}
-
-/**
- * Links the native messaging hosts of one directory into another, all but the connector's
- * own. A manifest already there is kept, so a link is made once and the user may replace it.
- */
-async function linkNativeHosts(from: string, to: string): Promise<void> {
-  const files = await readdir(from).catch((): string[] => []);
-  for (const file of files) {
-    if (!file.endsWith('.json') || file === `${NATIVE_HOST_NAME}.json`) continue;
-    const target = join(to, file);
-    const present = await lstat(target).then(
-      () => true,
-      () => false,
-    );
-    if (!present) await symlink(join(from, file), target);
-  }
+  const warnings = await shareNativeHosts(
+    join(dataDir, 'shared-native-hosts.json'),
+    options.profiles.flatMap((profile) =>
+      profile.nativeHostsFrom === undefined
+        ? []
+        : [
+            {
+              from: join(profile.nativeHostsFrom, 'NativeMessagingHosts'),
+              to: join(profile.userDataDir, 'NativeMessagingHosts'),
+            },
+          ],
+    ),
+  );
+  return { extensionDir, warnings };
 }
 
 /** The launcher a native host manifest names, if it is one this plugin could have written. */

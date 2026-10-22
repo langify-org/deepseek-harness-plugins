@@ -32,7 +32,9 @@ function fakePage(): FakePage & { readonly page: ChromePage } {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    send(method: string, params: unknown) {
+    // As a connected browser does, a command whose signal aborted is never sent.
+    send(method: string, params: unknown, options?: { signal?: AbortSignal }) {
+      if (options?.signal?.aborted) return Promise.reject(options.signal.reason);
       fake.sent.push({ method, params });
       return Promise.resolve({});
     },
@@ -40,7 +42,19 @@ function fakePage(): FakePage & { readonly page: ChromePage } {
   return Object.assign(fake, { page });
 }
 
-const confirmation: PageDialog = { kind: 'confirm', message: 'Delete it?', defaultPrompt: '' };
+const confirmation: PageDialog = {
+  kind: 'confirm',
+  message: 'Delete it?',
+  defaultPrompt: '',
+  url: 'https://example.com/',
+};
+/** A dialog of the kind, with nothing else to say. */
+const dialogOf = (kind: PageDialog['kind'], message = '', defaultPrompt = ''): PageDialog => ({
+  kind,
+  message,
+  defaultPrompt,
+  url: 'https://example.com/',
+});
 
 test('ends with the operation when the page opens no dialog', async () => {
   const { page } = fakePage();
@@ -69,9 +83,48 @@ test('ends as soon as the page opens a dialog, and drops what the operation does
   await new Promise((resolve) => setImmediate(resolve));
 });
 
+test('ends before the operation starts when the page already shows a dialog', async () => {
+  const fake = fakePage();
+  fake.showDialog(confirmation);
+  let started = false;
+  const outcome = await untilDialog(fake.page, async () => {
+    started = true;
+  });
+  assert.deepEqual(outcome, { dialog: confirmation });
+  assert.equal(started, false);
+});
+
+test('does not do the rest of an operation a dialog interrupted', async () => {
+  const fake = fakePage();
+  let release: () => void = () => {};
+  const firstPressAnswered = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const outcome = untilDialog(fake.page, async (page) => {
+    await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 1, y: 1 });
+    await firstPressAnswered;
+    await page.send('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: 1,
+      y: 1,
+      clickCount: 2,
+    });
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  fake.showDialog(confirmation);
+  assert.deepEqual(await outcome, { dialog: confirmation });
+  // The dialog is answered and the first press with it; the second is never sent.
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(
+    fake.sent.map(({ params }) => (params as { clickCount?: number }).clickCount ?? 1),
+    [1],
+  );
+});
+
 test("answers the page's dialog, with a prompt's text when given", async () => {
   const fake = fakePage();
-  fake.showDialog({ kind: 'prompt', message: 'Name?', defaultPrompt: 'Ada' });
+  fake.showDialog(dialogOf('prompt', 'Name?', 'Ada'));
   await answerDialog(fake.page, { accept: true, promptText: 'Grace' });
   await answerDialog(fake.page, { accept: false });
   assert.deepEqual(fake.sent, [
@@ -89,17 +142,14 @@ test('refuses to answer a dialog the page does not show', async () => {
 test("describes each kind of dialog, quoting the page's message", () => {
   assert.equal(describeDialog(confirmation), 'a confirmation asking "Delete it?"');
   assert.equal(
-    describeDialog({ kind: 'alert', message: 'Saved "draft"', defaultPrompt: '' }),
+    describeDialog(dialogOf('alert', 'Saved "draft"')),
     'an alert saying "Saved \\"draft\\""',
   );
   assert.equal(
-    describeDialog({ kind: 'prompt', message: 'Name?', defaultPrompt: 'Ada' }),
+    describeDialog(dialogOf('prompt', 'Name?', 'Ada')),
     'a question asking "Name?", suggesting "Ada"',
   );
-  assert.equal(
-    describeDialog({ kind: 'beforeunload', message: '', defaultPrompt: '' }),
-    'a question whether to leave the page',
-  );
-  const long = describeDialog({ kind: 'alert', message: 'x'.repeat(2000), defaultPrompt: '' });
+  assert.equal(describeDialog(dialogOf('beforeunload')), 'a question whether to leave the page');
+  const long = describeDialog(dialogOf('alert', 'x'.repeat(2000)));
   assert.ok(long.length < 600, `${long.length} characters`);
 });

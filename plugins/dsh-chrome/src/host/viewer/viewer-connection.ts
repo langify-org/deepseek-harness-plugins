@@ -326,7 +326,14 @@ export class ViewerConnection implements ScreenViewer {
       browserLabel: page.browser.identity.label,
       openedBy: page.openedBy ?? null,
       openerId: page.openerId ?? null,
-      dialog: page.dialog ?? null,
+      dialog:
+        page.dialog === undefined
+          ? null
+          : {
+              kind: page.dialog.kind,
+              message: page.dialog.message,
+              defaultPrompt: page.dialog.defaultPrompt,
+            },
     };
   }
 

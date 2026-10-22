@@ -424,7 +424,12 @@ test('a dialog of a page brought to the front is reported until it is answered',
   // The click returns once the page has handled it, which waits for the answer.
   const clicked = clickElement(page, 'ask');
   await waitFor(() => page.dialog !== undefined, 10_000, 'the dialog');
-  assert.deepEqual(page.dialog, { kind: 'confirm', message: 'Proceed?', defaultPrompt: '' });
+  assert.deepEqual(page.dialog, {
+    kind: 'confirm',
+    message: 'Proceed?',
+    defaultPrompt: '',
+    url: `${pageUrl}${OPENER_PAGE_PATH.slice(1)}`,
+  });
   await page.send('Page.handleJavaScriptDialog', { accept: true });
   await clicked;
   await waitFor(() => page.dialog === undefined, 10_000, 'the dialog to close');

@@ -2,14 +2,17 @@
  * Messages between the dsh-chrome host plugin and a viewer: the sidebar tab that shows
  * Chrome's screen in the DSH web client.
  *
- * A viewer holds two WebSockets to the DSH Host. Over the screen socket ({@link SCREEN_PATH})
- * travels the VNC protocol (RFB), byte for byte as Chrome's screen serves it: pixels in,
- * pointer and keys out. Over the viewer socket ({@link VIEWER_PATH}) travel the messages
- * defined here, as JSON text: the screen's size, whether Chrome runs, the agent's requests
- * for the user's help, and what the user asks for besides input.
+ * A viewer holds two WebSockets to the DSH Host. Over the screen socket ({@link screenPath})
+ * travels the VNC protocol (RFB), as Chrome's screen serves it: pixels in, pointer and keys
+ * out. Over the viewer socket ({@link VIEWER_PATH}) travel the messages defined here, as JSON
+ * text: where the session's part of the screen is, whether Chrome runs and the session has a
+ * window, the agent's requests for the user's help, and what the user asks for besides input.
  *
- * Every viewer shows the same screen, laid out for one of them at a time: the one the user
- * last worked in.
+ * Each session has its own part of the screen, with its own windows; its viewers show that
+ * part only, laid out for one of them at a time: the one the user last worked in.
+ *
+ * dsh-chrome's page in DSH's plugin settings holds a viewer socket too, without watching a
+ * session, to copy a profile of the user's own Chrome.
  *
  * This module is shared by the host plugin and the browser client: it uses only APIs
  * that both Node and browsers provide.
@@ -19,6 +22,21 @@
 export const VIEWER_PATH = '/dsh-chrome/viewer';
 /** The screen socket's path on the DSH Host: the VNC stream of Chrome's screen. */
 export const SCREEN_PATH = '/dsh-chrome/screen';
+/** The query parameter of the screen socket that names the viewer's DSH session. */
+export const SCREEN_SESSION_PARAMETER = 'session';
+
+/** The screen socket's path for a session's viewer: the keys it carries go to the session. */
+export function screenPath(sessionId: string): string {
+  return `${SCREEN_PATH}?${SCREEN_SESSION_PARAMETER}=${encodeURIComponent(sessionId)}`;
+}
+
+/** The session's part of the screen, in the screen's pixels. */
+export interface ScreenRegion {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
 
 /** How the user answered the agent's request for help. */
 export type HelpAnswer = 'done' | 'declined';
@@ -32,12 +50,24 @@ export type ViewerRequest =
   | { readonly type: 'claim-screen' }
   /** Opens a page for the session, in front. */
   | { readonly type: 'open'; readonly url: string }
-  /** Starts Chrome, if it is not running: when the tab opens, and when the user asks. */
-  | { readonly type: 'start-chrome' }
+  /**
+   * Shows the session's window, opening one, and starting Chrome, if need be: when the tab
+   * opens, and when the user asks.
+   */
+  | { readonly type: 'open-window' }
+  /** Closes Chrome and starts it again, for changed settings to apply. */
+  | { readonly type: 'restart-chrome' }
   /** The user's answer to the agent's request for help. */
   | { readonly type: 'answer-help'; readonly requestId: string; readonly answer: HelpAnswer }
   /** Asks for the text of the page the user is looking at, to add it to the user's message. */
-  | { readonly type: 'read-text'; readonly requestId: string };
+  | { readonly type: 'read-text'; readonly requestId: string }
+  /** Asks which profiles the user's own Chrome has. */
+  | { readonly type: 'user-chrome' }
+  /**
+   * Replaces dsh-chrome's profile with a copy of a profile of the user's own Chrome, closing
+   * Chrome's windows.
+   */
+  | { readonly type: 'copy-profile'; readonly directory: string };
 
 export type ViewerRequestType = ViewerRequest['type'];
 
@@ -47,16 +77,33 @@ const VIEWER_REQUEST_TYPES: Readonly<Record<ViewerRequestType, true>> = {
   viewport: true,
   'claim-screen': true,
   open: true,
-  'start-chrome': true,
+  'open-window': true,
+  'restart-chrome': true,
   'answer-help': true,
   'read-text': true,
+  'user-chrome': true,
+  'copy-profile': true,
 };
+
+/** A profile of the user's own Chrome. */
+export interface UserChromeProfileState {
+  /** The profile's directory in Chrome's user data directory, which names it in requests. */
+  readonly directory: string;
+  readonly name: string;
+  /** The Google account it is signed in to, if any. */
+  readonly account: string | null;
+}
 
 /** Whether Chrome runs. */
 export type ChromeStatus =
   | { readonly kind: 'stopped' }
   | { readonly kind: 'starting' }
-  | { readonly kind: 'running'; readonly version: string }
+  | {
+      readonly kind: 'running';
+      readonly version: string;
+      /** The settings changed since Chrome started: they apply once it starts again. */
+      readonly settingsChanged: boolean;
+    }
   | { readonly kind: 'failed'; readonly message: string };
 
 /** The agent asks the user to do something on a page, and waits. */
@@ -71,8 +118,21 @@ export interface HelpRequestState {
 export type ViewerEvent =
   /** Whether Chrome runs. Sent after `watch` and on every change. */
   | { readonly type: 'chrome'; readonly status: ChromeStatus }
-  /** Whether the screen follows this viewer's size. Sent after `watch` and on every change. */
-  | { readonly type: 'screen'; readonly owner: boolean }
+  /**
+   * Where the session's part of the screen is, `null` until it has one, and whether its size
+   * follows this viewer's. Sent after `watch` and on every change.
+   */
+  | { readonly type: 'screen'; readonly owner: boolean; readonly region: ScreenRegion | null }
+  /** Whether the session has a window in Chrome. Sent after `watch` and on every change. */
+  | { readonly type: 'windows'; readonly open: boolean }
+  /** The profiles of the user's own Chrome, and whether it runs: the answer to `user-chrome`. */
+  | {
+      readonly type: 'user-chrome';
+      readonly profiles: readonly UserChromeProfileState[];
+      readonly running: boolean;
+    }
+  /** dsh-chrome's profile is now a copy of the user's: the answer to `copy-profile`. */
+  | { readonly type: 'profile-copied'; readonly directory: string }
   /** The session's open request for help, or `null` when there is none. */
   | { readonly type: 'help'; readonly request: HelpRequestState | null }
   | {
@@ -125,8 +185,10 @@ export function parseViewerRequest(value: unknown): ViewerRequest | undefined {
       const { url } = value;
       return isString(url) ? { type: 'open', url } : undefined;
     }
-    case 'start-chrome':
-      return { type: 'start-chrome' };
+    case 'open-window':
+      return { type: 'open-window' };
+    case 'restart-chrome':
+      return { type: 'restart-chrome' };
     case 'answer-help': {
       const { requestId, answer } = value;
       return isString(requestId) && (answer === 'done' || answer === 'declined')
@@ -136,6 +198,12 @@ export function parseViewerRequest(value: unknown): ViewerRequest | undefined {
     case 'read-text': {
       const { requestId } = value;
       return isString(requestId) ? { type: 'read-text', requestId } : undefined;
+    }
+    case 'user-chrome':
+      return { type: 'user-chrome' };
+    case 'copy-profile': {
+      const { directory } = value;
+      return isString(directory) ? { type: 'copy-profile', directory } : undefined;
     }
     default:
       return undefined;
@@ -151,7 +219,26 @@ export function parseViewerEvent(value: unknown): ViewerEvent | undefined {
     }
     case 'screen': {
       const { owner } = value;
-      return typeof owner === 'boolean' ? { type: 'screen', owner } : undefined;
+      const region = value['region'] === null ? null : parseRegion(value['region']);
+      return typeof owner === 'boolean' && region !== undefined
+        ? { type: 'screen', owner, region }
+        : undefined;
+    }
+    case 'windows': {
+      const { open } = value;
+      return typeof open === 'boolean' ? { type: 'windows', open } : undefined;
+    }
+    case 'user-chrome': {
+      const { profiles, running } = value;
+      if (!Array.isArray(profiles) || typeof running !== 'boolean') return undefined;
+      const parsed = profiles.map(parseProfile);
+      return parsed.every((profile) => profile !== undefined)
+        ? { type: 'user-chrome', profiles: parsed as UserChromeProfileState[], running }
+        : undefined;
+    }
+    case 'profile-copied': {
+      const { directory } = value;
+      return isString(directory) ? { type: 'profile-copied', directory } : undefined;
     }
     case 'help': {
       const { request } = value;
@@ -189,8 +276,10 @@ function parseChromeStatus(value: unknown): ChromeStatus | undefined {
     case 'starting':
       return { kind: 'starting' };
     case 'running': {
-      const { version } = value;
-      return isString(version) ? { kind: 'running', version } : undefined;
+      const { version, settingsChanged } = value;
+      return isString(version) && typeof settingsChanged === 'boolean'
+        ? { kind: 'running', version, settingsChanged }
+        : undefined;
     }
     case 'failed': {
       const { message } = value;
@@ -199,6 +288,22 @@ function parseChromeStatus(value: unknown): ChromeStatus | undefined {
     default:
       return undefined;
   }
+}
+
+function parseProfile(value: unknown): UserChromeProfileState | undefined {
+  if (!isRecord(value)) return undefined;
+  const { directory, name, account } = value;
+  return isString(directory) && isString(name) && (account === null || isString(account))
+    ? { directory, name, account }
+    : undefined;
+}
+
+function parseRegion(value: unknown): ScreenRegion | undefined {
+  if (!isRecord(value)) return undefined;
+  const { x, y, width, height } = value;
+  return isCount(x) && isCount(y) && isPositive(width) && isPositive(height)
+    ? { x, y, width, height }
+    : undefined;
 }
 
 function safeJson(text: string): unknown {
@@ -219,6 +324,10 @@ function isRequestType(value: unknown): value is ViewerRequestType {
 
 function isString(value: unknown): value is string {
   return typeof value === 'string';
+}
+
+function isCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
 }
 
 function isPositive(value: unknown): value is number {

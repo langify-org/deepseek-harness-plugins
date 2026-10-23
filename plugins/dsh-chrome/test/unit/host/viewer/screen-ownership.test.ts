@@ -2,13 +2,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { silentLog } from '../../../../src/host/platform/log.ts';
 import {
-  type LayoutViewer,
-  ScreenLayout,
+  ScreenOwnership,
   type ScreenSize,
+  type ScreenViewer,
   type ViewerArea,
-} from '../../../../src/host/viewer/screen-layout.ts';
+} from '../../../../src/host/viewer/screen-ownership.ts';
 
-class FakeViewer implements LayoutViewer {
+class FakeViewer implements ScreenViewer {
   area: ViewerArea | undefined;
   owner: boolean | undefined;
 
@@ -21,15 +21,15 @@ class FakeViewer implements LayoutViewer {
   }
 }
 
-function layout(): { readonly sizes: ScreenSize[]; readonly layout: ScreenLayout } {
+function layout(): { readonly sizes: ScreenSize[]; readonly layout: ScreenOwnership } {
   const sizes: ScreenSize[] = [];
   return {
     sizes,
-    layout: new ScreenLayout(
+    layout: new ScreenOwnership(
       async (size) => {
         sizes.push(size);
       },
-      2,
+      () => 2,
       silentLog,
     ),
   };
@@ -92,12 +92,12 @@ test('hands the screen back to the viewer that had it before, when its owner lea
 test('tries a size again after the screen failed to take it', async () => {
   let failures = 1;
   const asked: ScreenSize[] = [];
-  const screen = new ScreenLayout(
+  const screen = new ScreenOwnership(
     async (size) => {
       asked.push(size);
       if (failures-- > 0) throw new Error('Xvnc did not answer');
     },
-    1,
+    () => 1,
     silentLog,
   );
   const viewer = new FakeViewer({ width: 500, height: 400 });
@@ -105,4 +105,33 @@ test('tries a size again after the screen failed to take it', async () => {
   await new Promise((resolve) => setImmediate(resolve));
   screen.areaChanged(viewer);
   assert.equal(asked.length, 2);
+});
+
+test('is empty until a viewer is added, and again when the last one leaves', () => {
+  const { layout: screen } = layout();
+  assert.equal(screen.empty, true);
+  const viewer = new FakeViewer();
+  screen.add(viewer);
+  assert.equal(screen.empty, false);
+  screen.remove(viewer);
+  assert.equal(screen.empty, true);
+});
+
+test('reads the device scale factor each time it lays the screen out', () => {
+  const sizes: ScreenSize[] = [];
+  let factor = 1;
+  const screen = new ScreenOwnership(
+    async (size) => {
+      sizes.push(size);
+    },
+    () => factor,
+    silentLog,
+  );
+  const viewer = new FakeViewer({ width: 600, height: 400 });
+  screen.add(viewer);
+  assert.deepEqual(sizes.at(-1), { width: 600, height: 400 });
+  factor = 2;
+  viewer.area = { width: 700, height: 400 };
+  screen.areaChanged(viewer);
+  assert.deepEqual(sizes.at(-1), { width: 1400, height: 800 });
 });

@@ -6,13 +6,14 @@ import { copyFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildPlugin } from '@langify-org/dsh-plugin-build';
+import { HOST_ROW_ID } from './src/protocol/settings.ts';
 
 const packageDir = fileURLToPath(new URL('.', import.meta.url));
 
 await buildPlugin({
   packageDir,
   hostPlugins: [
-    { id: 'dsh-chrome', exportPath: '.', source: 'src/host/index.ts' },
+    { id: HOST_ROW_ID, exportPath: '.', source: 'src/host/index.ts' },
     { id: 'dsh-chrome-tools', exportPath: './tools', source: 'src/host/tools/index.ts' },
     { id: 'dsh-chrome-context', exportPath: './context', source: 'src/host/context/index.ts' },
   ],

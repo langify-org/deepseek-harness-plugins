@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import type { ScreenRegion } from '../../protocol/viewer.ts';
 import { KEYSYM, routeKey } from './keysyms.ts';
 import { ScreenConnection, type ScreenStatus } from './screen-connection.ts';
 
@@ -21,6 +22,8 @@ export interface ScreenHandle {
 
 export interface ScreenViewProps {
   readonly openSocket: () => ConnectionWebSocket;
+  /** The session's part of the screen, which the view shows. */
+  readonly region: ScreenRegion | undefined;
   /** Whether to be connected; the view connects again after a drop while it is. */
   readonly active: boolean;
   /** The view's size changed, in CSS pixels. */
@@ -52,6 +55,7 @@ const MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navi
  */
 export function ScreenView({
   openSocket,
+  region,
   active,
   onArea,
   onInteract,
@@ -72,6 +76,8 @@ export function ScreenView({
   callbacks.current = { onArea, onInteract, onStatus, onHandle };
   const activeRef = useRef(active);
   activeRef.current = active;
+  const regionRef = useRef(region);
+  regionRef.current = region;
 
   useEffect(() => {
     const target = targetRef.current;
@@ -92,6 +98,7 @@ export function ScreenView({
       },
     });
     connectionRef.current = connection;
+    connection.setRegion(regionRef.current);
     if (activeRef.current) connection.start();
     callbacks.current.onHandle({
       screenshot: () => connection.screenshot(),
@@ -109,6 +116,15 @@ export function ScreenView({
     if (active) connection?.start();
     else connection?.stop();
   }, [active]);
+
+  const { x, y, width, height } = region ?? {};
+  useEffect(() => {
+    connectionRef.current?.setRegion(
+      x === undefined || y === undefined || width === undefined || height === undefined
+        ? undefined
+        : { x, y, width, height },
+    );
+  }, [x, y, width, height]);
 
   useEffect(() => {
     const area = areaRef.current;

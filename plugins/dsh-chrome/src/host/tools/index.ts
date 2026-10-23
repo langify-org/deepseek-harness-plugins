@@ -125,9 +125,9 @@ export function apply(ctx: Context): void {
   };
 
   /**
-   * The page a call names; without a name, the page the user is looking at, if the session
-   * may use it, else the page the session used last. A page the user opened in Chrome becomes
-   * the session's once its agent uses it, so that another session's agent does not.
+   * The page a call names; without a name, the page in front in the session's window, as the
+   * user sees it there, else the page the session used last. A page on no session's screen
+   * becomes the session's once its agent uses it, so that another session's agent does not.
    */
   const sessionPage = async (
     exec: ToolRunContext,
@@ -142,8 +142,7 @@ export function apply(ctx: Context): void {
       if (!usable(page))
         throw new Error(`there is no page ${pageId} this session can use; see chrome_pages`);
     } else {
-      const inFront = await chrome.pages.pageInFront();
-      page = usable(inFront) ? inFront : chrome.pages.ofSession(sessionId)[0];
+      page = (await chrome.pages.pageInFront(sessionId)) ?? chrome.pages.ofSession(sessionId)[0];
       if (page === undefined) {
         throw new Error('this session has no Chrome page yet; open one with chrome_open');
       }
@@ -155,18 +154,22 @@ export function apply(ctx: Context): void {
 
   /**
    * Refuses a page the agent may not read or operate, however it got there (a link, a
-   * redirect, the user): one that is not a web page, such as Chrome's settings, and one that
-   * shows DSH in any of its frames, since a page of the same site can frame DSH signed in
-   * (DSH's cookie reaches same-site frames). The frames' own addresses count: the page's last
-   * reported one lags behind navigation.
+   * redirect, the user): one that shows DSH in any of its frames, since a page of the same
+   * site can frame DSH signed in (DSH's cookie reaches same-site frames), or Chrome's error
+   * page for DSH's address; and one that is not a web page, such as Chrome's settings. The
+   * frames' own addresses count: the page's last reported one lags behind navigation.
    */
   const refuseOffLimits = async (page: ChromePage): Promise<void> => {
     const { frameTree } = await page.send('Page.getFrameTree');
+    const addresses = [
+      page.url,
+      ...framesOf(frameTree).flatMap((frame) => [frame.url, frame.unreachableUrl ?? '']),
+    ];
+    if (addresses.some((address) => address !== '' && isDsh(address))) {
+      throw new Error(DSH_REFUSAL);
+    }
     if (!isWebPage(page.url) || !isWebPage(frameTree.frame.url)) {
       throw new Error(CHROME_PAGE_REFUSAL);
-    }
-    if (isDsh(page.url) || framesOf(frameTree).some((frame) => isDsh(frame.url))) {
-      throw new Error(DSH_REFUSAL);
     }
   };
 
@@ -203,10 +206,11 @@ export function apply(ctx: Context): void {
   };
 
   /**
-   * Acts on a page as the user would on the page in front of them: the page comes to the
-   * front first, since Chrome shows the dialogs of that page only and answers the others'
-   * itself. A dialog the action leads to ends it, and the report names the dialog, and the
-   * pages the action opened.
+   * Acts on a page as the user would on the page in front of them: the page becomes the
+   * active tab of its window, where the session's view shows it, and the window gets Chrome's
+   * focus, without which Chrome edits no text for the keys it is sent. The user's own keys
+   * still go to the session they type in (see the keyboard's focus). A dialog the action
+   * leads to ends it, and the report names the dialog, and the pages the action opened.
    */
   const act = async <T>(
     page: ChromePage,
@@ -285,7 +289,7 @@ export function apply(ctx: Context): void {
       isConcurrencySafe: () => true,
       execute: async (_args, exec) => {
         await chrome.pages.refresh();
-        const inFront = await chrome.pages.pageInFront();
+        const inFront = await chrome.pages.pageInFront(sessionOf(exec));
         return {
           pages: chrome.pages.reachableBy(sessionOf(exec)).map((page) => ({
             ...pageValue(page),
@@ -690,7 +694,7 @@ export function apply(ctx: Context): void {
           MAX_HELP_MINUTES,
         );
         const timeout = AbortSignal.timeout(minutes * 60_000);
-        await page.bringToFront();
+        await page.show();
         // The sidebar shows the request with the page's title.
         await chrome.pages.refresh();
         try {

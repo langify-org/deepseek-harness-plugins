@@ -150,24 +150,19 @@ test('the agent opens a page, reads it, and operates it by ref', { skip }, async
   assert.deepEqual(empty.value, { pages: [] });
   assert.match(text(empty.content), /no Chrome pages/);
 
-  // Chrome starts on first use, and the page opens in a new tab, in front.
+  // Chrome starts on first use, and the page opens in front, in the session's own window.
   const opened = await run('chrome_open', { url: pageUrl });
   const pageId = (opened.value as { page: { id: string } }).page.id;
   assert.match(text(opened.content), new RegExp(`Opened page ${pageId}`));
   await waitFor(async () => (await evaluate<string>('document.readyState')) === 'complete');
 
-  // The tab Chrome started with is the user's, and the session may use it too.
+  // Chrome opens no window of its own: the session's page is its only one.
   const listed = (await run('chrome_pages', {})).value as {
     pages: { id: string; url: string; inFront: boolean }[];
   };
   assert.deepEqual(
     listed.pages.map(({ id, inFront }) => ({ id, inFront })),
-    [
-      { id: pageId, inFront: true },
-      ...listed.pages
-        .filter((page) => page.id !== pageId)
-        .map(({ id }) => ({ id, inFront: false })),
-    ],
+    [{ id: pageId, inFront: true }],
   );
 
   const snapshot = await run('chrome_snapshot', {});
@@ -341,13 +336,13 @@ test("the agent's actions report the pages they open and the dialogs they lead t
   await run('chrome_close', { page: openerId });
 });
 
-test("closing the session's pages leaves it only the user's", { skip }, async () => {
+test("closing the session's pages leaves it none", { skip }, async () => {
   for (const page of requireChrome().pages.ofSession(SESSION_ID)) {
     await run('chrome_close', { page: page.id });
   }
   const listed = (await run('chrome_pages', {})).value as { pages: { id: string }[] };
   assert.deepEqual(requireChrome().pages.ofSession(SESSION_ID), []);
-  for (const { id } of listed.pages) assert.equal(requireChrome().page(id)?.sessionId, undefined);
+  assert.deepEqual(listed.pages, []);
 });
 
 /** Runs a tool as DSH's runtime would, for a turn of the agent's session. */

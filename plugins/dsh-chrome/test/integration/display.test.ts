@@ -1,6 +1,7 @@
 /**
- * The screen Chrome draws on, as programs of other users would find it: Xvnc and Openbox,
- * started as dsh-chrome starts them, in a temporary runtime directory.
+ * The screen Chrome draws on, as programs of other users would find it, and as dsh-chrome
+ * lays it out and reads it: Xvnc and Openbox, started as dsh-chrome starts them, in a
+ * temporary runtime directory.
  *
  * Needs Xvnc and Openbox.
  */
@@ -11,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { type Display, startDisplay } from '../../src/host/chrome/display/display.ts';
+import { XConnection, XError } from '../../src/host/chrome/display/x-connection.ts';
 import {
   missingRequirements,
   windowManagerExecutable,
@@ -78,5 +80,56 @@ test('neither the X server nor VNC listens on TCP', { skip }, async () => {
       socket.once('error', (error: NodeJS.ErrnoException) => resolve(error.code ?? 'error'));
     });
     assert.equal(outcome, 'ECONNREFUSED', `port ${port}`);
+  }
+});
+
+test('the screen takes a layout of monitors side by side, as Xvnc reports it', {
+  skip,
+}, async () => {
+  const screen = requireDisplay();
+  const layout = {
+    width: 1700,
+    height: 700,
+    monitors: [
+      { id: 1, x: 0, y: 0, width: 900, height: 700 },
+      { id: 2, x: 900, y: 0, width: 800, height: 600 },
+    ],
+  };
+  await screen.setLayout(layout);
+  assert.deepEqual(screen.layout, layout);
+  // A layout Xvnc cannot make is refused, and the screen keeps the one it has.
+  await assert.rejects(
+    screen.setLayout({
+      width: 40_000,
+      height: 700,
+      monitors: [{ id: 1, x: 0, y: 0, width: 40_000, height: 700 }],
+    }),
+    /did not change the screen/,
+  );
+  assert.deepEqual(screen.layout, layout);
+  await screen.setLayout({
+    width: 800,
+    height: 600,
+    monitors: [{ id: 1, x: 0, y: 0, width: 800, height: 600 }],
+  });
+});
+
+test("the host's own X connection reads the keyboard's focus, and refuses a window that is not there", {
+  skip,
+}, async () => {
+  const screen = requireDisplay();
+  const x = await XConnection.connect(screen.name, screen.authorityPath);
+  try {
+    // Openbox keeps the focus on a window of its own, off the screen, while no other has it.
+    const focused = await x.inputFocus();
+    if (focused !== undefined) {
+      const bounds = await x.boundsOf(focused);
+      assert.equal(typeof bounds.width, 'number');
+    }
+    await assert.rejects(x.focus(0x7fffff), (error: unknown) => error instanceof XError);
+    // A refusal leaves the connection usable.
+    assert.equal(await x.inputFocus(), focused);
+  } finally {
+    x.close();
   }
 });

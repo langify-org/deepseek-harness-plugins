@@ -1,5 +1,6 @@
 import type { ConnectionWebSocket } from '@deepseek-ai/dsh-client-connection/client';
 import RFB from '@novnc/novnc';
+import type { ScreenRegion } from '../../protocol/viewer.ts';
 import { KEYSYM, MODIFIER_KEYSYMS } from './keysyms.ts';
 import { typingOf } from './typing.ts';
 
@@ -40,6 +41,8 @@ export class ScreenConnection {
   #retryTimer: ReturnType<typeof setTimeout> | undefined;
   /** The keysym each key the user holds pressed on the screen, by physical key. */
   readonly #held = new Map<string, number>();
+  /** The session's part of the screen, which the view shows. */
+  #region: ScreenRegion | undefined;
 
   constructor(options: ScreenConnectionOptions) {
     this.#options = options;
@@ -50,6 +53,12 @@ export class ScreenConnection {
     this.#started = true;
     this.#attempt = 0;
     this.#connect();
+  }
+
+  /** Shows the session's part of the screen, and asks for its pixels only. */
+  setRegion(region: ScreenRegion | undefined): void {
+    this.#region = region;
+    if (this.#rfb !== undefined) this.#rfb.viewRegion = region ?? null;
   }
 
   stop(): void {
@@ -177,6 +186,7 @@ export class ScreenConnection {
     this.#rfb = rfb;
     rfb.scaleViewport = true;
     rfb.clipViewport = false;
+    rfb.viewRegion = this.#region ?? null;
     // The host sets the screen's size: in device pixels, for the viewer that owns it.
     rfb.resizeSession = false;
     // The viewer's input surface takes the keys; noVNC's own handling would send scancodes,

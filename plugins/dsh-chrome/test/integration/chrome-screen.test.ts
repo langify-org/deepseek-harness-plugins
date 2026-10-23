@@ -1,7 +1,8 @@
 /**
- * Chrome on its screen, as a viewer sees and works it: the built host plugin starts Chrome
- * on Xvnc under Openbox, in a temporary profile, and the test reaches the screen as a VNC
- * client, the way the sidebar's noVNC does.
+ * Chrome on its screen, as viewers of two sessions see and work it: the built host plugin
+ * starts Chrome on Xvnc under Openbox, in a temporary profile, and the test reaches the
+ * screen as a VNC client, the way the sidebar's noVNC does, with the keys passed through the
+ * keyboard's focus as the screen bridge passes them.
  *
  * Needs a build (`pnpm build`), Google Chrome (or DSH_CHROME_TEST_EXECUTABLE), Xvnc and
  * Openbox.
@@ -14,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { pathToFileURL } from 'node:url';
+import type { Context } from '@deepseek-ai/cordis';
 import type { ChromeService } from '../../src/host/chrome/chrome-service.ts';
 import type { ChromePage } from '../../src/host/chrome/pages/page.ts';
 import { type DshHost, startDshHost } from '../support/dsh-host.ts';
@@ -28,7 +30,10 @@ import { OPENER_PAGE_HTML, OPENER_PAGE_PATH, TEST_PAGE_HTML } from '../support/t
 import { VncClient } from '../support/vnc-client.ts';
 import { waitFor } from '../support/wait.ts';
 
-const SESSION_ID = 'screen-session';
+const SESSION_A = 'screen-session-a';
+const SESSION_B = 'screen-session-b';
+/** A session no view shows, whose agent works in Chrome. */
+const SESSION_C = 'screen-session-c';
 const CONTROL_L = 0xffe3;
 const KEY_A = 0x61;
 const KEY_C = 0x63;
@@ -44,6 +49,10 @@ let chrome: ChromeService | undefined;
 let pageServer: Server | undefined;
 let pageUrl = '';
 let screen: VncClient | undefined;
+/** The host row, as DSH's Loader holds it: its parsed configuration and its context. */
+let hostFiber: { readonly config: unknown; readonly ctx: Context } | undefined;
+/** The sessions shown, as a viewer shows them: each ends with its function. */
+const shown: (() => void)[] = [];
 
 before(async () => {
   if (skip) return;
@@ -55,15 +64,20 @@ before(async () => {
   await new Promise<void>((resolve) => pageServer?.listen(0, '127.0.0.1', resolve));
   pageUrl = `http://127.0.0.1:${(pageServer.address() as AddressInfo).port}/`;
   host = await startDshHost();
-  await host.root.plugin(await import(pathToFileURL(join(distDir, 'host', 'index.js')).href), {
-    executable: chromeExecutable,
-    xvncExecutable,
-    windowManagerExecutable,
-    profileDir: join(workDir, 'chrome-profile'),
-    userChromeDir: join(workDir, 'user-chrome'),
-    dataDir: join(workDir, 'data'),
-    runtimeDir: join(workDir, 'run'),
-  });
+  const fiber = host.root.plugin(
+    await import(pathToFileURL(join(distDir, 'host', 'index.js')).href),
+    {
+      executable: chromeExecutable,
+      xvncExecutable,
+      windowManagerExecutable,
+      profileDir: join(workDir, 'chrome-profile'),
+      userChromeDir: join(workDir, 'user-chrome'),
+      dataDir: join(workDir, 'data'),
+      runtimeDir: join(workDir, 'run'),
+    },
+  );
+  await fiber;
+  hostFiber = fiber;
   chrome = host.root.get('chrome');
 });
 
@@ -76,53 +90,110 @@ after(async () => {
   if (workDir !== '') await rm(workDir, { recursive: true, force: true });
 });
 
-test('a viewer that connects starts the screen, and Chrome fills it at twice the pixels', {
+test('a session a viewer shows gets its part of the screen, and its window fills it at twice the pixels', {
   skip,
 }, async () => {
   const service = requireChrome();
+  shown.push(service.showSession(SESSION_A));
   screen = await VncClient.connect(await service.vncSocketPath());
-  // The screen alone: Chrome starts when a tab asks for it.
+  await service.screens.settled();
+  // The screen alone: Chrome starts when the session opens a window.
   assert.equal(service.state.kind, 'stopped');
+  assert.deepEqual(service.screens.monitorOf(SESSION_A), {
+    id: 1,
+    x: 0,
+    y: 0,
+    width: 2560,
+    height: 1600,
+  });
   await screen.refresh();
-  assert.deepEqual([screen.width, screen.height], [1280, 800]);
-  await service.chrome();
-  assert.equal(service.state.kind, 'running');
+  assert.deepEqual([screen.width, screen.height], [2560, 1600]);
 
-  const page = await openTestPage();
-  const window = await evaluate<{ width: number; height: number; dpr: number }>(
+  const page = await openTestPage(SESSION_A);
+  assert.equal(service.state.kind, 'running');
+  const window = await evaluate<Record<string, number>>(
     page,
-    '({ width: outerWidth, height: outerHeight, dpr: devicePixelRatio })',
+    '({ x: screenX, y: screenY, width: outerWidth, height: outerHeight, dpr: devicePixelRatio })',
   );
-  assert.deepEqual(window, { width: 640, height: 400, dpr: 2 });
+  assert.deepEqual(window, { x: 0, y: 0, width: 1280, height: 800, dpr: 2 });
 });
 
 test('by default, pages are not told that Chrome is under automated control', {
   skip,
 }, async () => {
   // Google's sign-in refuses a browser that says it is ("may not be secure").
-  assert.equal(await evaluate<boolean>(sessionPage(), 'navigator.webdriver'), false);
+  assert.equal(await evaluate<boolean>(sessionPage(SESSION_A), 'navigator.webdriver'), false);
 });
 
-test("the screen takes the size a viewer asks, and Chrome's window follows it", {
+test("each session's part of the screen takes the size its viewer asks, beside the others, and its window follows", {
+  skip,
+}, async () => {
+  const service = requireChrome();
+  service.sizeSessionScreen(SESSION_A, { width: 1100, height: 1400 });
+  shown.push(service.showSession(SESSION_B));
+  const pageB = await openTestPage(SESSION_B);
+  await service.screens.settled();
+  assert.deepEqual(
+    service.screens.layout.monitors.map((monitor) => [monitor.x, monitor.width, monitor.height]),
+    [
+      [0, 1100, 1400],
+      [1100, 2560, 1600],
+    ],
+  );
+  await waitFor(
+    async () =>
+      (await evaluate<string>(
+        sessionPage(SESSION_A),
+        'JSON.stringify([screenX, outerWidth, outerHeight])',
+      )) === '[0,550,700]',
+    10_000,
+    "A's window to fill A's part of the screen",
+  );
+  await waitFor(
+    async () =>
+      (await evaluate<string>(pageB, 'JSON.stringify([screenX, outerWidth, outerHeight])')) ===
+      '[550,1280,800]',
+    10_000,
+    "B's window to fill B's part of the screen",
+  );
+  const viewer = requireScreen();
+  await viewer.refresh();
+  assert.deepEqual([viewer.width, viewer.height], [3660, 1600]);
+});
+
+test("a session's pages open as tabs of its window, and a tab the user opens there is the session's", {
   skip,
 }, async () => {
   const service = requireChrome();
   const viewer = requireScreen();
-  await service.resizeScreen({ width: 1100, height: 1400 });
-  await viewer.refresh();
-  assert.deepEqual([viewer.width, viewer.height], [1100, 1400]);
-  const page = sessionPage();
+  const first = sessionPage(SESSION_A);
+  const second = await service.openPage(SESSION_A, pageUrl, { openedBy: 'agent' });
+  assert.equal(await windowOf(second), await windowOf(first));
+  assert.notEqual(await windowOf(second), await windowOf(sessionPage(SESSION_B)));
+  await second.close();
+
+  // The user opens a tab in A's window, as with Ctrl+T in its view.
+  const field = await screenPoint(first, 'field');
+  viewer.click(field.x, field.y);
+  const before = new Set(service.pages.all().map((page) => page.id));
+  await service.keyboard.deliver(SESSION_A, () => viewer.press(CONTROL_L, KEY_T));
+  let opened: ChromePage | undefined;
   await waitFor(
-    async () =>
-      (await evaluate<string>(page, 'JSON.stringify([outerWidth, outerHeight])')) === '[550,700]',
+    () => {
+      opened = service.pages.all().find((page) => !before.has(page.id));
+      return opened?.sessionId !== undefined;
+    },
     10_000,
-    "Chrome's window to fill the screen",
+    'the new tab, given to its session',
   );
+  assert.deepEqual([opened?.sessionId, opened?.openedBy], [SESSION_A, 'user']);
+  await service.keyboard.deliver(SESSION_A, () => viewer.press(CONTROL_L, KEY_W));
+  await waitFor(() => opened?.ending !== undefined, 10_000, 'the tab to close');
 });
 
 test("the viewer's clicks and keys reach the page, and its text pastes", { skip }, async () => {
   const viewer = requireScreen();
-  const page = sessionPage();
+  const page = sessionPage(SESSION_A);
   const field = await screenPoint(page, 'field');
   viewer.click(field.x, field.y);
   await waitFor(
@@ -130,6 +201,7 @@ test("the viewer's clicks and keys reach the page, and its text pastes", { skip 
     10_000,
     'the field to take the focus',
   );
+  await evaluate(page, "document.getElementById('field').value = ''");
   for (const character of 'typed') viewer.press(character.charCodeAt(0));
   await waitFor(async () => (await fieldValue(page)) === 'typed', 10_000, 'the typed text');
 
@@ -160,33 +232,56 @@ test("the viewer's clicks and keys reach the page, and its text pastes", { skip 
   );
 });
 
-test("a tab the user opens in Chrome is the user's, and no session's", { skip }, async () => {
+test("keys typed for a session reach its window, though another session's agent took the keyboard", {
+  skip,
+}, async () => {
   const service = requireChrome();
   const viewer = requireScreen();
-  const before = new Set(service.pages.all().map((page) => page.id));
-  viewer.press(CONTROL_L, KEY_T);
-  let opened: ChromePage | undefined;
+  const pageA = sessionPage(SESSION_A);
+  const pageB = sessionPage(SESSION_B);
+  for (const page of [pageA, pageB])
+    await evaluate(page, "document.getElementById('field').value = ''");
+  const field = await screenPoint(pageA, 'field');
+  viewer.click(field.x, field.y);
   await waitFor(
-    () => {
-      opened = service.pages.all().find((page) => !before.has(page.id));
-      return opened !== undefined;
-    },
+    async () => (await evaluate<boolean>(pageA, 'document.hasFocus()')) === true,
     10_000,
-    'the new tab',
+    "A's window to take the keyboard",
   );
-  assert.deepEqual([opened?.sessionId, opened?.openedBy], [undefined, 'user']);
-  assert.equal(service.pages.reachableBy(SESSION_ID).includes(opened as ChromePage), true);
-  viewer.press(CONTROL_L, KEY_W);
-  await waitFor(() => opened?.ending !== undefined, 10_000, 'the tab to close');
+  // B's agent clicks in its page, as chrome_click does: Chrome gives B's window the keyboard.
+  const target = await evaluate<{ x: number; y: number }>(
+    pageB,
+    "(() => { const r = document.getElementById('field').getBoundingClientRect(); return { x: r.x + 5, y: r.y + 5 }; })()",
+  );
+  for (const type of ['mousePressed', 'mouseReleased'] as const) {
+    await pageB.send('Input.dispatchMouseEvent', {
+      type,
+      x: target.x,
+      y: target.y,
+      button: 'left',
+      clickCount: 1,
+    });
+  }
+  await waitFor(
+    async () => (await evaluate<boolean>(pageB, 'document.hasFocus()')) === true,
+    10_000,
+    "B's window to take the keyboard",
+  );
+  // The user types in A's view: the screen bridge passes each key as this does.
+  for (const character of 'mine') {
+    await service.keyboard.deliver(SESSION_A, () => viewer.press(character.charCodeAt(0)));
+  }
+  await waitFor(async () => (await fieldValue(pageA)) === 'mine', 10_000, "the keys in A's field");
+  assert.equal(await fieldValue(pageB), '');
 });
 
-test("a window a page opens stays above Chrome's, and its title bar closes it", {
+test("a window a page opens stays above its opener's, on the session's part of the screen, and its title bar closes it", {
   skip,
 }, async () => {
   const service = requireChrome();
   const viewer = requireScreen();
   const openerUrl = new URL(OPENER_PAGE_PATH, pageUrl).href;
-  const opener = await service.openPage(SESSION_ID, openerUrl, { openedBy: 'user' });
+  const opener = await service.openPage(SESSION_B, openerUrl, { openedBy: 'user' });
   await waitForLoad(opener, openerUrl);
   const button = await screenPoint(opener, 'popup');
   viewer.click(button.x, button.y);
@@ -200,15 +295,22 @@ test("a window a page opens stays above Chrome's, and its title bar closes it", 
     'the popup',
   );
   assert.ok(popup);
+  assert.equal(popup.sessionId, SESSION_B);
   await waitForLoad(popup);
   // Its frame, in the screen's pixels: the page's top is below the title bar.
-  const frame = await evaluate<{ right: number; top: number; width: number }>(
+  const frame = await evaluate<{ left: number; right: number; top: number; width: number }>(
     popup,
-    '({ right: (screenX + outerWidth) * devicePixelRatio, top: screenY * devicePixelRatio, width: outerWidth * devicePixelRatio })',
+    '({ left: screenX * devicePixelRatio, right: (screenX + outerWidth) * devicePixelRatio, top: screenY * devicePixelRatio, width: outerWidth * devicePixelRatio })',
   );
-  assert.ok(frame.width < viewer.width, 'the popup fills the screen');
-  // Working in Chrome's window keeps the popup above it: its close button is still there.
-  viewer.click(viewer.width - 20, viewer.height - 20);
+  const monitor = service.screens.monitorOf(SESSION_B);
+  assert.ok(monitor);
+  assert.ok(
+    frame.left >= monitor.x && frame.right <= monitor.x + monitor.width,
+    "the popup is on B's part",
+  );
+  assert.ok(frame.width < monitor.width, 'the popup fills the screen');
+  // Working in the opener's window keeps the popup above it: its close button is still there.
+  viewer.click(monitor.x + monitor.width - 20, monitor.height - 20);
   await new Promise((resolve) => setTimeout(resolve, 500));
   viewer.click(frame.right - 11, frame.top - 11);
   const closed = popup;
@@ -216,25 +318,97 @@ test("a window a page opens stays above Chrome's, and its title bar closes it", 
   await opener.close();
 });
 
-test('Chrome closed by the user starts again when needed, with its profile, on the same screen', {
+test("Chrome stays up when every window closes; a session's part of the screen goes with its last window and viewer", {
   skip,
 }, async () => {
   const service = requireChrome();
-  const viewer = requireScreen();
-  const page = sessionPage();
-  await evaluate(page, "localStorage.setItem('kept', 'yes')");
-  // Closing every tab closes Chrome, as the user does with the last tab's ✕.
+  await evaluate(sessionPage(SESSION_A), "localStorage.setItem('kept', 'yes')");
   for (const open of service.pages.all()) await open.close();
-  await waitFor(() => service.state.kind === 'stopped', 15_000, 'Chrome to exit');
-  assert.equal(viewer.closed, false);
-
-  const again = await service.openPage(SESSION_ID, pageUrl, { openedBy: 'user' });
+  await waitFor(() => service.pages.all().length === 0, 10_000, 'the windows to close');
+  await new Promise((resolve) => setTimeout(resolve, 1000));
   assert.equal(service.state.kind, 'running');
-  await waitForLoad(again);
+  // B's viewer goes: B has neither a window nor a viewer, and its part of the screen goes.
+  shown.pop()?.();
+  await service.screens.settled();
+  assert.deepEqual(service.screens.sessions, [SESSION_A]);
+
+  const again = await openTestPage(SESSION_A);
   assert.equal(await evaluate(again, "localStorage.getItem('kept')"), 'yes');
-  await viewer.refresh();
-  assert.deepEqual([viewer.width, viewer.height], [1100, 1400]);
 });
+
+test('a session no view shows opens its pages on the parking monitor, as its own, and takes them along once a view shows it', {
+  skip,
+}, async () => {
+  const service = requireChrome();
+  const page = await openTestPage(SESSION_C);
+  // No view shows C: its window is on the parking monitor, and the page is C's.
+  assert.equal(page.sessionId, SESSION_C);
+  assert.equal(service.screens.monitorOf(SESSION_C), undefined);
+  const parking = service.screens.parkingMonitor;
+  assert.ok(parking, 'the parking monitor');
+  const left = await evaluate<number>(page, 'screenX * devicePixelRatio');
+  assert.ok(
+    left >= parking.x && left < parking.x + parking.width,
+    'the window is on the parking monitor',
+  );
+  // A view shows C: its window moves to C's own monitor, and the parking monitor goes.
+  const hide = service.showSession(SESSION_C);
+  try {
+    await service.screens.settled();
+    const own = service.screens.monitorOf(SESSION_C);
+    assert.ok(own, "C's own monitor");
+    await waitFor(
+      async () => (await evaluate<number>(page, 'screenX * devicePixelRatio')) === own.x,
+      10_000,
+      "C's window on its own monitor",
+    );
+    assert.equal(service.screens.parkingMonitor, undefined);
+  } finally {
+    hide();
+  }
+  await page.close();
+});
+
+test('a change of the settings while Chrome runs says that Chrome takes it when it starts again', {
+  skip,
+}, async () => {
+  const service = requireChrome();
+  assert.ok(service.state.kind === 'running' && !service.state.settingsChanged);
+  changeSetting('deviceScaleFactor', 1.5);
+  assert.ok(service.state.kind === 'running' && service.state.settingsChanged);
+  changeSetting('deviceScaleFactor', 2);
+  assert.ok(service.state.kind === 'running' && !service.state.settingsChanged);
+});
+
+test('Chrome started again keeps the profile, and the sessions open their windows again', {
+  skip,
+}, async () => {
+  const service = requireChrome();
+  await service.restartChrome();
+  assert.equal(service.state.kind, 'running');
+  assert.deepEqual(service.pages.ofSession(SESSION_A), []);
+  const page = await openTestPage(SESSION_A);
+  assert.equal(await evaluate(page, "localStorage.getItem('kept')"), 'yes');
+  const viewer = requireScreen();
+  assert.equal(viewer.closed, false);
+});
+
+/**
+ * Changes a setting as DSH's Loader does when the settings page writes it: in the reference
+ * the row holds, through the protocol shared by every copy of the reference's library, and
+ * then it tells the row which settings changed.
+ */
+function changeSetting(key: string, value: unknown): void {
+  assert.ok(hostFiber, 'the plugin did not start');
+  const reference = (hostFiber.config as Record<string, Record<symbol, (value: unknown) => void>>)[
+    key
+  ];
+  reference?.[Symbol.for('cosmokit.volatile.write')]?.(value);
+  (hostFiber.ctx as unknown as { emit(name: string, ...args: unknown[]): void }).emit(
+    'loader/volatile-update',
+    [[key]],
+  );
+}
 
 function requireChrome(): ChromeService {
   assert.ok(chrome, 'the plugin did not start');
@@ -246,14 +420,14 @@ function requireScreen(): VncClient {
   return screen;
 }
 
-function sessionPage(): ChromePage {
-  const page = requireChrome().pages.ofSession(SESSION_ID)[0];
+function sessionPage(sessionId: string): ChromePage {
+  const page = requireChrome().pages.ofSession(sessionId)[0];
   assert.ok(page, 'the session has no page');
   return page;
 }
 
-async function openTestPage(): Promise<ChromePage> {
-  const page = await requireChrome().openPage(SESSION_ID, pageUrl, { openedBy: 'user' });
+async function openTestPage(sessionId: string): Promise<ChromePage> {
+  const page = await requireChrome().openPage(sessionId, pageUrl, { openedBy: 'user' });
   await waitForLoad(page);
   return page;
 }
@@ -278,6 +452,15 @@ async function evaluate<T>(page: ChromePage, expression: string): Promise<T> {
   });
   if (exceptionDetails !== undefined) throw new Error(exceptionDetails.text);
   return result.value as T;
+}
+
+/** The Chrome window the page is in. */
+async function windowOf(page: ChromePage): Promise<number> {
+  const chrome = await requireChrome().chrome();
+  const { windowId } = await chrome.connection.send('Browser.getWindowForTarget', {
+    targetId: page.targetId,
+  });
+  return windowId;
 }
 
 function fieldValue(page: ChromePage): Promise<string> {

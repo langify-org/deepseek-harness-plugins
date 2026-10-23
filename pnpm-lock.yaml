@@ -163,7 +163,7 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  '@novnc/novnc@1.7.0': b5fd800d5b2c45476ec5461ee7384e1c653b969f3bab84fe6d87beab8749fe82
+  '@novnc/novnc@1.7.0': 4b6582bde3ebaaa1b1e223fb57050e6061908abe0c64240a67f500e9b866a258
 
 importers:
 
@@ -237,7 +237,7 @@ importers:
         version: link:../../tooling/dsh-plugin-build
       '@novnc/novnc':
         specifier: 1.7.0
-        version: 1.7.0(patch_hash=b5fd800d5b2c45476ec5461ee7384e1c653b969f3bab84fe6d87beab8749fe82)
+        version: 1.7.0(patch_hash=4b6582bde3ebaaa1b1e223fb57050e6061908abe0c64240a67f500e9b866a258)
       '@types/node':
         specifier: 24.19.2
         version: 24.19.2
@@ -1464,7 +1464,7 @@ snapshots:
 
   '@eslint-community/regexpp@4.12.2': {}
 
-  '@novnc/novnc@1.7.0(patch_hash=b5fd800d5b2c45476ec5461ee7384e1c653b969f3bab84fe6d87beab8749fe82)': {}
+  '@novnc/novnc@1.7.0(patch_hash=4b6582bde3ebaaa1b1e223fb57050e6061908abe0c64240a67f500e9b866a258)': {}
 
   '@standard-schema/spec@1.1.0': {}
 

@@ -28,15 +28,34 @@ export interface ScreenSize {
 }
 
 /**
- * The host's own VNC connection to the screen, through which it sets the screen's size:
- * the protocol's SetDesktopSize, which Xvnc applies by resizing its screen as RandR would.
- * It asks for no pixels, only a pixel at a time when it needs Xvnc's answer.
+ * A monitor of the screen, as RandR shows it to the programs on the screen: a rectangle of
+ * the screen, in device pixels. Its id stays with it from one layout to the next.
+ */
+export interface Monitor {
+  readonly id: number;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** The screen's layout: its size, and the monitors on it. */
+export interface ScreenLayout extends ScreenSize {
+  readonly monitors: readonly Monitor[];
+}
+
+/** The most monitors a layout has: the protocol counts them in one byte. */
+export const MAX_MONITORS = 255;
+
+/**
+ * The host's own VNC connection to the screen, through which it sets the screen's layout:
+ * the protocol's SetDesktopSize, which Xvnc applies by resizing its screen and its monitors
+ * as RandR would. It asks for no pixels, only a pixel at a time when it needs Xvnc's answer.
  */
 export class ScreenControl {
   readonly #socket: Socket;
   readonly #reader: Reader;
-  #size: ScreenSize = { width: 0, height: 0 };
-  #screenId = 0;
+  #layout: ScreenLayout = { width: 0, height: 0, monitors: [] };
   #bytesPerPixel = 4;
   /** Who waits for the next layout Xvnc reports: `reason` says why it changed. */
   #layoutWaiter:
@@ -79,13 +98,17 @@ export class ScreenControl {
     return control;
   }
 
-  get size(): ScreenSize {
-    return this.#size;
+  /** The screen's layout, as Xvnc last reported it. */
+  get layout(): ScreenLayout {
+    return this.#layout;
   }
 
-  /** Sets the screen's size, in device pixels; changes are applied one after another. */
-  resize(size: ScreenSize): Promise<void> {
-    const run = this.#queue.then(() => this.#resize(size));
+  /**
+   * Sets the screen's layout, in device pixels; changes are applied one after another.
+   * @throws when Xvnc refuses it, keeping the layout it had.
+   */
+  setLayout(layout: ScreenLayout): Promise<void> {
+    const run = this.#queue.then(() => this.#setLayout(layout));
     this.#queue = run.catch(() => {});
     return run;
   }
@@ -111,7 +134,9 @@ export class ScreenControl {
     // ClientInit: share the screen with the viewers.
     this.#socket.write(Buffer.from([1]));
     const init = await this.#reader.read(24);
-    this.#size = { width: init.readUInt16BE(0), height: init.readUInt16BE(2) };
+    const width = init.readUInt16BE(0);
+    const height = init.readUInt16BE(2);
+    this.#layout = { width, height, monitors: [{ id: 0, x: 0, y: 0, width, height }] };
     this.#bytesPerPixel = Math.max(1, (init[4] ?? 32) / 8);
     await this.#reader.read(init.readUInt32BE(20));
     const encodings = [ENCODING_EXTENDED_DESKTOP_SIZE, ENCODING_DESKTOP_SIZE];
@@ -124,17 +149,26 @@ export class ScreenControl {
     this.#socket.write(message);
   }
 
-  async #resize({ width, height }: ScreenSize): Promise<void> {
+  async #setLayout(layout: ScreenLayout): Promise<void> {
     if (this.#closedBy !== undefined) throw this.#closedBy;
-    if (width === this.#size.width && height === this.#size.height) return;
-    const message = Buffer.alloc(24);
+    if (sameLayout(layout, this.#layout)) return;
+    const { monitors } = layout;
+    if (monitors.length === 0 || monitors.length > MAX_MONITORS) {
+      throw new Error(`a screen has 1 to ${MAX_MONITORS} monitors, not ${monitors.length}`);
+    }
+    const message = Buffer.alloc(8 + 16 * monitors.length);
     message[0] = CLIENT_SET_DESKTOP_SIZE;
-    message.writeUInt16BE(width, 2);
-    message.writeUInt16BE(height, 4);
-    message[6] = 1;
-    message.writeUInt32BE(this.#screenId, 8);
-    message.writeUInt16BE(width, 16);
-    message.writeUInt16BE(height, 18);
+    message.writeUInt16BE(layout.width, 2);
+    message.writeUInt16BE(layout.height, 4);
+    message[6] = monitors.length;
+    for (const [index, monitor] of monitors.entries()) {
+      const offset = 8 + 16 * index;
+      message.writeUInt32BE(monitor.id, offset);
+      message.writeUInt16BE(monitor.x, offset + 4);
+      message.writeUInt16BE(monitor.y, offset + 6);
+      message.writeUInt16BE(monitor.width, offset + 8);
+      message.writeUInt16BE(monitor.height, offset + 10);
+    }
     this.#socket.write(message);
     // Only an update for this client's own request carries the result.
     const status = await this.#nextLayout(
@@ -143,7 +177,7 @@ export class ScreenControl {
     );
     if (status !== 0) {
       throw new Error(
-        `Xvnc did not resize the screen: ${RESIZE_REFUSALS[status] ?? `status ${status}`}`,
+        `Xvnc did not change the screen: ${RESIZE_REFUSALS[status] ?? `status ${status}`}`,
       );
     }
   }
@@ -228,15 +262,21 @@ export class ScreenControl {
       if (encoding === ENCODING_RAW) {
         await this.#reader.read(width * height * this.#bytesPerPixel);
       } else if (encoding === ENCODING_EXTENDED_DESKTOP_SIZE) {
-        const screens = (await this.#reader.read(4))[0] ?? 0;
-        const layout = await this.#reader.read(16 * screens);
-        if (screens > 0) this.#screenId = layout.readUInt32BE(0);
-        this.#size = { width, height };
+        const count = (await this.#reader.read(4))[0] ?? 0;
+        const screens = await this.#reader.read(16 * count);
+        const monitors = Array.from({ length: count }, (_, monitor) => ({
+          id: screens.readUInt32BE(16 * monitor),
+          x: screens.readUInt16BE(16 * monitor + 4),
+          y: screens.readUInt16BE(16 * monitor + 6),
+          width: screens.readUInt16BE(16 * monitor + 8),
+          height: screens.readUInt16BE(16 * monitor + 10),
+        }));
+        this.#layout = { width, height, monitors };
         // x is the reason for the change; when this client asked, y is the result.
         if (this.#layoutWaiter?.offer(x, x === REASON_THIS_CLIENT ? y : 0))
           this.#layoutWaiter = undefined;
       } else if (encoding === ENCODING_DESKTOP_SIZE) {
-        this.#size = { width, height };
+        this.#layout = { width, height, monitors: [{ id: 0, x: 0, y: 0, width, height }] };
       } else {
         throw new Error(`Xvnc sent an encoding this client did not ask for (${encoding})`);
       }
@@ -292,4 +332,24 @@ class Reader {
     this.#buffered = this.#buffered.subarray(bytes);
     return data;
   }
+}
+
+/** Whether two layouts are the same: the same size, and the same monitors in the same order. */
+export function sameLayout(a: ScreenLayout, b: ScreenLayout): boolean {
+  return (
+    a.width === b.width &&
+    a.height === b.height &&
+    a.monitors.length === b.monitors.length &&
+    a.monitors.every((monitor, index) => {
+      const other = b.monitors[index];
+      return (
+        other !== undefined &&
+        monitor.id === other.id &&
+        monitor.x === other.x &&
+        monitor.y === other.y &&
+        monitor.width === other.width &&
+        monitor.height === other.height
+      );
+    })
+  );
 }

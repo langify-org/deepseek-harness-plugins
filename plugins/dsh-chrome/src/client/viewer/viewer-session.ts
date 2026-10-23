@@ -4,6 +4,7 @@ import {
   decodeViewerEvent,
   type HelpAnswer,
   type HelpRequestState,
+  type ScreenRegion,
   type ViewerEvent,
   type ViewerRequest,
 } from '../../protocol/viewer.ts';
@@ -17,6 +18,10 @@ export interface ViewerSnapshot {
   readonly chrome: ChromeStatus | undefined;
   /** Whether the screen follows this viewer's size. */
   readonly screenOwner: boolean;
+  /** The session's part of the screen, once it has one. */
+  readonly region: ScreenRegion | undefined;
+  /** Whether the session has a window in Chrome, once the host said. */
+  readonly windowsOpen: boolean | undefined;
   /** The agent's open request for the user's help, in this tab's session. */
   readonly help: HelpRequestState | undefined;
   /** A message for the user: why a request failed, or what happened. */
@@ -59,6 +64,8 @@ export class ViewerSession {
     connection: 'connecting',
     chrome: undefined,
     screenOwner: false,
+    region: undefined,
+    windowsOpen: undefined,
     help: undefined,
     notice: undefined,
   };
@@ -69,7 +76,7 @@ export class ViewerSession {
   #reconnectAttempt = 0;
   #reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   /** Whether the tab has asked for Chrome, as it does when it first connects. */
-  #askedForChrome = false;
+  #askedForWindow = false;
   #disposed = false;
 
   constructor(options: ViewerSessionOptions) {
@@ -105,8 +112,14 @@ export class ViewerSession {
     else this.#pendingOpens.push(url);
   }
 
-  startChrome(): void {
-    this.#send({ type: 'start-chrome' });
+  /** Shows the session's window, opening one, and starting Chrome, if need be. */
+  openWindow(): void {
+    this.#send({ type: 'open-window' });
+  }
+
+  /** Closes Chrome, every session's windows with it, and starts it with the settings as they are. */
+  restartChrome(): void {
+    this.#send({ type: 'restart-chrome' });
   }
 
   answerHelp(answer: HelpAnswer): void {
@@ -165,9 +178,9 @@ export class ViewerSession {
       this.#send({ type: 'watch', sessionId: this.#options.sessionId });
       if (this.#area !== undefined) this.#send({ type: 'viewport', ...this.#area });
       for (const url of this.#pendingOpens.splice(0)) this.#send({ type: 'open', url });
-      if (!this.#askedForChrome) {
-        this.#askedForChrome = true;
-        this.#send({ type: 'start-chrome' });
+      if (!this.#askedForWindow) {
+        this.#askedForWindow = true;
+        this.#send({ type: 'open-window' });
       }
       this.#update({ connection: 'connected' });
     });
@@ -193,7 +206,14 @@ export class ViewerSession {
         this.#update({ chrome: event.status });
         return;
       case 'screen':
-        this.#update({ screenOwner: event.owner });
+        this.#update({ screenOwner: event.owner, region: event.region ?? undefined });
+        return;
+      case 'windows':
+        this.#update({ windowsOpen: event.open });
+        return;
+      // For the plugin's settings page, which this viewer is not.
+      case 'user-chrome':
+      case 'profile-copied':
         return;
       case 'help':
         this.#update({ help: event.request ?? undefined });

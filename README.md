@@ -6,7 +6,7 @@ packages, and reproducible builds.
 
 | Plugin | What it does |
 | --- | --- |
-| [dsh-chrome](plugins/dsh-chrome/README.md) | Shares a real Chrome between you and the agent in DSH's right sidebar: a Chrome of its own, on a profile of its own, whose whole window the sidebar shows. |
+| [dsh-chrome](plugins/dsh-chrome/README.md) | Shares a real Chrome between you and the agent in DSH's right sidebar: a Chrome of its own, on a profile of its own (or a copy of one of yours), with a window of its own for each session, which that session's sidebar shows. |
 
 ## Using a plugin
 

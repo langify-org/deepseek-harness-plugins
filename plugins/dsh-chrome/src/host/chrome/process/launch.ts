@@ -10,6 +10,20 @@ const START_TIMEOUT_MS = 30_000;
 /** How long Chrome may take to save its profile and exit when asked to close. */
 const CLOSE_TIMEOUT_MS = 5000;
 
+/**
+ * How Chrome draws WebGL. The screen is drawn in memory, with no GPU of its own, so Chrome
+ * finds no OpenGL to draw with, and turns WebGL off: Vulkan reaches the machine's GPU
+ * without the screen.
+ *
+ * - `gpu`: on the machine's GPU, through Vulkan; none on a machine without a Vulkan driver.
+ * - `gpu-or-cpu`: on the GPU, else on the CPU (Mesa's software Vulkan or OpenGL), which
+ *   Chrome otherwise refuses: slower, and a larger target for a hostile page.
+ * - `off`: as Chrome decides by itself, which here is without WebGL.
+ */
+export type WebglMode = 'gpu' | 'gpu-or-cpu' | 'off';
+
+export const WEBGL_MODES: readonly WebglMode[] = ['gpu', 'gpu-or-cpu', 'off'];
+
 export interface ChromeOptions {
   readonly executable: string;
   readonly profileDir: string;
@@ -24,6 +38,7 @@ export interface ChromeOptions {
    * as Chrome tells them of a browser debugged through a pipe.
    */
   readonly announceAutomation: boolean;
+  readonly webgl: WebglMode;
   readonly log: Log;
 }
 
@@ -93,23 +108,35 @@ export async function launchChrome(options: ChromeOptions): Promise<ChromeProces
 }
 
 /**
- * Chrome's command line. Chrome takes a browser debugged through a pipe for one under
- * automated control, and tells pages so (`navigator.webdriver`); unless that is wanted, the
- * flag behind it is turned off. Google refuses to sign in to a browser that says so ("This
- * browser or app may not be secure"), and other sites take whoever uses it for a bot, the
- * user working by hand included. Chrome warns of the flag with a bar in its first tab at
- * each start, which only a managed policy turns off.
+ * Chrome's command line. Chrome opens no window of its own: each DSH session opens its own,
+ * on its own part of the screen.
+ *
+ * Chrome takes a browser debugged through a pipe for one under automated control, and tells
+ * pages so (`navigator.webdriver`); unless that is wanted, the flag behind it is turned off.
+ * Google refuses to sign in to a browser that says so ("This browser or app may not be
+ * secure"), and other sites take whoever uses it for a bot, the user working by hand
+ * included. Chrome warns of that flag with a bar in the window it opens at its start, which
+ * only a managed policy turns off; opening none, it shows no bar. It warns of none of the
+ * others.
  */
 export function chromeArguments(
-  options: Pick<ChromeOptions, 'profileDir' | 'deviceScaleFactor' | 'announceAutomation'>,
+  options: Pick<ChromeOptions, 'profileDir' | 'deviceScaleFactor' | 'announceAutomation' | 'webgl'>,
 ): string[] {
   return [
     `--user-data-dir=${options.profileDir}`,
     '--remote-debugging-pipe',
     '--no-first-run',
     '--no-default-browser-check',
+    '--no-startup-window',
     '--ozone-platform=x11',
     `--force-device-scale-factor=${options.deviceScaleFactor}`,
     ...(options.announceAutomation ? [] : ['--disable-blink-features=AutomationControlled']),
+    ...WEBGL_ARGUMENTS[options.webgl],
   ];
 }
+
+const WEBGL_ARGUMENTS: Readonly<Record<WebglMode, readonly string[]>> = {
+  gpu: ['--use-angle=vulkan'],
+  'gpu-or-cpu': ['--use-angle=vulkan', '--ignore-gpu-blocklist'],
+  off: [],
+};

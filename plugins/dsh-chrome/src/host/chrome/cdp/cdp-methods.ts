@@ -10,6 +10,9 @@ export const CDP_COMMANDS = [
   // The browser.
   'Browser.close',
   'Browser.getVersion',
+  'Browser.getWindowBounds',
+  'Browser.getWindowForTarget',
+  'Browser.setWindowBounds',
   'Target.activateTarget',
   'Target.closeTarget',
   'Target.getTargets',

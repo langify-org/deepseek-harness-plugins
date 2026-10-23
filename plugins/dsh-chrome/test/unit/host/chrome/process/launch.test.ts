@@ -1,19 +1,21 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { chromeArguments } from '../../../../../src/host/chrome/process/launch.ts';
+import { chromeArguments, WEBGL_MODES } from '../../../../../src/host/chrome/process/launch.ts';
 
 const options = {
   profileDir: '/home/someone/.dsh/dsh-chrome/chrome-profile',
   deviceScaleFactor: 2,
+  webgl: 'gpu' as const,
 };
 
 test('starts Chrome on its profile, controlled through the pipe, at the scale factor', () => {
   const args = chromeArguments({ ...options, announceAutomation: false });
-  assert.deepEqual(args.slice(0, 6), [
+  assert.deepEqual(args.slice(0, 7), [
     '--user-data-dir=/home/someone/.dsh/dsh-chrome/chrome-profile',
     '--remote-debugging-pipe',
     '--no-first-run',
     '--no-default-browser-check',
+    '--no-startup-window',
     '--ozone-platform=x11',
     '--force-device-scale-factor=2',
   ]);
@@ -26,8 +28,10 @@ test('starts Chrome on its profile, controlled through the pipe, at the scale fa
 
 test('turns off what tells pages Chrome is automated, unless they are to be told', () => {
   assert.equal(
-    chromeArguments({ ...options, announceAutomation: false }).at(-1),
-    '--disable-blink-features=AutomationControlled',
+    chromeArguments({ ...options, announceAutomation: false }).includes(
+      '--disable-blink-features=AutomationControlled',
+    ),
+    true,
   );
   assert.equal(
     chromeArguments({ ...options, announceAutomation: true }).some((arg) =>
@@ -35,4 +39,27 @@ test('turns off what tells pages Chrome is automated, unless they are to be told
     ),
     false,
   );
+});
+
+test('opens no window by itself, since each session opens its own', () => {
+  assert.equal(
+    chromeArguments({ ...options, announceAutomation: false }).includes('--no-startup-window'),
+    true,
+  );
+});
+
+test('gives each WebGL mode its arguments', () => {
+  const expected = {
+    gpu: ['--use-angle=vulkan'],
+    'gpu-or-cpu': ['--use-angle=vulkan', '--ignore-gpu-blocklist'],
+    off: [],
+  };
+  assert.deepEqual([...WEBGL_MODES].sort(), Object.keys(expected).sort());
+  for (const webgl of WEBGL_MODES) {
+    const args = chromeArguments({ ...options, announceAutomation: true, webgl });
+    assert.deepEqual(
+      args.filter((arg) => arg.includes('angle') || arg.includes('gpu')),
+      expected[webgl],
+    );
+  }
 });

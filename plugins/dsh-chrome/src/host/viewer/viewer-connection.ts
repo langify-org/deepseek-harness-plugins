@@ -2,6 +2,7 @@ import type { RawData, WebSocket } from 'ws';
 import {
   type ChromeStatus,
   decodeViewerRequest,
+  type ScreenRegion,
   type ViewerEvent,
   type ViewerRequest,
 } from '../../protocol/viewer.ts';
@@ -9,29 +10,39 @@ import type { ChromeService, ChromeState } from '../chrome/chrome-service.ts';
 import { normalizeAddress } from '../page-operations/address.ts';
 import { pageTextMarkdown, readPageText } from '../page-operations/text.ts';
 import type { Log } from '../platform/log.ts';
-import type { LayoutViewer, ScreenLayout, ViewerArea } from './screen-layout.ts';
+import type { ScreenOwnership, ScreenViewer, ViewerArea } from './screen-ownership.ts';
 
 /** The most page text a viewer may add to a message. */
 const MAX_PAGE_TEXT_CHARS = 200_000;
 
 export interface ViewerDependencies {
   readonly chrome: ChromeService;
-  readonly layout: ScreenLayout;
+  /** The layout of a session's screen, made for its first viewer. */
+  readonly ownershipOf: (sessionId: string) => ScreenOwnership;
+  /** A viewer left the session's layout: it goes once none is left. */
+  readonly ownershipLeft: (sessionId: string) => void;
   readonly log: Log;
 }
 
 /**
  * One viewer's control connection: a sidebar tab of one DSH session. It hears whether
- * Chrome runs, how the screen is laid out, and the session's requests for help; it gives
- * its size, claims the screen when the user works in it, and asks for pages and their text.
- * Its pixels and input travel over its screen connection.
+ * Chrome runs, where the session's part of the screen is and whether the session has a
+ * window, and the session's requests for help; it gives its size, claims the session's
+ * screen when the user works in it, and asks for windows, pages and their text. Its pixels
+ * and input travel over its screen connection.
  */
-export class ViewerConnection implements LayoutViewer {
+export class ViewerConnection implements ScreenViewer {
   readonly #socket: WebSocket;
   readonly #deps: ViewerDependencies;
   readonly #subscriptions: (() => void)[] = [];
   #sessionId: string | undefined;
+  #ownership: ScreenOwnership | undefined;
+  #owner = false;
   #area: ViewerArea | undefined;
+  /** The screen event last sent, as JSON, so that only changes are sent. */
+  #sentScreen: string | undefined;
+  /** Whether the viewer last heard that the session has a window. */
+  #sentWindows: boolean | undefined;
   /** The request for help last sent, as JSON, so that only changes are sent. */
   #sentHelp: string | undefined;
   #closed = false;
@@ -51,7 +62,8 @@ export class ViewerConnection implements LayoutViewer {
   }
 
   ownerChanged(owner: boolean): void {
-    this.#send({ type: 'screen', owner });
+    this.#owner = owner;
+    this.#sendScreen();
   }
 
   #receive(data: RawData, isBinary: boolean): void {
@@ -76,20 +88,40 @@ export class ViewerConnection implements LayoutViewer {
   }
 
   async #handle(request: ViewerRequest): Promise<void> {
-    const { chrome, layout } = this.#deps;
+    const { chrome } = this.#deps;
     switch (request.type) {
       case 'watch':
         this.#watch(request.sessionId);
         return;
       case 'viewport':
         this.#area = { width: request.width, height: request.height };
-        layout.areaChanged(this);
+        this.#ownership?.areaChanged(this);
         return;
       case 'claim-screen':
-        layout.claim(this);
+        this.#ownership?.claim(this);
         return;
-      case 'start-chrome':
-        await chrome.chrome();
+      case 'open-window':
+        await chrome.openWindow(this.#requireSession());
+        return;
+      case 'restart-chrome':
+        await chrome.restartChrome();
+        return;
+      case 'user-chrome': {
+        const { profiles, running } = await chrome.userChrome();
+        this.#send({
+          type: 'user-chrome',
+          profiles: profiles.map(({ directory, name, account }) => ({
+            directory,
+            name,
+            account: account ?? null,
+          })),
+          running,
+        });
+        return;
+      }
+      case 'copy-profile':
+        await chrome.copyUserChromeProfile(request.directory);
+        this.#send({ type: 'profile-copied', directory: request.directory });
         return;
       case 'open': {
         const url = normalizeAddress(request.url);
@@ -105,8 +137,8 @@ export class ViewerConnection implements LayoutViewer {
         return;
       }
       case 'read-text': {
-        const page = await chrome.pages.pageInFront();
-        if (page === undefined) throw new Error('Chrome shows no page');
+        const page = await chrome.pages.pageInFront(this.#requireSession());
+        if (page === undefined) throw new Error("the session's window shows no page");
         const text = await readPageText(page, MAX_PAGE_TEXT_CHARS);
         this.#send({
           type: 'page-text',
@@ -123,16 +155,50 @@ export class ViewerConnection implements LayoutViewer {
   #watch(sessionId: string): void {
     if (this.#sessionId !== undefined) throw new Error('this viewer already watches a session');
     if (this.#closed) return;
+    const { chrome, ownershipOf } = this.#deps;
+    // Throws when the screen has no room for another session; the viewer hears why.
+    const hide = chrome.showSession(sessionId);
     this.#sessionId = sessionId;
-    const { chrome, layout } = this.#deps;
     this.#subscriptions.push(
+      hide,
       chrome.onStateChange((state) => this.#send({ type: 'chrome', status: statusOf(state) })),
       chrome.helpRequests.onChange(() => this.#sendHelp()),
-      chrome.pages.onChange(() => this.#sendHelp()),
+      chrome.pages.onChange(() => {
+        this.#sendHelp();
+        this.#sendWindows();
+      }),
+      chrome.screens.onChange(() => this.#sendScreen()),
     );
     this.#send({ type: 'chrome', status: statusOf(chrome.state) });
     this.#sendHelp();
-    layout.add(this);
+    this.#sendWindows();
+    this.#ownership = ownershipOf(sessionId);
+    this.#ownership.add(this);
+    this.#sendScreen();
+  }
+
+  /** Where the session's part of the screen is, and whether it follows this viewer. */
+  #sendScreen(): void {
+    if (this.#sessionId === undefined) return;
+    const monitor = this.#deps.chrome.screens.monitorOf(this.#sessionId);
+    const region: ScreenRegion | null =
+      monitor === undefined
+        ? null
+        : { x: monitor.x, y: monitor.y, width: monitor.width, height: monitor.height };
+    const event: ViewerEvent = { type: 'screen', owner: this.#owner, region };
+    const text = JSON.stringify(event);
+    if (text === this.#sentScreen) return;
+    this.#sentScreen = text;
+    this.#send(event);
+  }
+
+  /** Whether the session has a window. */
+  #sendWindows(): void {
+    if (this.#sessionId === undefined) return;
+    const open = this.#deps.chrome.pages.ofSession(this.#sessionId).length > 0;
+    if (open === this.#sentWindows) return;
+    this.#sentWindows = open;
+    this.#send({ type: 'windows', open });
   }
 
   #requireSession(): string {
@@ -165,7 +231,10 @@ export class ViewerConnection implements LayoutViewer {
   #close(): void {
     this.#closed = true;
     for (const unsubscribe of this.#subscriptions.splice(0)) unsubscribe();
-    this.#deps.layout.remove(this);
+    if (this.#sessionId !== undefined) {
+      this.#ownership?.remove(this);
+      this.#deps.ownershipLeft(this.#sessionId);
+    }
   }
 
   #send(event: ViewerEvent): void {
@@ -176,7 +245,7 @@ export class ViewerConnection implements LayoutViewer {
 function statusOf(state: ChromeState): ChromeStatus {
   switch (state.kind) {
     case 'running':
-      return { kind: 'running', version: state.version };
+      return { kind: 'running', version: state.version, settingsChanged: state.settingsChanged };
     case 'failed':
       return { kind: 'failed', message: state.message };
     default:

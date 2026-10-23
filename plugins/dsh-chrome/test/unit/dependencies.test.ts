@@ -12,24 +12,28 @@ import { fileURLToPath } from 'node:url';
  * The host and the client share `protocol` and nothing else.
  *
  * In the Host, `chrome` is `ctx.chrome`: the service in its directory, and what it is made
- * of: the CDP connection, the screen Chrome draws on, the Chrome process, its profile, and its
- * pages. Page operations work on pages; the viewer, the tools and the context reading are what
- * DSH and the agent use; and `host` itself is the main row.
+ * of: the CDP connection, the screen Chrome draws on, the Chrome process, its profile, its
+ * pages, and the sessions' parts of the screen with the keyboard they share. Page operations
+ * work on pages; the viewer, the tools and the context reading are what DSH and the agent use;
+ * and `host` itself is the main row.
  *
- * In the client, `screen` shows Chrome's screen and takes the user's input for it, and
- * `viewer` is the tab's control connection; the tab itself puts them together.
+ * In the client, `screen` shows a session's part of Chrome's screen and takes the user's
+ * input for it, and `viewer` is the tab's control connection; the tab itself puts them
+ * together. `settings` is the plugin's page in DSH's plugin settings.
  */
 const PARTS: Readonly<Record<string, readonly string[]>> = {
   protocol: [],
-  'client/screen': [],
+  'client/screen': ['protocol'],
   'client/viewer': ['protocol'],
-  client: ['protocol', 'client/screen', 'client/viewer'],
+  'client/settings': ['protocol'],
+  client: ['protocol', 'client/screen', 'client/viewer', 'client/settings'],
   'host/platform': [],
   'host/chrome/cdp': ['host/platform'],
   'host/chrome/display': ['host/platform'],
   'host/chrome/process': ['host/platform', 'host/chrome/cdp'],
   'host/chrome/profile': [],
   'host/chrome/pages': ['host/chrome/cdp'],
+  'host/chrome/sessions': ['host/platform', 'host/chrome/display'],
   'host/chrome': [
     'host/platform',
     'host/chrome/cdp',
@@ -37,6 +41,7 @@ const PARTS: Readonly<Record<string, readonly string[]>> = {
     'host/chrome/process',
     'host/chrome/profile',
     'host/chrome/pages',
+    'host/chrome/sessions',
   ],
   // A page's commands fail with the CDP connection's errors.
   'host/page-operations': ['host/chrome/cdp', 'host/chrome/pages'],

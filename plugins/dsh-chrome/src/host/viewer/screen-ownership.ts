@@ -9,8 +9,8 @@ export interface ViewerArea {
   readonly height: number;
 }
 
-/** A viewer, as the screen's layout sees it. */
-export interface LayoutViewer {
+/** A viewer, as the ownership of its session's screen sees it. */
+export interface ScreenViewer {
   /** The viewer's screen area, once it said. */
   readonly area: ViewerArea | undefined;
   /** Tells the viewer whether the screen now follows its size. */
@@ -21,8 +21,8 @@ export interface LayoutViewer {
 const CHROME_MIN_WINDOW_WIDTH = 500;
 
 /**
- * Which viewer the screen is laid out for: every viewer shows the one screen, at the size of
- * one of them, its owner. A viewer becomes the owner when the user works in it, or when it
+ * Which viewer a session's screen is laid out for: every viewer of the session shows its
+ * screen, at the size of one of them, its owner. A viewer becomes the owner when the user works in it, or when it
  * is the only one; when the owner leaves, the viewer that was the owner most recently before
  * it takes over. The screen gets the owner's area in device pixels: a CSS pixel of the viewer
  * takes as many of the screen's pixels as a CSS pixel of Chrome does, so Chrome looks as large
@@ -31,34 +31,47 @@ const CHROME_MIN_WINDOW_WIDTH = 500;
  * Chrome's window is never narrower than {@link CHROME_MIN_WINDOW_WIDTH}: a narrower viewer
  * gets a screen that wide, its height in proportion, which the viewer shows scaled down to fit.
  */
-export class ScreenLayout {
+export class ScreenOwnership {
   readonly #resize: (size: ScreenSize) => Promise<void>;
-  readonly #deviceScaleFactor: number;
+  readonly #deviceScaleFactor: () => number;
   readonly #log: Log;
   /** The viewers, the one that was the owner most recently last. */
-  readonly #viewers: LayoutViewer[] = [];
-  #owner: LayoutViewer | undefined;
+  readonly #viewers: ScreenViewer[] = [];
+  #owner: ScreenViewer | undefined;
   /** The size last asked of the screen. */
   #applied: ScreenSize | undefined;
 
-  constructor(resize: (size: ScreenSize) => Promise<void>, deviceScaleFactor: number, log: Log) {
+  /**
+   * @param resize - sizes the session's screen, in device pixels.
+   * @param deviceScaleFactor - how many device pixels a CSS pixel takes in Chrome now.
+   */
+  constructor(
+    resize: (size: ScreenSize) => Promise<void>,
+    deviceScaleFactor: () => number,
+    log: Log,
+  ) {
     this.#resize = resize;
     this.#deviceScaleFactor = deviceScaleFactor;
     this.#log = log;
   }
 
-  get owner(): LayoutViewer | undefined {
+  get owner(): ScreenViewer | undefined {
     return this.#owner;
   }
 
-  add(viewer: LayoutViewer): void {
+  /** Whether no viewer shows the screen. */
+  get empty(): boolean {
+    return this.#viewers.length === 0;
+  }
+
+  add(viewer: ScreenViewer): void {
     if (this.#viewers.includes(viewer)) return;
     this.#viewers.unshift(viewer);
     if (this.#owner === undefined) this.claim(viewer);
     else viewer.ownerChanged(false);
   }
 
-  remove(viewer: LayoutViewer): void {
+  remove(viewer: ScreenViewer): void {
     const index = this.#viewers.indexOf(viewer);
     if (index === -1) return;
     this.#viewers.splice(index, 1);
@@ -69,7 +82,7 @@ export class ScreenLayout {
   }
 
   /** Lays the screen out for the viewer. */
-  claim(viewer: LayoutViewer): void {
+  claim(viewer: ScreenViewer): void {
     if (!this.#viewers.includes(viewer)) return;
     this.#viewers.splice(this.#viewers.indexOf(viewer), 1);
     this.#viewers.push(viewer);
@@ -83,14 +96,19 @@ export class ScreenLayout {
   }
 
   /** The viewer's area changed: the screen follows if the viewer owns it. */
-  areaChanged(viewer: LayoutViewer): void {
+  areaChanged(viewer: ScreenViewer): void {
     if (this.#owner === viewer) this.#apply();
+  }
+
+  /** Sizes the screen for its owner again: Chrome started, maybe at another scale factor. */
+  refresh(): void {
+    this.#apply();
   }
 
   #apply(): void {
     const area = this.#owner?.area;
     if (area === undefined) return;
-    const scale = this.#deviceScaleFactor * Math.max(1, CHROME_MIN_WINDOW_WIDTH / area.width);
+    const scale = this.#deviceScaleFactor() * Math.max(1, CHROME_MIN_WINDOW_WIDTH / area.width);
     const size = {
       width: Math.round(area.width * scale),
       height: Math.round(area.height * scale),
@@ -100,7 +118,7 @@ export class ScreenLayout {
     this.#resize(size).catch((error: unknown) => {
       // The next change tries again.
       this.#applied = undefined;
-      this.#log.warn(`dsh-chrome: could not resize the screen: ${String(error)}`);
+      this.#log.warn(`dsh-chrome: could not size the session's screen: ${String(error)}`);
     });
   }
 }

@@ -10,9 +10,11 @@ import { silentLog } from '../../../../../src/host/platform/log.ts';
 import { FakeBrowser, settle } from '../../../../support/fake-browser.ts';
 
 /** A registry following a fake browser's pages, as it follows Chrome's. */
-async function tracked(): Promise<{ readonly browser: FakeBrowser; readonly pages: PageRegistry }> {
+async function tracked(
+  sessionOfTarget?: (targetId: string) => Promise<string | undefined>,
+): Promise<{ readonly browser: FakeBrowser; readonly pages: PageRegistry }> {
   const browser = new FakeBrowser();
-  const pages = new PageRegistry();
+  const pages = new PageRegistry(sessionOfTarget);
   await pages.track(new CdpConnection(browser, silentLog));
   return { browser, pages };
 }
@@ -218,19 +220,24 @@ test('finds the page in front: one showing a dialog, else the focused one, else 
   browser.answer('Runtime.evaluate', ({ sessionId }) => ({
     result: { value: views[sessionId ?? ''] },
   }));
-  browser.attachPage({ targetId: 'T1' }, 'S1');
-  browser.attachPage({ targetId: 'T2' }, 'S2');
-  browser.attachPage({ targetId: 'T3' }, 'S3');
+  for (const [target, cdpSession] of [
+    ['T1', 'S1'],
+    ['T2', 'S2'],
+    ['T3', 'S3'],
+  ] as const) {
+    pages.claim(target, 'session-a', 'agent');
+    browser.attachPage({ targetId: target }, cdpSession);
+  }
   const byTarget = (targetId: string) => pages.all().find((page) => page.targetId === targetId);
-  assert.equal(await pages.pageInFront(), byTarget('T2'));
+  assert.equal(await pages.pageInFront('session-a'), byTarget('T2'));
   views['S3'] = 'focused';
-  assert.equal(await pages.pageInFront(), byTarget('T3'));
+  assert.equal(await pages.pageInFront('session-a'), byTarget('T3'));
   browser.emit(
     'Page.javascriptDialogOpening',
     { url: '', message: 'Hi', type: 'alert', hasBrowserHandler: true },
     'S1',
   );
-  assert.equal(await pages.pageInFront(), byTarget('T1'));
+  assert.equal(await pages.pageInFront('session-a'), byTarget('T1'));
 });
 
 test('asks a page whether it is in view in a world of its own, which the page cannot redefine', async () => {
@@ -243,10 +250,11 @@ test('asks a page whether it is in view in a world of its own, which the page ca
       ? { error: 'Cannot find context with specified id' }
       : { result: { value: 'visible' } },
   );
+  pages.claim('T1', 'session-a', 'agent');
   browser.attachPage({ targetId: 'T1' }, 'S1');
   const page = only(pages);
-  assert.equal(await pages.pageInFront(), page);
-  assert.equal(await pages.pageInFront(), page);
+  assert.equal(await pages.pageInFront('session-a'), page);
+  assert.equal(await pages.pageInFront('session-a'), page);
   assert.deepEqual(
     browser.commands('Runtime.evaluate').map(({ params }) => params['contextId']),
     [101, 101],
@@ -257,7 +265,7 @@ test('asks a page whether it is in view in a world of its own, which the page ca
   });
   // The page went on to another document, and the world with the first.
   gone = true;
-  assert.equal(await pages.pageInFront(), page);
+  assert.equal(await pages.pageInFront('session-a'), page);
   assert.equal(worlds, 2);
 });
 
@@ -276,4 +284,72 @@ test('brings a page to the front, and returns once Chrome has it focused', async
 test('gives up waiting for a page Chrome does not report', async () => {
   const { pages } = await tracked();
   await assert.rejects(pages.whenAdopted('T9', { timeoutMs: 20 }), /did not report/);
+});
+
+test("finds only the given session's pages in front, whatever the others show", async () => {
+  const { browser, pages } = await tracked();
+  browser.answer('Runtime.evaluate', () => ({ result: { value: 'focused' } }));
+  pages.claim('T1', 'session-a', 'agent');
+  pages.claim('T2', 'session-b', 'agent');
+  browser.attachPage({ targetId: 'T1' }, 'S1');
+  browser.attachPage({ targetId: 'T2' }, 'S2');
+  const byTarget = (targetId: string) => pages.all().find((page) => page.targetId === targetId);
+  assert.equal(await pages.pageInFront('session-a'), byTarget('T1'));
+  assert.equal(await pages.pageInFront('session-b'), byTarget('T2'));
+  assert.equal(await pages.pageInFront('session-c'), undefined);
+  // A dialog in another session's page does not answer for this one.
+  browser.emit(
+    'Page.javascriptDialogOpening',
+    { url: '', message: 'Hi', type: 'alert', hasBrowserHandler: true },
+    'S2',
+  );
+  assert.equal(await pages.pageInFront('session-a'), byTarget('T1'));
+  assert.equal(await pages.pageInFront('session-b'), byTarget('T2'));
+});
+
+test('gives a page no command claimed and no page opened to the session whose screen its window is on', async () => {
+  const asked: string[] = [];
+  const { browser, pages } = await tracked(async (targetId) => {
+    asked.push(targetId);
+    return targetId === 'T1' ? 'session-a' : undefined;
+  });
+  browser.attachPage({ targetId: 'T1' }, 'S1');
+  browser.attachPage({ targetId: 'T2' }, 'S2');
+  await settle();
+  const byTarget = (targetId: string) => pages.all().find((page) => page.targetId === targetId);
+  assert.deepEqual([byTarget('T1')?.sessionId, byTarget('T1')?.openedBy], ['session-a', 'user']);
+  // A window on no session's screen stays no session's.
+  assert.equal(byTarget('T2')?.sessionId, undefined);
+  assert.deepEqual(asked, ['T1', 'T2']);
+});
+
+test('keeps the session a claim gave a page, without asking whose screen it is on', async () => {
+  const asked: string[] = [];
+  const { browser, pages } = await tracked(async (targetId) => {
+    asked.push(targetId);
+    return 'session-b';
+  });
+  pages.claim('T1', 'session-a', 'agent');
+  browser.attachPage({ targetId: 'T1' }, 'S1');
+  await settle();
+  assert.equal(only(pages).sessionId, 'session-a');
+  assert.deepEqual(asked, []);
+});
+
+test('shows a page only when it is hidden', async () => {
+  const { browser, pages } = await tracked();
+  let view = 'visible';
+  browser.answer('Runtime.evaluate', () => ({ result: { value: view } }));
+  browser.attachPage({ targetId: 'T1' }, 'S1');
+  const page = only(pages);
+  await page.show();
+  view = 'focused';
+  await page.show();
+  assert.equal(browser.commands('Target.activateTarget').length, 0);
+  view = 'hidden';
+  await page.show();
+  assert.deepEqual(
+    browser.commands('Target.activateTarget').map(({ params }) => params),
+    [{ targetId: 'T1' }],
+  );
 });

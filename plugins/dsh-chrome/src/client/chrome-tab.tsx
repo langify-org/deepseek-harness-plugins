@@ -5,6 +5,7 @@ import type { SessionIdOf } from '@deepseek-ai/dsh-client-ui-slots';
 import {
   type CSSProperties,
   type ReactNode,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -19,7 +20,7 @@ export interface ChromeTabInjected {
   /** Opens the viewer socket: state and requests. */
   readonly openViewerSocket: () => ConnectionWebSocket;
   /** Opens the screen socket: Chrome's screen, as VNC. */
-  readonly openScreenSocket: () => ConnectionWebSocket;
+  readonly openScreenSocket: (sessionId: string) => ConnectionWebSocket;
   /** Attaches files to the session's next message. */
   readonly addToMessage: (
     sessionId: SessionIdOf,
@@ -42,9 +43,10 @@ export interface ChromeTabProps extends ChromeTabInjected {
 }
 
 /**
- * The body of a Chrome tab in the right sidebar: Chrome's screen, the agent's requests for
- * help, and buttons to add what Chrome shows to the user's message. Every Chrome tab shows the
- * same Chrome; the screen is laid out for the tab the user last worked in.
+ * The body of a Chrome tab in the right sidebar: the session's part of Chrome's screen, with
+ * the session's windows, the agent's requests for help, and buttons to add what Chrome shows
+ * to the user's message. The tabs of one session show the same part of the screen, laid out
+ * for the tab the user last worked in.
  */
 export function ChromeTab({
   sessionId,
@@ -69,6 +71,10 @@ export function ChromeTab({
     if (session !== undefined && requestedUrl !== undefined) session.open(requestedUrl);
   }, [session, requestedUrl, tab.navigation.revision]);
 
+  const openSessionScreen = useCallback(
+    () => openScreenSocket(sessionId),
+    [openScreenSocket, sessionId],
+  );
   const documentVisible = useDocumentVisible();
   if (session === undefined) return null;
   const attach = (files: readonly File[]) =>
@@ -76,7 +82,7 @@ export function ChromeTab({
   return (
     <ChromeScreen
       session={session}
-      openScreenSocket={openScreenSocket}
+      openScreenSocket={openSessionScreen}
       visible={tab.visible && documentVisible}
       addToMessage={attach}
     />
@@ -99,8 +105,8 @@ function ChromeScreen({
   const screenRef = useRef<ScreenHandle>();
   const [screenConnected, setScreenConnected] = useState(false);
   const chrome = snapshot.chrome;
-  // The screen connects while the tab is seen; connecting starts Chrome if it is not running.
-  const active = visible && snapshot.connection === 'connected' && chrome?.kind !== 'failed';
+  // The screen connects while the tab is seen, once the session has its part of the screen.
+  const active = visible && snapshot.connection === 'connected' && snapshot.region !== undefined;
 
   // The screen is laid out for the tab the user looks at: one that comes into view takes it.
   useEffect(() => {
@@ -157,6 +163,7 @@ function ChromeScreen({
       <div style={screenColumnStyle}>
         <ScreenView
           openSocket={openScreenSocket}
+          region={snapshot.region}
           active={active}
           onArea={(width, height) => session.setArea(width, height)}
           onInteract={() => session.claimScreen()}
@@ -202,7 +209,10 @@ function Toast({ notice, onDismiss }: { readonly notice: string; readonly onDism
   );
 }
 
-/** What stands between the user and Chrome: a lost connection, or Chrome not running. */
+/**
+ * What stands between the user and Chrome: a lost connection, Chrome not running, or the
+ * session without a window; and settings that apply once Chrome starts again.
+ */
 function StateNotice({
   snapshot,
   session,
@@ -225,7 +235,7 @@ function StateNotice({
     return (
       <p role="alert" style={noticeStyle}>
         Chrome did not start: {chrome.message}{' '}
-        <button type="button" style={linkButtonStyle} onClick={() => session.startChrome()}>
+        <button type="button" style={linkButtonStyle} onClick={() => session.openWindow()}>
           Try again
         </button>
       </p>
@@ -235,8 +245,29 @@ function StateNotice({
     return (
       <p style={noticeStyle}>
         Chrome is closed.{' '}
-        <button type="button" style={linkButtonStyle} onClick={() => session.startChrome()}>
+        <button type="button" style={linkButtonStyle} onClick={() => session.openWindow()}>
           Open Chrome
+        </button>
+      </p>
+    );
+  }
+  if (chrome?.kind === 'running' && snapshot.windowsOpen === false) {
+    return (
+      <p style={noticeStyle}>
+        This session has no window in Chrome.{' '}
+        <button type="button" style={linkButtonStyle} onClick={() => session.openWindow()}>
+          Open a window
+        </button>
+      </p>
+    );
+  }
+  if (chrome?.kind === 'running' && chrome.settingsChanged) {
+    return (
+      <p style={noticeStyle}>
+        Chrome takes the changed settings when it starts again; restarting closes its windows in
+        every session.{' '}
+        <button type="button" style={linkButtonStyle} onClick={() => session.restartChrome()}>
+          Restart Chrome
         </button>
       </p>
     );

@@ -1,3 +1,197 @@
+diff --git a/core/display.js b/core/display.js
+index 4efd6f4b97dfda3ab450723ff8c722c8258d60fc..704f943fa6f8a536ef0197ba57f9f47a7abd114d 100644
+--- a/core/display.js
++++ b/core/display.js
+@@ -131,6 +131,31 @@ export default class Display {
+         this.flip();
+     }
+ 
++    // Patched for dsh-chrome: show the rectangle of the remote screen at x, y, clipped to
++    // it, as the viewport; the scale then fits that rectangle.
++    setViewport(x, y, width, height) {
++        this._clipViewport = true;
++        width = Math.max(1, Math.min(Math.floor(width), this._fbWidth));
++        height = Math.max(1, Math.min(Math.floor(height), this._fbHeight));
++        x = Math.max(0, Math.min(Math.floor(x), this._fbWidth - width));
++        y = Math.max(0, Math.min(Math.floor(y), this._fbHeight - height));
++        const vp = this._viewportLoc;
++        if (vp.x === x && vp.y === y && vp.w === width && vp.h === height) {
++            return;
++        }
++        if (vp.w !== width || vp.h !== height) {
++            this._target.width = width;
++            this._target.height = height;
++        }
++        vp.x = x;
++        vp.y = y;
++        vp.w = width;
++        vp.h = height;
++        this._damage(vp.x, vp.y, vp.w, vp.h);
++        this.flip();
++        this._rescale(this._scale);
++    }
++
+     viewportChangeSize(width, height) {
+ 
+         if (!this._clipViewport ||
+@@ -224,12 +249,16 @@ export default class Display {
+         return this._drawCtx.getImageData(0, 0, this.width, this.height);
+     }
+ 
++    // Patched for dsh-chrome: while clipped, the image is the viewport's, which the target
++    // canvas holds at the remote screen's resolution.
+     toDataURL(type, encoderOptions) {
+-        return this._backbuffer.toDataURL(type, encoderOptions);
++        const canvas = this._clipViewport ? this._target : this._backbuffer;
++        return canvas.toDataURL(type, encoderOptions);
+     }
+ 
+     toBlob(callback, type, quality) {
+-        return this._backbuffer.toBlob(callback, type, quality);
++        const canvas = this._clipViewport ? this._target : this._backbuffer;
++        return canvas.toBlob(callback, type, quality);
+     }
+ 
+     // Track what parts of the visible canvas that need updating
+diff --git a/core/rfb.js b/core/rfb.js
+index 80011e4a10203806f14df1ffc3b8425861a965a7..a7a8785d705166b5f85c1cf36359dd80c6946df1 100644
+--- a/core/rfb.js
++++ b/core/rfb.js
+@@ -297,6 +297,8 @@ export default class RFB extends EventTargetMixin {
+         this._clipViewport = false;
+         this._clippingViewport = false;
+         this._scaleViewport = false;
++        // Patched for dsh-chrome: the rectangle of the remote screen to show, or null.
++        this._viewRegion = null;
+         this._resizeSession = false;
+ 
+         this._showDotCursor = false;
+@@ -324,6 +326,45 @@ export default class RFB extends EventTargetMixin {
+     get capabilities() { return this._capabilities; }
+ 
+     get clippingViewport() { return this._clippingViewport; }
++
++    // Patched for dsh-chrome: show only one rectangle of the remote screen, scaled to the
++    // target with scaleViewport, and ask the server for that rectangle's pixels only. The
++    // pointer's positions are the rectangle's. null shows the whole screen.
++    get viewRegion() { return this._viewRegion; }
++    set viewRegion(region) {
++        const next = region ? { x: Math.max(0, Math.floor(region.x)),
++                                y: Math.max(0, Math.floor(region.y)),
++                                w: Math.max(1, Math.floor(region.width)),
++                                h: Math.max(1, Math.floor(region.height)) } : null;
++        const previous = this._viewRegion;
++        if (previous === next || (previous && next && previous.x === next.x &&
++            previous.y === next.y && previous.w === next.w && previous.h === next.h)) {
++            return;
++        }
++        this._viewRegion = next;
++        if (this._rfbConnectionState !== 'connected') {
++            return;
++        }
++        this._updateClip();
++        this._updateScale();
++        this._updateContinuousUpdates();
++        // The client has no pixels of the new rectangle yet.
++        const rect = this._updateRect();
++        RFB.messages.fbUpdateRequest(this._sock, false, rect.x, rect.y, rect.w, rect.h);
++    }
++
++    // Patched for dsh-chrome: the area updates are asked for, within the remote screen.
++    _updateRect() {
++        const region = this._viewRegion;
++        if (!region) {
++            return { x: 0, y: 0, w: this._fbWidth, h: this._fbHeight };
++        }
++        const x = Math.min(region.x, Math.max(0, this._fbWidth - 1));
++        const y = Math.min(region.y, Math.max(0, this._fbHeight - 1));
++        return { x, y,
++                 w: Math.max(1, Math.min(region.w, this._fbWidth - x)),
++                 h: Math.max(1, Math.min(region.h, this._fbHeight - y)) };
++    }
+     _setClippingViewport(on) {
+         if (on === this._clippingViewport) {
+             return;
+@@ -742,6 +783,13 @@ export default class RFB extends EventTargetMixin {
+     // Update state of clipping in Display object, and make sure the
+     // configured viewport matches the current screen size
+     _updateClip() {
++        if (this._viewRegion) {
++            // Patched for dsh-chrome: the region is the viewport, whatever the target's size.
++            const rect = this._updateRect();
++            this._display.setViewport(rect.x, rect.y, rect.w, rect.h);
++            this._setClippingViewport(false);
++            return;
++        }
+         const curClip = this._display.clipViewport;
+         let newClip = this._clipViewport;
+ 
+@@ -1214,12 +1262,22 @@ export default class RFB extends EventTargetMixin {
+ 
+         let extendedMouseButtons = mask & 0x7f80;
+ 
++        // Patched for dsh-chrome: every pointer position the server gets comes through here
++        // (mouse, wheel, gestures), and while the pointer is captured in a drag it can leave
++        // the canvas. The region is one session's monitor: keep the pointer in it, so that a
++        // window dragged out of the view does not land on another session's monitor.
++        let absX = this._display.absX(x);
++        let absY = this._display.absY(y);
++        const region = this._viewRegion;
++        if (region) {
++            absX = Math.min(Math.max(absX, region.x), region.x + region.w - 1);
++            absY = Math.min(Math.max(absY, region.y), region.y + region.h - 1);
++        }
++
+         if (this._extendedPointerEventSupported && extendedMouseButtons) {
+-            RFB.messages.extendedPointerEvent(this._sock, this._display.absX(x),
+-                                              this._display.absY(y), mask);
++            RFB.messages.extendedPointerEvent(this._sock, absX, absY, mask);
+         } else {
+-            RFB.messages.pointerEvent(this._sock, this._display.absX(x),
+-                                      this._display.absY(y), mask);
++            RFB.messages.pointerEvent(this._sock, absX, absY, mask);
+         }
+     }
+ 
+@@ -2219,7 +2277,11 @@ export default class RFB extends EventTargetMixin {
+ 
+         RFB.messages.pixelFormat(this._sock, this._fbDepth, true);
+         this._sendEncodings();
+-        RFB.messages.fbUpdateRequest(this._sock, false, 0, 0, this._fbWidth, this._fbHeight);
++        {
++            // Patched for dsh-chrome: only the region, when one is shown.
++            const rect = this._updateRect();
++            RFB.messages.fbUpdateRequest(this._sock, false, rect.x, rect.y, rect.w, rect.h);
++        }
+ 
+         this._updateConnectionState('connected');
+         return true;
+@@ -2569,8 +2631,10 @@ export default class RFB extends EventTargetMixin {
+             case 0:  // FramebufferUpdate
+                 ret = this._framebufferUpdate();
+                 if (ret && !this._enabledContinuousUpdates) {
+-                    RFB.messages.fbUpdateRequest(this._sock, true, 0, 0,
+-                                                 this._fbWidth, this._fbHeight);
++                    // Patched for dsh-chrome: only the region, when one is shown.
++                    const rect = this._updateRect();
++                    RFB.messages.fbUpdateRequest(this._sock, true, rect.x, rect.y,
++                                                 rect.w, rect.h);
+                 }
+                 return ret;
+ 
+@@ -2995,8 +3059,10 @@ export default class RFB extends EventTargetMixin {
+     _updateContinuousUpdates() {
+         if (!this._enabledContinuousUpdates) { return; }
+ 
+-        RFB.messages.enableContinuousUpdates(this._sock, true, 0, 0,
+-                                             this._fbWidth, this._fbHeight);
++        // Patched for dsh-chrome: only the region, when one is shown.
++        const rect = this._updateRect();
++        RFB.messages.enableContinuousUpdates(this._sock, true, rect.x, rect.y,
++                                             rect.w, rect.h);
+     }
+ 
+     // Handle resize-messages from the server
 diff --git a/core/util/browser.js b/core/util/browser.js
 index 63596d211bc3f2ac0c1853d58488dcbb18bd8949..dae9ebf1b5b74ae6313a67c9fa1619020172d189 100644
 --- a/core/util/browser.js

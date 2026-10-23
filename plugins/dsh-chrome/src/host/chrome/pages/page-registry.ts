@@ -143,10 +143,21 @@ class Page implements ChromePage {
     return () => this.#endListeners.delete(listener);
   }
 
-  async bringToFront(): Promise<void> {
+  async show(): Promise<void> {
+    // Bringing a tab forward brings its window forward too, which takes the keyboard from the
+    // window the user may be typing in; a page in view needs neither.
+    if ((await this.inView()) !== 'hidden') return;
     await this.#connection.send('Target.activateTarget', { targetId: this.targetId });
-    // The window manager grants the focus after the request; until then, Chrome would answer
-    // the page's dialogs itself.
+  }
+
+  async activate(): Promise<void> {
+    await this.#connection.send('Target.activateTarget', { targetId: this.targetId });
+  }
+
+  async bringToFront(): Promise<void> {
+    await this.activate();
+    // The window manager grants the focus after the request; Chrome counts the window as its
+    // active one once it has it.
     for (let check = 0; check < FOCUS_CHECKS; check += 1) {
       if ((await this.inView()) === 'focused') return;
       await sleep(FOCUS_CHECK_MS);
@@ -255,6 +266,9 @@ class Page implements ChromePage {
   }
 }
 
+/** Which session's screen the window of a page is on. */
+export type SessionOfTarget = (targetId: string) => Promise<string | undefined>;
+
 /**
  * The pages of the Chrome dsh-chrome runs, as they come and go, with the sessions they
  * belong to and the dialogs they show. It follows Chrome's page targets over the CDP
@@ -281,6 +295,19 @@ export class PageRegistry {
   /** The order of last use: a larger number is more recent. */
   readonly #lastUse = new Map<PageId, number>();
   #useCount = 0;
+  readonly #sessionOfTarget: SessionOfTarget | undefined;
+  /** How many holds keep pages from being placed by their windows; see {@link holdPlacement}. */
+  #placementHolds = 0;
+  /** The pages that wait for the holds to end, to be placed. */
+  readonly #unplaced = new Set<Page>();
+
+  /**
+   * @param sessionOfTarget - says whose a page is that no command opened and no page did:
+   * one the user opened in a session's window, which is the session's.
+   */
+  constructor(sessionOfTarget?: SessionOfTarget) {
+    this.#sessionOfTarget = sessionOfTarget;
+  }
 
   /**
    * Follows the pages of the browser behind the connection, those it has and those to come,
@@ -411,13 +438,12 @@ export class PageRegistry {
   }
 
   /**
-   * The page Chrome shows in front: the one with the focus, or, while no window has it, the
+   * The session's page in front, as its view shows it: the one with the focus, or else the
    * most recently used one in view.
    */
-  async pageInFront(): Promise<ChromePage | undefined> {
-    const pages = this.#byRecentUse();
-    // Chrome shows a page's dialog only while the page is in front, and the page answers
-    // nothing else meanwhile.
+  async pageInFront(sessionId: string): Promise<ChromePage | undefined> {
+    const pages = this.#byRecentUse().filter((page) => page.sessionId === sessionId);
+    // A page that shows a dialog answers nothing else until it is answered.
     const asking = pages.find((page) => page.dialog !== undefined);
     if (asking !== undefined) return asking;
     const views = await Promise.all(pages.map((page) => page.inView()));
@@ -425,6 +451,24 @@ export class PageRegistry {
       pages.find((_page, index) => views[index] === 'focused') ??
       pages.find((_page, index) => views[index] === 'visible')
     );
+  }
+
+  /**
+   * Keeps the pages Chrome reports meanwhile from being given a session by their windows, until
+   * the returned function is called: a command that creates a target claims it after Chrome
+   * has reported it, and its claim, not the window's place, says whose the page is.
+   */
+  holdPlacement(): () => void {
+    this.#placementHolds += 1;
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false;
+      this.#placementHolds -= 1;
+      if (this.#placementHolds > 0) return;
+      for (const page of [...this.#unplaced]) this.#placeInSession(page);
+      this.#unplaced.clear();
+    };
   }
 
   /** Records that the user or the agent worked with the page. */
@@ -476,11 +520,31 @@ export class PageRegistry {
       .catch(() => {})
       .then(() => (waitingForDebugger ? page.send('Runtime.runIfWaitingForDebugger') : undefined))
       .catch(() => {});
+    if (origin.sessionId === undefined) this.#placeInSession(page);
     for (const adopted of [...(this.#adoptionWaiters.get(page.targetId) ?? [])]) adopted(page);
     if (opener !== undefined && claim === undefined) {
       for (const listener of [...this.#openingListeners]) listener({ page, opener });
     }
     this.#notify();
+  }
+
+  /** Gives a page no one claimed to the session whose screen its window is on. */
+  #placeInSession(page: Page): void {
+    const sessionOf = this.#sessionOfTarget;
+    if (sessionOf === undefined || page.sessionId !== undefined || page.ending !== undefined)
+      return;
+    if (this.#placementHolds > 0) {
+      this.#unplaced.add(page);
+      return;
+    }
+    sessionOf(page.targetId).then(
+      (sessionId) => {
+        if (sessionId === undefined || page.ending !== undefined) return;
+        if (page.claim({ sessionId, openedBy: page.openedBy })) this.#notify();
+      },
+      // A page whose window cannot be found is ending; its ending follows.
+      () => {},
+    );
   }
 
   #dialogChanged(cdpSession: string | undefined, dialog: PageDialog | undefined): void {

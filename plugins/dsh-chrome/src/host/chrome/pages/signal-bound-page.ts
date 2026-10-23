@@ -95,6 +95,14 @@ class SignalBoundPage implements ChromePage {
     return this.#page.onEnded(listener);
   }
 
+  show(): Promise<void> {
+    return this.#page.show();
+  }
+
+  activate(): Promise<void> {
+    return this.#page.activate();
+  }
+
   bringToFront(): Promise<void> {
     return this.#page.bringToFront();
   }

@@ -52,6 +52,27 @@ behavior behind it, so that a later DSH release can be checked against it.
 - Context for the model: an `agent/pre-step` listener may prepend user messages with a
   source kind of the plugin's own (declare it in `MessageSourceMap`). Add one only when the
   state it reports changed, so cached prompt prefixes stay valid.
+- **A row reaches only the services it injects**: `ctx.foo` throws `cannot get property "foo"
+  without inject` otherwise, also for a service the row itself provides. Hand such a row's
+  service what it needs through its configuration.
+
+## Settings
+
+- Declare the settings a user changes while DSH runs as `.volatile()` fields of the host
+  plugin's `Config` schema, and read them with `.get()` where they are used. DSH's settings
+  service serves a form of each running row's volatile fields only (their part of the
+  schema, as Schemastery's JSON), and writes edits into the DSH profile's
+  `cordis.patch.yml`. The Loader then updates the values in place, without restarting the
+  row, and emits `loader/volatile-update` to that row only. Changing any other field
+  restarts the row.
+- Draw the settings page from that schema, so that the schema stays the one definition:
+  register a component in the Plugins page's `plugins.row.config` slot, keyed
+  `<package>#<row id>`; it receives `view` (`'page'` or `'summary'`) and, while the row runs,
+  `form` (`state`, and `mutate(operations, revision)`). The schema comes from
+  `ctx.configForms.describe()` (the namespace named by the row id). DSH 0.2.1-rc.2 ships no
+  generic form and no types of these services; declare what you use, and keep their
+  objects as `this` when calling their methods (they are classes). dsh-chrome's
+  `src/client/settings/` is a worked example.
 
 ## Browser modules
 

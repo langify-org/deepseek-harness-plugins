@@ -49,7 +49,7 @@ export function apply(ctx: Context): void {
         () => false,
       );
       if (!read) return decision;
-      const inFront = await chrome.pages.pageInFront();
+      const inFront = await chrome.pages.pageInFront(sessionId);
       const pages = chrome.pages.reachableBy(sessionId).map((page) => ({
         id: page.id,
         url: page.url,

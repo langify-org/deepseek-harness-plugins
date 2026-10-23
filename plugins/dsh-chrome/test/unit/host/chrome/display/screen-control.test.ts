@@ -160,15 +160,28 @@ async function serving(name: string, options: FakeVncOptions): Promise<FakeVncSe
   return server;
 }
 
-test("learns the screen's size, and sets it as the viewer asks", async () => {
+/** A layout of the control's one monitor, at the size: the monitor keeps the id Xvnc gave it. */
+const oneMonitor = (control: ScreenControl, width: number, height: number) => ({
+  width,
+  height,
+  monitors: [{ id: control.layout.monitors[0]?.id ?? 0, x: 0, y: 0, width, height }],
+});
+
+/** The screen's size, as the control last heard it. */
+const sizeOf = (control: ScreenControl) => ({
+  width: control.layout.width,
+  height: control.layout.height,
+});
+
+test("learns the screen's size, and lays it out as asked", async () => {
   const server = await serving('resize', { width: 1280, height: 800 });
   const control = await ScreenControl.connect(server.path);
-  assert.deepEqual(control.size, { width: 1280, height: 800 });
-  await control.resize({ width: 1200, height: 1800 });
-  assert.deepEqual(control.size, { width: 1200, height: 1800 });
+  assert.deepEqual(sizeOf(control), { width: 1280, height: 800 });
+  await control.setLayout(oneMonitor(control, 1200, 1800));
+  assert.deepEqual(sizeOf(control), { width: 1200, height: 1800 });
   assert.deepEqual([server.width, server.height], [1200, 1800]);
-  // The size it has is not asked for again.
-  await control.resize({ width: 1200, height: 1800 });
+  // The layout it has is not asked for again.
+  await control.setLayout(oneMonitor(control, 1200, 1800));
   assert.equal(server.asked.length, 1);
   control.close();
 });
@@ -176,8 +189,11 @@ test("learns the screen's size, and sets it as the viewer asks", async () => {
 test('says why the screen kept its size, when the server refuses the change', async () => {
   const server = await serving('refuse', { width: 1280, height: 800, resizeStatus: 3 });
   const control = await ScreenControl.connect(server.path);
-  await assert.rejects(control.resize({ width: 10, height: 10 }), /the screen layout is invalid/);
-  assert.deepEqual(control.size, { width: 1280, height: 800 });
+  await assert.rejects(
+    control.setLayout(oneMonitor(control, 10, 10)),
+    /the screen layout is invalid/,
+  );
+  assert.deepEqual(sizeOf(control), { width: 1280, height: 800 });
   control.close();
 });
 
@@ -194,6 +210,6 @@ test('fails a change of size at once when Xvnc closes the connection', async () 
   for (const socket of server.sockets) socket.destroy();
   const started = Date.now();
   // With the reason the connection ended: closed, or a write that failed.
-  await assert.rejects(control.resize({ width: 300, height: 300 }));
+  await assert.rejects(control.setLayout(oneMonitor(control, 300, 300)));
   assert.ok(Date.now() - started < 1000, 'it waited for its timeout');
 });

@@ -19,6 +19,13 @@ declare module '@novnc/novnc' {
     /** Scale the screen to fit the target, keeping its proportions. */
     scaleViewport: boolean;
     clipViewport: boolean;
+    /**
+     * The rectangle of the remote screen to show, scaled with scaleViewport, and the only one
+     * whose updates are asked for; null shows the whole screen. While it is set, the pointer is
+     * kept in it: a drag that leaves the view does not reach another session's monitor.
+     * dsh-chrome's patch of noVNC.
+     */
+    viewRegion: { x: number; y: number; width: number; height: number } | null;
     resizeSession: boolean;
     viewOnly: boolean;
     focusOnClick: boolean;

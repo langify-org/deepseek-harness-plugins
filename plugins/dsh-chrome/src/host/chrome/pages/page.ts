@@ -41,13 +41,14 @@ export interface RequestOptions {
  * A page of the Chrome dsh-chrome runs: a tab or a popup window.
  *
  * It belongs to the DSH session whose agent opened it, or whose sidebar did, and a page it
- * opened belongs there too. A page the user opened in Chrome itself belongs to no session.
+ * opened belongs there too; one the user opened in Chrome belongs to the session whose
+ * screen its window is on. A page that is on no session's screen belongs to no session.
  */
 export interface ChromePage {
   readonly id: PageId;
   /** The page's CDP target. */
   readonly targetId: string;
-  /** The DSH session the page belongs to; `undefined` for one the user opened in Chrome. */
+  /** The DSH session the page belongs to; `undefined` for one on no session's screen. */
   readonly sessionId: string | undefined;
   readonly openedBy: PageOpener;
   /** The page that opened this one, when another page did. */
@@ -70,10 +71,16 @@ export interface ChromePage {
   onChanged(listener: (page: ChromePage) => void): () => void;
   /** Runs once the page ends; immediately if it already has. */
   onEnded(listener: (ending: PageEnding) => void): () => void;
+  /** Makes the page the active tab of its window, where its session's view shows it. */
+  show(): Promise<void>;
   /**
-   * Makes the page the one in front: the active tab of the focused window, as the tab a
-   * person looks at is. Chrome shows the dialogs of that page only, and answers those of
-   * any other itself.
+   * Asks Chrome to make the page the active tab of its window and to bring the window forward,
+   * which gives it the focus, and returns without waiting for it.
+   */
+  activate(): Promise<void>;
+  /**
+   * Makes the page the active tab of Chrome's focused window, and returns once the window has
+   * the focus: Chrome then opens a new tab in that window.
    */
   bringToFront(): Promise<void>;
   /** Closes the tab or window. */

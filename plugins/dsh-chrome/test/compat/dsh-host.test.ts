@@ -20,6 +20,7 @@ import packageJson from '../../package.json' with { type: 'json' };
 import {
   decodeViewerEvent,
   SCREEN_PATH,
+  screenPath,
   VIEWER_PATH,
   type ViewerEvent,
 } from '../../src/protocol/viewer.ts';
@@ -110,8 +111,10 @@ test('a signed-in viewer watches its session, owns the screen, and hears why Chr
   socket.send(JSON.stringify({ type: 'watch', sessionId: 'session-1' }));
   assert.deepEqual(await events.next(), { type: 'chrome', status: { kind: 'stopped' } });
   assert.deepEqual(await events.next(), { type: 'help', request: null });
-  // The only viewer owns the screen: it is laid out at its size.
-  assert.deepEqual(await events.next(), { type: 'screen', owner: true });
+  assert.deepEqual(await events.next(), { type: 'windows', open: false });
+  // The session's only viewer owns its part of the screen, which has no place until the
+  // screen runs.
+  assert.deepEqual(await events.next(), { type: 'screen', owner: true, region: null });
 
   socket.send(JSON.stringify({ type: 'open', url: 'example.com' }));
   assert.deepEqual(await events.next(), { type: 'chrome', status: { kind: 'starting' } });
@@ -124,8 +127,20 @@ test('a signed-in viewer watches its session, owns the screen, and hears why Chr
   socket.close();
 });
 
+test('the screen route refuses a socket that names no session, whose keys would go nowhere', {
+  skip,
+}, async () => {
+  assert.equal(
+    await upgradeStatus(SCREEN_PATH, {
+      origin: `http://127.0.0.1:${port}`,
+      cookie: SIGNED_IN_COOKIE,
+    }),
+    400,
+  );
+});
+
 test('the screen route closes with the reason the screen did not start', { skip }, async () => {
-  const socket = signedInSocket(SCREEN_PATH);
+  const socket = signedInSocket(screenPath('session-1'));
   const { code, reason } = await new Promise<{ code: number; reason: string }>((resolve) =>
     socket.once('close', (closeCode, closeReason) =>
       resolve({ code: closeCode, reason: closeReason.toString() }),

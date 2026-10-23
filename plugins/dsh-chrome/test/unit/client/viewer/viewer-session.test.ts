@@ -82,7 +82,7 @@ function startSession() {
   return { session, sockets, socket };
 }
 
-test('watches its session first, then gives its size, opens the links that waited, and starts Chrome', () => {
+test('watches its session first, then gives its size, opens the links that waited, and opens its window', () => {
   const { session, socket } = startSession();
   session.setArea(400, 600);
   session.open('example.com');
@@ -92,7 +92,7 @@ test('watches its session first, then gives its size, opens the links that waite
     { type: 'watch', sessionId: 'session-1' },
     { type: 'viewport', width: 400, height: 600 },
     { type: 'open', url: 'example.com' },
-    { type: 'start-chrome' },
+    { type: 'open-window' },
   ]);
   assert.equal(session.getSnapshot().connection, 'connected');
 });
@@ -115,13 +115,13 @@ test('sends its size when it changes, and only then', () => {
 test('claims the screen when the user works in it and another tab has it, once', () => {
   const { session, socket } = startSession();
   socket().open();
-  socket().receive({ type: 'screen', owner: false });
+  socket().receive({ type: 'screen', owner: false, region: null });
   session.claimScreen();
   session.claimScreen();
   assert.deepEqual(socket().sent.filter((request) => request.type === 'claim-screen').length, 1);
   assert.equal(session.getSnapshot().screenOwner, true);
   // Another tab took it.
-  socket().receive({ type: 'screen', owner: false });
+  socket().receive({ type: 'screen', owner: false, region: null });
   session.claimScreen();
   assert.deepEqual(socket().sent.filter((request) => request.type === 'claim-screen').length, 2);
 });
@@ -129,10 +129,17 @@ test('claims the screen when the user works in it and another tab has it, once',
 test("keeps Chrome's state and the session's request for help as the host reports them", () => {
   const { session, socket } = startSession();
   socket().open();
-  socket().receive({ type: 'chrome', status: { kind: 'running', version: 'Chrome/154' } });
+  socket().receive({
+    type: 'chrome',
+    status: { kind: 'running', version: 'Chrome/154', settingsChanged: true },
+  });
   const help = { id: 'help-1', message: 'Sign in', pageTitle: 'Bank', pageUrl: 'https://bank/' };
   socket().receive({ type: 'help', request: help });
-  assert.deepEqual(session.getSnapshot().chrome, { kind: 'running', version: 'Chrome/154' });
+  assert.deepEqual(session.getSnapshot().chrome, {
+    kind: 'running',
+    version: 'Chrome/154',
+    settingsChanged: true,
+  });
   assert.deepEqual(session.getSnapshot().help, help);
   session.answerHelp('done');
   assert.deepEqual(socket().sent.at(-1), {
@@ -187,7 +194,7 @@ test('connects again after a drop, and tells the host its size again', async () 
   const { session, sockets, socket } = startSession();
   socket().open();
   session.setArea(300, 500);
-  socket().receive({ type: 'screen', owner: true });
+  socket().receive({ type: 'screen', owner: true, region: null });
   socket().drop();
   assert.deepEqual(
     [session.getSnapshot().connection, session.getSnapshot().screenOwner],
@@ -196,10 +203,48 @@ test('connects again after a drop, and tells the host its size again', async () 
   await new Promise((resolve) => setTimeout(resolve, 600));
   assert.equal(sockets.length, 2);
   socket().open();
-  // A Chrome the user closed meanwhile stays closed.
+  // A window the user closed meanwhile stays closed.
   assert.deepEqual(socket().sent, [
     { type: 'watch', sessionId: 'session-1' },
     { type: 'viewport', width: 300, height: 500 },
   ]);
   session.dispose();
+});
+
+test('asks for its window once, when it first connects, and not after a drop', async () => {
+  const { session, sockets, socket } = startSession();
+  socket().open();
+  socket().drop();
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  socket().open();
+  assert.equal(sockets.length, 2);
+  assert.equal(
+    sockets.flatMap((one) => one.sent).filter((r) => r.type === 'open-window').length,
+    1,
+  );
+  session.dispose();
+});
+
+test('asks for its window again, and for Chrome to start again, when told to', () => {
+  const { session, socket } = startSession();
+  socket().open();
+  session.openWindow();
+  session.restartChrome();
+  assert.deepEqual(socket().sent.slice(-2), [{ type: 'open-window' }, { type: 'restart-chrome' }]);
+});
+
+test("follows the session's part of the screen and whether it has a window", () => {
+  const { session, socket } = startSession();
+  socket().open();
+  assert.equal(session.getSnapshot().region, undefined);
+  assert.equal(session.getSnapshot().windowsOpen, undefined);
+  const region = { x: 0, y: 900, width: 1200, height: 800 };
+  socket().receive({ type: 'screen', owner: true, region });
+  socket().receive({ type: 'windows', open: true });
+  assert.deepEqual(session.getSnapshot().region, region);
+  assert.equal(session.getSnapshot().windowsOpen, true);
+  socket().receive({ type: 'screen', owner: true, region: null });
+  socket().receive({ type: 'windows', open: false });
+  assert.equal(session.getSnapshot().region, undefined);
+  assert.equal(session.getSnapshot().windowsOpen, false);
 });

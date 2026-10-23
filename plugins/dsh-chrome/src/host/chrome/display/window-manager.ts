@@ -20,16 +20,18 @@ export interface WindowManager {
 }
 
 /**
- * Openbox, configured so that Chrome's windows fill the screen, without decorations or
- * borders. Chrome draws its own tabs; the window manager keeps its windows sized to the
- * screen as the screen follows the viewer, brings a window Chrome activates to the front,
- * and gives the focus to a new window and to the window clicked: Chrome shows a page's
- * dialogs only in the focused window. Dialogs of their own, such as a file chooser, keep
- * their size. It has no keys or menus of its own, so that every key reaches Chrome.
+ * Openbox, configured so that each Chrome window fills the monitor it is on, without
+ * decorations or borders. Chrome draws its own tabs; the window manager keeps its windows
+ * sized to their monitors as the monitors follow the viewers (on the monitor each overlaps
+ * most, which the Chrome service corrects when that is another session's), brings a window
+ * Chrome activates to the front, and gives the focus to a new window and to the window
+ * clicked. Dialogs of their own, such as a file chooser,
+ * keep their size. It has no keys or menus of its own, so that every key reaches Chrome.
  *
- * A window a page opens (a sign-in popup) stays centred above Chrome's, with a title bar
- * whose only button closes it: there is no taskbar to find a window again that went behind
- * another, and the browser that shows DSH keeps Chrome's shortcut for closing a window.
+ * A window a page opens (a sign-in popup) stays above Chrome's, where Chrome puts it: on its
+ * opener's monitor. It has a title bar whose only button closes it: there is no taskbar to
+ * find a window again that went behind another, and the browser that shows DSH keeps
+ * Chrome's shortcut for closing a window.
  */
 export const OPENBOX_CONFIG = `<?xml version="1.0" encoding="UTF-8"?>
 <openbox_config xmlns="http://openbox.org/3.4/rc">
@@ -59,7 +61,6 @@ export const OPENBOX_CONFIG = `<?xml version="1.0" encoding="UTF-8"?>
     <application class="*" type="normal"><maximized>yes</maximized></application>
     <application class="*" role="pop-up">
       <decor>yes</decor><maximized>no</maximized><layer>above</layer>
-      <position force="yes"><x>center</x><y>center</y></position>
     </application>
   </applications>
 </openbox_config>

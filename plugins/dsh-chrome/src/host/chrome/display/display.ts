@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { makePrivateDirectory } from './private-directory.ts';
 import { endRecordedProcesses, forgetProcesses, recordProcesses } from './recorded-processes.ts';
-import { ScreenControl, type ScreenSize } from './screen-control.ts';
+import { ScreenControl, type ScreenLayout, type ScreenSize } from './screen-control.ts';
 import { startWindowManager, type WindowManager } from './window-manager.ts';
 import { writeXAuthority } from './x-authority.ts';
 import { startXvnc } from './xvnc.ts';
@@ -23,8 +23,9 @@ export interface DisplayOptions {
 
 /**
  * The screen Chrome draws on: an X server that keeps it in memory and serves it over VNC,
- * and a window manager that keeps Chrome's windows filling it. The sidebar shows it, and
- * its size follows the sidebar's.
+ * and a window manager that keeps each Chrome window filling the monitor it is on. The
+ * screen is laid out as monitors, one for each DSH session that shows Chrome; each sidebar
+ * shows its session's monitor.
  */
 export interface Display {
   /** The X display, for Chrome to draw on. */
@@ -33,9 +34,10 @@ export interface Display {
   readonly authorityPath: string;
   /** Where VNC viewers connect. */
   readonly vncSocketPath: string;
-  /** The screen's size, in device pixels. */
-  readonly size: ScreenSize;
-  resize(size: ScreenSize): Promise<void>;
+  /** The screen's layout, as Xvnc last reported it. */
+  readonly layout: ScreenLayout;
+  /** Lays the screen out as the monitors, one change at a time. */
+  setLayout(layout: ScreenLayout): Promise<void>;
   /** Resolves once the X server has exited. */
   readonly exited: Promise<void>;
   stop(): Promise<void>;
@@ -77,10 +79,10 @@ export async function startDisplay(options: DisplayOptions): Promise<Display> {
     name: server.display,
     authorityPath,
     vncSocketPath: server.socketPath,
-    get size() {
-      return screen.size;
+    get layout() {
+      return screen.layout;
     },
-    resize: (size) => screen.resize(size),
+    setLayout: (layout) => screen.setLayout(layout),
     exited: server.exited,
     stop: async () => {
       screen.close();

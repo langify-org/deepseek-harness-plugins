@@ -26,8 +26,8 @@ export interface ScreenViewProps {
   readonly region: ScreenRegion | undefined;
   /** Whether to be connected; the view connects again after a drop while it is. */
   readonly active: boolean;
-  /** The view's size changed, in CSS pixels. */
-  readonly onArea: (width: number, height: number) => void;
+  /** The view's size changed, in CSS pixels, or the pixel ratio of the display it is on. */
+  readonly onArea: (width: number, height: number, devicePixelRatio: number) => void;
   /** The user works in the view: a press, a key, text. */
   readonly onInteract: () => void;
   readonly onStatus: (status: ScreenStatus) => void;
@@ -129,13 +129,37 @@ export function ScreenView({
   useEffect(() => {
     const area = areaRef.current;
     if (area === null) return;
+    let size: { width: number; height: number } | undefined;
+    const report = () => {
+      if (size !== undefined) {
+        callbacks.current.onArea(size.width, size.height, window.devicePixelRatio);
+      }
+    };
     const observer = new ResizeObserver(([entry]) => {
       if (entry === undefined) return;
       const { width, height } = entry.contentRect;
-      if (width > 0 && height > 0) callbacks.current.onArea(width, height);
+      if (width <= 0 || height <= 0) return;
+      size = { width, height };
+      report();
     });
     observer.observe(area);
-    return () => observer.disconnect();
+    // A window moved to a display of another density changes its pixel ratio, and not always
+    // its size: the media query of the ratio it has says when.
+    let ratio: MediaQueryList | undefined;
+    const onRatio = () => {
+      report();
+      watchRatio();
+    };
+    const watchRatio = () => {
+      ratio?.removeEventListener('change', onRatio);
+      ratio = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+      ratio.addEventListener('change', onRatio);
+    };
+    watchRatio();
+    return () => {
+      observer.disconnect();
+      ratio?.removeEventListener('change', onRatio);
+    };
   }, []);
 
   const connection = () => connectionRef.current;

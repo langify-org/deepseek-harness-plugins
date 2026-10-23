@@ -70,6 +70,14 @@ export class SessionScreens {
     return this.#applied?.monitors.find((monitor) => monitor.id === PARKING_MONITOR_ID);
   }
 
+  /**
+   * Applies the layout again: the default size it takes for the parking monitor depends on
+   * Chrome's scale, which changes when Chrome starts.
+   */
+  relayout(): void {
+    this.#schedule();
+  }
+
   /** Wants the parking monitor, or no longer. */
   setParking(wanted: boolean): void {
     if (wanted === this.#parking) return;

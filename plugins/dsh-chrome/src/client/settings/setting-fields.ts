@@ -14,6 +14,14 @@ export interface SettingOption {
   readonly description: string | undefined;
 }
 
+/** A number a choice also takes, besides its values: within these bounds. */
+export interface NumberOption {
+  readonly description: string | undefined;
+  readonly min: number | undefined;
+  readonly max: number | undefined;
+  readonly step: number | undefined;
+}
+
 interface FieldBase {
   /** The setting's key in the configuration, which the form writes. */
   readonly key: string;
@@ -34,6 +42,8 @@ export type SettingField =
       readonly kind: 'choice';
       readonly defaultValue: SettingValue | undefined;
       readonly options: readonly SettingOption[];
+      /** A number the setting takes instead of one of the values, if any. */
+      readonly number: NumberOption | undefined;
     })
   /** A setting of a type this form does not edit; it is shown, and left as it is. */
   | (FieldBase & { readonly kind: 'other'; readonly type: string });
@@ -95,31 +105,42 @@ export function settingFields(
             key,
             description,
             defaultValue: asType(fallback, 'number'),
-            min: asType(field.meta['min'], 'number') ?? (field.type === 'natural' ? 0 : undefined),
-            max: asType(field.meta['max'], 'number'),
-            step:
-              asType(field.meta['step'], 'number') ?? (field.type === 'natural' ? 1 : undefined),
+            ...bounds(field),
           },
         ];
       case 'string':
         return [{ kind: 'text', key, description, defaultValue: asType(fallback, 'string') }];
       case 'union': {
+        // Values to choose from, and at most one number besides them.
         const options = (field.list ?? []).map(node);
-        if (options.every((option) => option?.type === 'const' && isSettingValue(option.value))) {
-          return [
-            {
-              kind: 'choice',
-              key,
-              description,
-              defaultValue: isSettingValue(fallback) ? fallback : undefined,
-              options: (options as SerializedNode[]).map((option) => ({
-                value: option.value as SettingValue,
-                description: describe(option.meta),
-              })),
-            },
-          ];
+        const values = options.filter(
+          (option): option is SerializedNode =>
+            option?.type === 'const' && isSettingValue(option.value),
+        );
+        const numbers = options.filter(
+          (option): option is SerializedNode =>
+            option?.type === 'number' || option?.type === 'natural',
+        );
+        if (values.length + numbers.length !== options.length || numbers.length > 1) {
+          return [{ kind: 'other', key, description, type: field.type }];
         }
-        return [{ kind: 'other', key, description, type: field.type }];
+        const number = numbers[0];
+        return [
+          {
+            kind: 'choice',
+            key,
+            description,
+            defaultValue: isSettingValue(fallback) ? fallback : undefined,
+            options: values.map((option) => ({
+              value: option.value as SettingValue,
+              description: describe(option.meta),
+            })),
+            number:
+              number === undefined
+                ? undefined
+                : { description: describe(number.meta), ...bounds(number) },
+          },
+        ];
       }
       default:
         return [{ kind: 'other', key, description, type: field.type }];
@@ -127,9 +148,19 @@ export function settingFields(
   });
 }
 
+/** The bounds a number node of the schema declares; a natural number counts from 0 in ones. */
+function bounds(field: SerializedNode): Pick<NumberOption, 'min' | 'max' | 'step'> {
+  const natural = field.type === 'natural';
+  return {
+    min: asType(field.meta['min'], 'number') ?? (natural ? 0 : undefined),
+    max: asType(field.meta['max'], 'number'),
+    step: asType(field.meta['step'], 'number') ?? (natural ? 1 : undefined),
+  };
+}
+
 /** A setting's value, as the user enters it in the field, or an error to show instead. */
 export function numberInput(
-  field: Extract<SettingField, { kind: 'number' }>,
+  field: Pick<NumberOption, 'min' | 'max' | 'step'>,
   text: string,
 ): { readonly value: number } | { readonly error: string } {
   const value = Number(text.trim());

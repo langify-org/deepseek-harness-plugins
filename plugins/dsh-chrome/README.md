@@ -41,6 +41,16 @@ dsh-chrome keeps its files in the DSH home, with the rest of DSH's data: `~/.dsh
 `dsh-chrome/chrome-profile` there. Each home has its own Chrome and screen, so DSH
 installations with different homes can run at once.
 
+### From 0.4
+
+Chrome now draws at the pixel ratio of the display you use it on (`deviceScaleFactor` is
+`auto`): on most displays, a quarter of the pixels 0.4 drew and sent, at a fraction of the CPU
+(see [design](docs/design.md#how-the-screen-reaches-the-sidebar)). A `deviceScaleFactor` you
+set stays as it is. Chrome composites its pages on the CPU, which costs less than reading
+each frame back from the GPU; WebGL still draws on the GPU. A profile copy says how far it
+has come. Reload DSH's pages after updating: the sidebar and the settings page speak to the
+plugin in this version's terms only.
+
 ### From 0.3
 
 Each session now has its own window, so sessions no longer take each other's view; Chrome
@@ -68,9 +78,13 @@ To start from your own Chrome's sign-ins, passwords, bookmarks and extensions, c
 its profiles: in DSH, open **Plugins**, dsh-chrome's page, and under **Copy a profile of your
 Chrome**, choose the profile and **Copy…**, then confirm. The copy replaces dsh-chrome's
 profile (the one it replaces is kept beside it, as `Default.before-copy`, until the next
-copy), and Chrome closes meanwhile, with its windows in every session. Close your own Chrome
-first for an exact copy; a running one may not have written its last changes yet. The copy
-joins Chrome Sync as a device of its own.
+copy), and Chrome closes meanwhile, with its windows in every session. The page shows how
+far the copy has come: the files copied, then the databases checked, then Chrome closing
+and the copy taking the profile's place. A page opened or reloaded during or after the copy
+shows how it went, and a page whose connection to DSH drops, or goes silent, connects again
+and shows it.
+Close your own Chrome first for an exact copy; a running one may not have written its last
+changes yet. The copy joins Chrome Sync as a device of its own.
 
 Or open **Chrome** from the sidebar's new-tab guide, and set it up there as you would a new
 Chrome:
@@ -99,8 +113,9 @@ dialogs pages open. A window a page opens, such as a sign-in popup, stays above 
 window until it closes; its title bar has a button to close it.
 
 Each session's Chrome tab shows the session's own window. Opening the tab opens the window,
-and starts Chrome if need be; the window takes the size of the tab, at two of its pixels for
-each of the tab's, so it is sharp on high-density displays too. Two tabs of one session (in
+and starts Chrome if need be, once the tab is shown; the window takes the size of the tab,
+and Chrome draws at the pixel ratio of the display the tab is on, so it is as sharp as that
+display shows, and no larger. Two tabs of one session (in
 two browser windows, or on a phone) show the same window, at the size of the one you last
 looked at or worked in; the other shows it scaled to fit. Keys you type in a session's tab
 go to that session's window, even while another session's agent works in its own. When you
@@ -142,7 +157,7 @@ the others go only there, and changing one restarts the plugin:
 | `executable` | `google-chrome-stable` | The Chrome to run. |
 | `xvncExecutable` | `Xvnc` | TigerVNC's Xvnc. |
 | `windowManagerExecutable` | `openbox` | Openbox. |
-| `deviceScaleFactor` | `2` | How many of the screen's pixels a CSS pixel of Chrome takes, from 1 to 4. 2 is sharp on high-density displays and still clear on others; 1 sends a quarter of the pixels. |
+| `deviceScaleFactor` | `auto` | How many of the screen's pixels a CSS pixel of Chrome takes: `auto`, the pixel ratio of the display of the tab that last asked for Chrome, when Chrome starts (rounded to a quarter, from 1 to 4; kept between starts, and 1 before any tab said); or a number from 1 to 4, in quarters, whatever the display. 2 is sharp on a high-density display, and sends four times the pixels of 1. |
 | `announceAutomation` | `false` | Tell pages that Chrome is under automated control (`navigator.webdriver`), as Chrome would for the pipe dsh-chrome controls it through. Google then refuses to sign in, and other sites may take you for a bot; see [Security](#security). |
 | `webgl` | `gpu` | How Chrome draws WebGL: `gpu` on your GPU, through Vulkan (none without a Vulkan driver); `gpu-or-cpu` on your GPU, else on the CPU, slower and a larger target for a hostile page, which is why Chrome refuses it by itself; `off` as Chrome decides, which on this screen is without WebGL. |
 | `profileDir` | `dsh-chrome/chrome-profile` in the DSH home | The Chrome profile: its user data directory. |
@@ -187,6 +202,10 @@ The tools and the turn-start reading are separate rows; turn either off on its o
   window of their own.
 - Settings changed in DSH apply when Chrome starts again, which closes every session's
   windows.
+- Chrome draws at one scale for every session. With `auto`, it is the pixel ratio of the
+  display of the tab that last asked for Chrome when it started (a tab that opened, a page you
+  opened, a restart), kept between DSH's starts; a tab on a display of another ratio shows
+  Chrome scaled, and offers **Restart Chrome**, which starts Chrome at that tab's ratio.
 
 ## Security
 

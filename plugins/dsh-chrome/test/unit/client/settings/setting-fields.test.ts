@@ -69,8 +69,37 @@ test('reads a union of constants as a choice, each option with its description',
         { value: 'gpu', description: 'On the GPU.' },
         { value: 'off', description: undefined },
       ],
+      number: undefined,
     },
   ]);
+});
+
+test('reads a union of constants and a number as a choice that also takes a number in bounds', () => {
+  const schema = z.object({
+    scale: z
+      .union([
+        z.const('auto').description('As the display.'),
+        z.number().min(1).max(4).step(0.25).description('This many.'),
+      ])
+      .default('auto'),
+  });
+  assert.deepEqual(fieldsOf(schema), [
+    {
+      kind: 'choice',
+      key: 'scale',
+      description: undefined,
+      defaultValue: 'auto',
+      options: [{ value: 'auto', description: 'As the display.' }],
+      number: { description: 'This many.', min: 1, max: 4, step: 0.25 },
+    },
+  ]);
+});
+
+test('a union with two numbers, or with another kind of member, is not edited', () => {
+  const twoNumbers = z.object({ value: z.union([z.number(), z.natural()]) });
+  const withText = z.object({ value: z.union([z.const('a'), z.string()]) });
+  assert.equal(fieldsOf(twoNumbers)[0]?.kind, 'other');
+  assert.equal(fieldsOf(withText)[0]?.kind, 'other');
 });
 
 test('reads a choice of numbers', () => {

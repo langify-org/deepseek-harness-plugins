@@ -70,7 +70,9 @@ export class ViewerSession {
     notice: undefined,
   };
   #socket: ConnectionWebSocket | undefined;
-  #area: { readonly width: number; readonly height: number } | undefined;
+  #area:
+    | { readonly width: number; readonly height: number; readonly devicePixelRatio: number }
+    | undefined;
   /** Links to open once connected. */
   readonly #pendingOpens: string[] = [];
   #reconnectAttempt = 0;
@@ -91,11 +93,19 @@ export class ViewerSession {
 
   readonly getSnapshot = (): ViewerSnapshot => this.#snapshot;
 
-  /** The tab's screen area, in CSS pixels. */
-  setArea(width: number, height: number): void {
-    if (this.#area?.width === width && this.#area.height === height) return;
-    this.#area = { width, height };
-    this.#send({ type: 'viewport', width, height });
+  /** The tab's screen area, in CSS pixels, and the pixel ratio of the display it is on. */
+  setArea(width: number, height: number, devicePixelRatio: number): void {
+    const area = this.#area;
+    if (
+      area?.width === width &&
+      area.height === height &&
+      area.devicePixelRatio === devicePixelRatio
+    ) {
+      return;
+    }
+    this.#area = { width, height, devicePixelRatio };
+    this.#send({ type: 'viewport', width, height, devicePixelRatio });
+    this.#openWaiting();
   }
 
   /** The user works in this tab: the screen follows its size. */
@@ -108,8 +118,8 @@ export class ViewerSession {
 
   /** Opens a page for the session, in front. */
   open(url: string): void {
-    if (this.#snapshot.connection === 'connected') this.#send({ type: 'open', url });
-    else this.#pendingOpens.push(url);
+    this.#pendingOpens.push(url);
+    this.#openWaiting();
   }
 
   /** Shows the session's window, opening one, and starting Chrome, if need be. */
@@ -166,6 +176,19 @@ export class ViewerSession {
     this.#listeners.clear();
   }
 
+  /**
+   * Opens the pages that wait, and the session's window the first time: once connected, and
+   * once the host knows the tab's size and display, which Chrome takes when it starts.
+   */
+  #openWaiting(): void {
+    if (this.#snapshot.connection !== 'connected' || this.#area === undefined) return;
+    for (const url of this.#pendingOpens.splice(0)) this.#send({ type: 'open', url });
+    if (!this.#askedForWindow) {
+      this.#askedForWindow = true;
+      this.#send({ type: 'open-window' });
+    }
+  }
+
   #connect(): void {
     this.#socket?.close();
     this.#update({ connection: 'connecting', screenOwner: false });
@@ -174,15 +197,12 @@ export class ViewerSession {
     socket.addEventListener('open', () => {
       if (this.#socket !== socket) return;
       this.#reconnectAttempt = 0;
-      // The host takes requests only from a viewer that watches a session: watch first.
-      this.#send({ type: 'watch', sessionId: this.#options.sessionId });
+      // The size and display first, so that the host knows them when it tells how Chrome draws
+      // for this viewer; then the session, which the other requests need.
       if (this.#area !== undefined) this.#send({ type: 'viewport', ...this.#area });
-      for (const url of this.#pendingOpens.splice(0)) this.#send({ type: 'open', url });
-      if (!this.#askedForWindow) {
-        this.#askedForWindow = true;
-        this.#send({ type: 'open-window' });
-      }
+      this.#send({ type: 'watch', sessionId: this.#options.sessionId });
       this.#update({ connection: 'connected' });
+      this.#openWaiting();
     });
     socket.addEventListener('message', ({ data }) => {
       if (this.#socket !== socket || typeof data !== 'string') return;
@@ -213,7 +233,7 @@ export class ViewerSession {
         return;
       // For the plugin's settings page, which this viewer is not.
       case 'user-chrome':
-      case 'profile-copied':
+      case 'profile-copy':
         return;
       case 'help':
         this.#update({ help: event.request ?? undefined });

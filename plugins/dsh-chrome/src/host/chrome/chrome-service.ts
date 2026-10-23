@@ -22,6 +22,7 @@ import {
 } from './profile/profile-copy.ts';
 import { KeyboardFocus } from './sessions/keyboard-focus.ts';
 import { SessionScreens } from './sessions/session-screens.ts';
+import { readStartPixelRatio, writeStartPixelRatio } from './start-pixel-ratio.ts';
 
 export { WEBGL_MODES, type WebglMode } from './process/launch.ts';
 export type { KeyboardFocus } from './sessions/keyboard-focus.ts';
@@ -36,8 +37,11 @@ declare module '@deepseek-ai/cordis' {
 /** What the user sets in the plugin's settings; Chrome takes them when it starts. */
 export interface ChromeSettings {
   readonly executable: string;
-  /** How many device pixels a CSS pixel takes in Chrome. */
-  readonly deviceScaleFactor: number;
+  /**
+   * How many device pixels a CSS pixel takes in Chrome; `auto`, the pixel ratio of the
+   * display of the viewer that last asked for Chrome, its windows or pages ({@link scaleOf}).
+   */
+  readonly deviceScaleFactor: number | 'auto';
   /** Whether pages are told that Chrome is under automated control (`navigator.webdriver`). */
   readonly announceAutomation: boolean;
   readonly webgl: WebglMode;
@@ -67,17 +71,44 @@ export interface ChromeServiceConfig {
 /** A window's place, as Chrome measures it: in CSS pixels of its screen. */
 type WindowBounds = Protocol.Browser.Bounds;
 
+/**
+ * Where the copy of a profile of the user's Chrome stands: the last one since dsh-chrome
+ * started. `startedAt`, in milliseconds since the epoch, tells one copy from another.
+ */
+export type ProfileCopyState = { readonly directory: string; readonly startedAt: number } & (
+  | {
+      readonly kind: 'copying-files';
+      /** The bytes of the files begun so far, and of all the copy takes. */
+      readonly copiedBytes: number;
+      readonly totalBytes: number;
+    }
+  | {
+      readonly kind: 'checking-databases';
+      /** How many of the databases copied are checked whole, of all. */
+      readonly checked: number;
+      readonly total: number;
+    }
+  /** Chrome closes, and the copy takes the profile's place. */
+  | { readonly kind: 'replacing' }
+  | { readonly kind: 'copied' }
+  | { readonly kind: 'failed'; readonly message: string }
+);
+
+/** How often, at most, a copy says how many bytes it has copied. */
+const COPY_PROGRESS_INTERVAL_MS = 250;
+
 /** Whether Chrome runs, for the sidebar. */
 export type ChromeState =
   | { readonly kind: 'stopped' }
   | { readonly kind: 'starting' }
-  | {
-      readonly kind: 'running';
-      readonly version: string;
-      /** The settings changed since Chrome started: they apply once it starts again. */
-      readonly settingsChanged: boolean;
-    }
+  | { readonly kind: 'running'; readonly version: string }
   | { readonly kind: 'failed'; readonly message: string };
+
+/**
+ * Why Chrome would start otherwise now than it runs, for a viewer: the settings changed since
+ * it started, or an `auto` scale would draw for the viewer's display at another pixel ratio.
+ */
+export type RestartReason = 'settings' | 'display';
 
 /** The size of a session's screen until its view gives one, in CSS pixels of Chrome. */
 const SESSION_SCREEN_CSS: ScreenSize = { width: 1280, height: 800 };
@@ -130,11 +161,21 @@ export class ChromeService extends Service {
   private xRetry: ReturnType<typeof setTimeout> | undefined;
   private chromeStart: Promise<ChromeProcess> | undefined;
   /** The Chrome that runs, once it does, and the settings it started with. */
-  private runningChrome: { process: ChromeProcess; settings: ChromeSettings } | undefined;
+  private runningChrome:
+    | { process: ChromeProcess; settings: ChromeSettings; deviceScaleFactor: number }
+    | undefined;
+  /**
+   * The pixel ratio an `auto` scale starts Chrome at: that of the display of the viewer that
+   * last asked for Chrome, its windows or pages, once one said, kept between starts.
+   */
+  private startPixelRatio: number | undefined;
+  /** Writes of {@link startPixelRatio} to its file, one after another. */
+  private startPixelRatioWrites: Promise<void> = Promise.resolve();
   /** The CDP connection of the Chrome that starts or runs. */
   private connection: CdpConnection | undefined;
   private current: ChromeState = { kind: 'stopped' };
   private readonly stateListeners = new Set<(state: ChromeState) => void>();
+  private readonly settingsListeners = new Set<() => void>();
   /** How many viewers show each session's screen. */
   private readonly viewers = new Map<string, number>();
   /** How many of each session's pages are being opened. */
@@ -147,6 +188,8 @@ export class ChromeService extends Service {
   /** Chrome starts once this settles: a copy of a profile taking the place of dsh-chrome's. */
   private profileChange: Promise<void> = Promise.resolve();
   private copying = false;
+  private copyState: ProfileCopyState | undefined;
+  private readonly copyListeners = new Set<(state: ProfileCopyState) => void>();
   /** Stops a profile copy when the plugin stops. */
   private readonly copyAbort = new AbortController();
   /** Set once the plugin stops: nothing may start after its closing. */
@@ -184,6 +227,7 @@ export class ChromeService extends Service {
     ];
     for (const warning of warnings) this.log.warn(`dsh-chrome: ${warning}`);
     await removeUnfinishedCopy(profileDir);
+    this.startPixelRatio ??= await readStartPixelRatio(this.startPixelRatioPath);
     this.ctx.effect(
       () => this.pages.onChange(() => this.reviewScreens()),
       'dsh-chrome: session screens',
@@ -216,19 +260,52 @@ export class ChromeService extends Service {
     return () => this.stateListeners.delete(listener);
   }
 
-  /** How many device pixels a CSS pixel takes in Chrome: the running one's, else the setting. */
+  /** How many device pixels a CSS pixel takes in Chrome: the running one's, else the setting's. */
   get deviceScaleFactor(): number {
-    return (this.runningChrome?.settings ?? this.config.settings()).deviceScaleFactor;
+    return (
+      this.runningChrome?.deviceScaleFactor ??
+      scaleOf(this.config.settings().deviceScaleFactor, this.startPixelRatio)
+    );
   }
 
-  /** The settings changed: the sidebar says so while Chrome runs with the earlier ones. */
-  private settingsChanged(): void {
+  /**
+   * A viewer on a display of this pixel ratio asks for Chrome, its windows or pages: an `auto`
+   * scale starts Chrome at it. A Chrome that runs keeps its scale until it starts again.
+   */
+  setStartPixelRatio(pixelRatio: number): void {
+    if (!Number.isFinite(pixelRatio) || pixelRatio <= 0 || pixelRatio === this.startPixelRatio) {
+      return;
+    }
+    this.startPixelRatio = pixelRatio;
+    this.startPixelRatioWrites = this.startPixelRatioWrites
+      .then(() => writeStartPixelRatio(this.startPixelRatioPath, pixelRatio))
+      .catch((error: unknown) =>
+        this.log.warn(`dsh-chrome: could not keep the display's pixel ratio: ${String(error)}`),
+      );
+  }
+
+  private get startPixelRatioPath(): string {
+    return join(this.config.dataDir, 'start-pixel-ratio.json');
+  }
+
+  /**
+   * Why Chrome would start otherwise now than it runs, for a viewer on a display of this pixel
+   * ratio, or of one not known yet; nothing while it would not, or does not run.
+   */
+  restartReason(pixelRatio: number | undefined): RestartReason | undefined {
     const running = this.runningChrome;
-    if (running === undefined || this.current.kind !== 'running') return;
-    this.setState({
-      ...this.current,
-      settingsChanged: !sameSettings(running.settings, this.config.settings()),
-    });
+    if (running === undefined || this.current.kind !== 'running') return undefined;
+    return restartReasonFor(running, this.config.settings(), pixelRatio, this.startPixelRatio);
+  }
+
+  /** Listens to changes of the settings Chrome takes when it starts. */
+  onSettingsChange(listener: () => void): () => void {
+    this.settingsListeners.add(listener);
+    return () => this.settingsListeners.delete(listener);
+  }
+
+  private settingsChanged(): void {
+    for (const listener of [...this.settingsListeners]) listener();
   }
 
   /** The running Chrome, started now if it is not. */
@@ -236,6 +313,22 @@ export class ChromeService extends Service {
     if (this.stopped) return Promise.reject(new Error('dsh-chrome is stopping'));
     this.chromeStart ??= this.profileChange.then(() => this.startChrome());
     return untilAborted(this.chromeStart, options.signal);
+  }
+
+  /** Where the last copy of a profile asked for stands, if one was. */
+  get profileCopy(): ProfileCopyState | undefined {
+    return this.copyState;
+  }
+
+  /** Listens to changes of {@link profileCopy}. */
+  onProfileCopyChange(listener: (state: ProfileCopyState) => void): () => void {
+    this.copyListeners.add(listener);
+    return () => this.copyListeners.delete(listener);
+  }
+
+  private setCopyState(state: ProfileCopyState): void {
+    this.copyState = state;
+    for (const listener of [...this.copyListeners]) listener(state);
   }
 
   /** The profiles of the user's own Chrome, to copy one into dsh-chrome's. */
@@ -252,13 +345,42 @@ export class ChromeService extends Service {
   async copyUserChromeProfile(directory: string): Promise<void> {
     if (this.copying) throw new Error('a profile is being copied already');
     this.copying = true;
+    let reported = 0;
+    const startedAt = Date.now();
     try {
+      this.setCopyState({
+        kind: 'copying-files',
+        directory,
+        startedAt,
+        copiedBytes: 0,
+        totalBytes: 0,
+      });
       const staged = await stageProfileCopy({
         userChromeDir: this.config.userChromeDir,
         directory,
         profileDir: this.config.profileDir,
         signal: this.copyAbort.signal,
+        onProgress: (progress) => {
+          if (progress.step === 'databases') {
+            const { checked, total } = progress;
+            this.setCopyState({ kind: 'checking-databases', directory, startedAt, checked, total });
+            return;
+          }
+          // Each file says so: viewers hear of it a few times a second, and of the last count.
+          const { copiedBytes, totalBytes, final } = progress;
+          const now = Date.now();
+          if (!final && copiedBytes > 0 && now - reported < COPY_PROGRESS_INTERVAL_MS) return;
+          reported = now;
+          this.setCopyState({
+            kind: 'copying-files',
+            directory,
+            startedAt,
+            copiedBytes,
+            totalBytes,
+          });
+        },
       });
+      this.setCopyState({ kind: 'replacing', directory, startedAt });
       const change = (async () => {
         await this.stopChrome();
         // A plugin that stops meanwhile leaves the profile to the one that starts after it.
@@ -275,14 +397,26 @@ export class ChromeService extends Service {
       this.log.info(
         `dsh-chrome: dsh-chrome's profile is now a copy of your Chrome's "${directory}"`,
       );
+      this.setCopyState({ kind: 'copied', directory, startedAt });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.setCopyState({ kind: 'failed', directory, startedAt, message });
+      throw error;
     } finally {
       this.copying = false;
     }
   }
 
   /** Closes Chrome, and starts it again with the settings as they are now. */
-  async restartChrome(): Promise<void> {
+  /**
+   * Closes Chrome and starts it again, with the settings as they are: at the pixel ratio of the
+   * display it is restarted from, for an `auto` scale, when one is given. The ratio is taken
+   * right before Chrome starts, so that another viewer's request meanwhile does not take its
+   * place.
+   */
+  async restartChrome(pixelRatio?: number): Promise<void> {
     await this.stopChrome();
+    if (pixelRatio !== undefined) this.setStartPixelRatio(pixelRatio);
     await this.chrome();
   }
 
@@ -477,6 +611,7 @@ export class ChromeService extends Service {
     this.setState({ kind: 'starting' });
     try {
       const settings = this.config.settings();
+      const deviceScaleFactor = scaleOf(settings.deviceScaleFactor, this.startPixelRatio);
       const display = await this.screen();
       const { profileDir } = this.config;
       // Again, for the native apps as the settings say now.
@@ -490,7 +625,7 @@ export class ChromeService extends Service {
         profileDir,
         display: display.name,
         authorityPath: display.authorityPath,
-        deviceScaleFactor: settings.deviceScaleFactor,
+        deviceScaleFactor,
         announceAutomation: settings.announceAutomation,
         webgl: settings.webgl,
         log: this.log,
@@ -503,15 +638,12 @@ export class ChromeService extends Service {
         await chrome.close();
         throw error;
       }
-      this.runningChrome = { process: chrome, settings };
+      this.runningChrome = { process: chrome, settings, deviceScaleFactor };
       void chrome.exited.then(() => this.chromeExited(chrome));
       this.log.info(`dsh-chrome: ${chrome.version} started on display ${display.name}`);
-      this.setState({
-        kind: 'running',
-        version: chrome.version,
-        // The settings may have changed while Chrome started.
-        settingsChanged: !sameSettings(settings, this.config.settings()),
-      });
+      // The screen's monitors that no viewer sizes (the parking one) take Chrome's scale.
+      this.screens.relayout();
+      this.setState({ kind: 'running', version: chrome.version });
       return chrome;
     } catch (error) {
       this.chromeStart = undefined;
@@ -742,9 +874,49 @@ export class ChromeService extends Service {
   }
 }
 
-function sameSettings(a: ChromeSettings, b: ChromeSettings): boolean {
-  const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof ChromeSettings>;
-  return [...keys].every((key) => a[key] === b[key]);
+/** The device scale factor Chrome takes, from 1 to 4 as the setting allows, in quarters. */
+export const DEVICE_SCALE_FACTORS = { min: 1, max: 4, step: 0.25 } as const;
+
+/**
+ * The device scale factor Chrome starts at: the setting's, or for `auto` the pixel ratio of a
+ * viewer's display, so that the screen has the pixels that display shows, and no more. Without
+ * one, `auto` is 1, which most displays are.
+ */
+export function scaleOf(setting: number | 'auto', pixelRatio: number | undefined): number {
+  if (setting !== 'auto') return setting;
+  const { min, max, step } = DEVICE_SCALE_FACTORS;
+  const ratio = Math.round((pixelRatio ?? 1) / step) * step;
+  return Math.min(max, Math.max(min, ratio));
+}
+
+/**
+ * Why a Chrome that runs as it started would start otherwise now, for a viewer, if it would:
+ * the settings other than the scale changed, or the scale it would take differs. A scale is
+ * compared as Chrome takes it, so `auto` and the number it resolves to are the same. With the
+ * setting as Chrome started with it, the scale differs only for another display than Chrome
+ * draws for, which only a viewer that said which display it is on is told of.
+ * @param viewerPixelRatio - the pixel ratio of the viewer's display, once it said.
+ * @param startPixelRatio - the ratio Chrome would start at for any other viewer.
+ */
+export function restartReasonFor(
+  running: { readonly settings: ChromeSettings; readonly deviceScaleFactor: number },
+  settings: ChromeSettings,
+  viewerPixelRatio: number | undefined,
+  startPixelRatio: number | undefined,
+): RestartReason | undefined {
+  const { deviceScaleFactor: scale, ...others } = settings;
+  const { deviceScaleFactor: runningScale, ...runningOthers } = running.settings;
+  if (!sameValues(others, runningOthers)) return 'settings';
+  const pixelRatio = viewerPixelRatio ?? startPixelRatio;
+  if (scaleOf(scale, pixelRatio) === running.deviceScaleFactor) return undefined;
+  if (scale !== runningScale) return 'settings';
+  return viewerPixelRatio === undefined ? undefined : 'display';
+}
+
+/** Whether two records hold the same values, key by key. */
+function sameValues(a: object, b: object): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  return [...keys].every((key) => Reflect.get(a, key) === Reflect.get(b, key));
 }
 
 /** The promise, or its signal's reason once it aborts: the caller stops waiting, nothing else. */

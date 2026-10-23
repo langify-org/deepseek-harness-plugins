@@ -44,8 +44,16 @@ export type HelpAnswer = 'done' | 'declined';
 export type ViewerRequest =
   /** Names the viewer's DSH session; the host answers with the state of Chrome and the screen. */
   | { readonly type: 'watch'; readonly sessionId: string }
-  /** The size of the viewer's screen area, in CSS pixels; sent on every change. */
-  | { readonly type: 'viewport'; readonly width: number; readonly height: number }
+  /**
+   * The size of the viewer's screen area, in CSS pixels, and the pixel ratio of the display it
+   * is on; sent on every change, and before `watch` once known.
+   */
+  | {
+      readonly type: 'viewport';
+      readonly width: number;
+      readonly height: number;
+      readonly devicePixelRatio: number;
+    }
   /** The user works in this viewer: the screen is laid out for it. */
   | { readonly type: 'claim-screen' }
   /** Opens a page for the session, in front. */
@@ -94,6 +102,29 @@ export interface UserChromeProfileState {
   readonly account: string | null;
 }
 
+/**
+ * Where a copy of a profile of the user's Chrome stands. `startedAt`, the host's time in
+ * milliseconds since the epoch, tells one copy from another.
+ */
+export type ProfileCopyStatus = { readonly directory: string; readonly startedAt: number } & (
+  | {
+      readonly kind: 'copying-files';
+      /** The bytes of the files begun so far, and of all the copy takes. */
+      readonly copiedBytes: number;
+      readonly totalBytes: number;
+    }
+  | {
+      readonly kind: 'checking-databases';
+      /** How many of the databases copied are checked whole, of all. */
+      readonly checked: number;
+      readonly total: number;
+    }
+  /** Chrome closes, and the copy takes the profile's place. */
+  | { readonly kind: 'replacing' }
+  | { readonly kind: 'copied' }
+  | { readonly kind: 'failed'; readonly message: string }
+);
+
 /** Whether Chrome runs. */
 export type ChromeStatus =
   | { readonly kind: 'stopped' }
@@ -101,8 +132,12 @@ export type ChromeStatus =
   | {
       readonly kind: 'running';
       readonly version: string;
-      /** The settings changed since Chrome started: they apply once it starts again. */
-      readonly settingsChanged: boolean;
+      /**
+       * Why Chrome would start otherwise now, for this viewer, if it would: the settings changed
+       * since it started, or an `auto` scale would draw for this viewer's display at another
+       * pixel ratio. Either applies once Chrome starts again.
+       */
+      readonly restartFor: 'settings' | 'display' | null;
     }
   | { readonly kind: 'failed'; readonly message: string };
 
@@ -131,8 +166,12 @@ export type ViewerEvent =
       readonly profiles: readonly UserChromeProfileState[];
       readonly running: boolean;
     }
-  /** dsh-chrome's profile is now a copy of the user's: the answer to `copy-profile`. */
-  | { readonly type: 'profile-copied'; readonly directory: string }
+  /**
+   * Where the last copy of a profile since dsh-chrome started stands, under way or ended, or
+   * `null` for none: to a viewer that asked for the user's profiles or for a copy, at once, and
+   * on every change.
+   */
+  | { readonly type: 'profile-copy'; readonly copy: ProfileCopyStatus | null }
   /** The session's open request for help, or `null` when there is none. */
   | { readonly type: 'help'; readonly request: HelpRequestState | null }
   | {
@@ -174,9 +213,9 @@ export function parseViewerRequest(value: unknown): ViewerRequest | undefined {
       return isString(sessionId) ? { type: 'watch', sessionId } : undefined;
     }
     case 'viewport': {
-      const { width, height } = value;
-      return isPositive(width) && isPositive(height)
-        ? { type: 'viewport', width, height }
+      const { width, height, devicePixelRatio } = value;
+      return isPositive(width) && isPositive(height) && isPositive(devicePixelRatio)
+        ? { type: 'viewport', width, height, devicePixelRatio }
         : undefined;
     }
     case 'claim-screen':
@@ -236,9 +275,10 @@ export function parseViewerEvent(value: unknown): ViewerEvent | undefined {
         ? { type: 'user-chrome', profiles: parsed as UserChromeProfileState[], running }
         : undefined;
     }
-    case 'profile-copied': {
-      const { directory } = value;
-      return isString(directory) ? { type: 'profile-copied', directory } : undefined;
+    case 'profile-copy': {
+      if (value['copy'] === null) return { type: 'profile-copy', copy: null };
+      const copy = parseCopyStatus(value['copy']);
+      return copy === undefined ? undefined : { type: 'profile-copy', copy };
     }
     case 'help': {
       const { request } = value;
@@ -276,9 +316,10 @@ function parseChromeStatus(value: unknown): ChromeStatus | undefined {
     case 'starting':
       return { kind: 'starting' };
     case 'running': {
-      const { version, settingsChanged } = value;
-      return isString(version) && typeof settingsChanged === 'boolean'
-        ? { kind: 'running', version, settingsChanged }
+      const { version, restartFor } = value;
+      return isString(version) &&
+        (restartFor === null || restartFor === 'settings' || restartFor === 'display')
+        ? { kind: 'running', version, restartFor }
         : undefined;
     }
     case 'failed': {
@@ -311,6 +352,35 @@ function safeJson(text: string): unknown {
     return JSON.parse(text);
   } catch {
     return undefined;
+  }
+}
+
+function parseCopyStatus(value: unknown): ProfileCopyStatus | undefined {
+  if (!isRecord(value)) return undefined;
+  const { directory, startedAt } = value;
+  if (!isString(directory) || !isCount(startedAt)) return undefined;
+  switch (value['kind']) {
+    case 'copying-files': {
+      const { copiedBytes, totalBytes } = value;
+      return isCount(copiedBytes) && isCount(totalBytes)
+        ? { kind: 'copying-files', directory, startedAt, copiedBytes, totalBytes }
+        : undefined;
+    }
+    case 'checking-databases': {
+      const { checked, total } = value;
+      return isCount(checked) && isCount(total) && checked <= total
+        ? { kind: 'checking-databases', directory, startedAt, checked, total }
+        : undefined;
+    }
+    case 'replacing':
+    case 'copied':
+      return { kind: value['kind'], directory, startedAt };
+    case 'failed':
+      return isString(value['message'])
+        ? { kind: 'failed', directory, startedAt, message: value['message'] }
+        : undefined;
+    default:
+      return undefined;
   }
 }
 

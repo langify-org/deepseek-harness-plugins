@@ -110,6 +110,8 @@ before(async () => {
   await root.plugin(VisionModels);
   await root.plugin(await import(pathToFileURL(join(distDir, 'host', 'index.js')).href), {
     executable: chromeExecutable,
+    // Twice the pixels, as on a high-density display: what scaling must get right.
+    deviceScaleFactor: 2,
     xvncExecutable,
     windowManagerExecutable,
     profileDir: join(workDir, 'chrome-profile'),
@@ -176,6 +178,14 @@ test('the agent opens a page, reads it, and operates it by ref', { skip }, async
   assert.equal(await evaluate<string>(`document.getElementById('field').value`), 'hello');
   await run('chrome_press', { keys: 'Backspace' });
   assert.equal(await evaluate<string>(`document.getElementById('field').value`), 'hell');
+  // Typing again replaces the field's text, unless told to add to it; and the key after it is
+  // the key, not the select-all that replacing began with.
+  await run('chrome_type', { ref: fieldRef, text: 'world' });
+  assert.equal(await evaluate<string>(`document.getElementById('field').value`), 'world');
+  await run('chrome_press', { keys: 'Backspace' });
+  assert.equal(await evaluate<string>(`document.getElementById('field').value`), 'worl');
+  await run('chrome_type', { ref: fieldRef, text: 'd!', replace: false });
+  assert.equal(await evaluate<string>(`document.getElementById('field').value`), 'world!');
   await run('chrome_click', { ref: buttonRef });
   await waitFor(
     async () => (await evaluate<string>(`document.getElementById('go').textContent`)) === 'Clicked',

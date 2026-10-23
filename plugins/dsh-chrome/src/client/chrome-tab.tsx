@@ -165,7 +165,9 @@ function ChromeScreen({
           openSocket={openScreenSocket}
           region={snapshot.region}
           active={active}
-          onArea={(width, height) => session.setArea(width, height)}
+          onArea={(width, height, devicePixelRatio) =>
+            session.setArea(width, height, devicePixelRatio)
+          }
           onInteract={() => session.claimScreen()}
           onStatus={(status) => setScreenConnected(status === 'connected')}
           onHandle={(handle) => {
@@ -261,11 +263,13 @@ function StateNotice({
       </p>
     );
   }
-  if (chrome?.kind === 'running' && chrome.settingsChanged) {
+  if (chrome?.kind === 'running' && chrome.restartFor !== null) {
     return (
       <p style={noticeStyle}>
-        Chrome takes the changed settings when it starts again; restarting closes its windows in
-        every session.{' '}
+        {chrome.restartFor === 'settings'
+          ? 'Chrome takes the changed settings when it starts again.'
+          : 'Chrome draws for a display of another sharpness: restarted from here, it draws for this one.'}{' '}
+        Restarting closes its windows in every session.{' '}
         <button type="button" style={linkButtonStyle} onClick={() => session.restartChrome()}>
           Restart Chrome
         </button>

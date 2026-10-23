@@ -2,11 +2,17 @@ import type { RawData, WebSocket } from 'ws';
 import {
   type ChromeStatus,
   decodeViewerRequest,
+  type ProfileCopyStatus,
   type ScreenRegion,
   type ViewerEvent,
   type ViewerRequest,
 } from '../../protocol/viewer.ts';
-import type { ChromeService, ChromeState } from '../chrome/chrome-service.ts';
+import type {
+  ChromeService,
+  ChromeState,
+  ProfileCopyState,
+  RestartReason,
+} from '../chrome/chrome-service.ts';
 import { normalizeAddress } from '../page-operations/address.ts';
 import { pageTextMarkdown, readPageText } from '../page-operations/text.ts';
 import type { Log } from '../platform/log.ts';
@@ -39,6 +45,11 @@ export class ViewerConnection implements ScreenViewer {
   #ownership: ScreenOwnership | undefined;
   #owner = false;
   #area: ViewerArea | undefined;
+  /** The pixel ratio of the display the viewer is on, once it said. */
+  #pixelRatio: number | undefined;
+  #followsProfileCopy = false;
+  /** The Chrome status last sent, as JSON, so that only changes are sent. */
+  #sentChrome: string | undefined;
   /** The screen event last sent, as JSON, so that only changes are sent. */
   #sentScreen: string | undefined;
   /** Whether the viewer last heard that the session has a window. */
@@ -87,6 +98,41 @@ export class ViewerConnection implements ScreenViewer {
     });
   }
 
+  /**
+   * The user asks, in this viewer, for Chrome, its windows or pages: an `auto` scale starts
+   * Chrome at the pixel ratio of this viewer's display.
+   */
+  #startHere(): void {
+    if (this.#pixelRatio !== undefined) this.#deps.chrome.setStartPixelRatio(this.#pixelRatio);
+  }
+
+  /** Tells this viewer whether Chrome runs, and why it would restart for this viewer's display. */
+  #sendChrome(): void {
+    const { chrome } = this.#deps;
+    const status = statusOf(chrome.state, chrome.restartReason(this.#pixelRatio));
+    const json = JSON.stringify(status);
+    if (json === this.#sentChrome) return;
+    this.#sentChrome = json;
+    this.#send({ type: 'chrome', status });
+  }
+
+  /**
+   * Tells this viewer, a settings page, where the last copy of a profile stands, now and on
+   * every change: a page that missed how a copy went, or was not open then, learns it.
+   */
+  #followProfileCopy(): void {
+    if (this.#followsProfileCopy) return;
+    this.#followsProfileCopy = true;
+    const { chrome } = this.#deps;
+    this.#subscriptions.push(
+      chrome.onProfileCopyChange((copy) =>
+        this.#send({ type: 'profile-copy', copy: copyStatusOf(copy) }),
+      ),
+    );
+    const copy = chrome.profileCopy;
+    this.#send({ type: 'profile-copy', copy: copy === undefined ? null : copyStatusOf(copy) });
+  }
+
   async #handle(request: ViewerRequest): Promise<void> {
     const { chrome } = this.#deps;
     switch (request.type) {
@@ -95,18 +141,23 @@ export class ViewerConnection implements ScreenViewer {
         return;
       case 'viewport':
         this.#area = { width: request.width, height: request.height };
+        this.#pixelRatio = request.devicePixelRatio;
         this.#ownership?.areaChanged(this);
+        // Whether Chrome draws for this display may have changed with it.
+        if (this.#sessionId !== undefined) this.#sendChrome();
         return;
       case 'claim-screen':
         this.#ownership?.claim(this);
         return;
       case 'open-window':
+        this.#startHere();
         await chrome.openWindow(this.#requireSession());
         return;
       case 'restart-chrome':
-        await chrome.restartChrome();
+        await chrome.restartChrome(this.#pixelRatio);
         return;
       case 'user-chrome': {
+        this.#followProfileCopy();
         const { profiles, running } = await chrome.userChrome();
         this.#send({
           type: 'user-chrome',
@@ -120,12 +171,15 @@ export class ViewerConnection implements ScreenViewer {
         return;
       }
       case 'copy-profile':
+        this.#followProfileCopy();
+        // How it goes, and ends, comes as `profile-copy`; the request fails too when the copy
+        // does, or does not begin.
         await chrome.copyUserChromeProfile(request.directory);
-        this.#send({ type: 'profile-copied', directory: request.directory });
         return;
       case 'open': {
         const url = normalizeAddress(request.url);
         if (url === undefined) throw new Error(`"${request.url}" is not a web address`);
+        this.#startHere();
         await chrome.openPage(this.#requireSession(), url, { openedBy: 'user' });
         return;
       }
@@ -161,7 +215,8 @@ export class ViewerConnection implements ScreenViewer {
     this.#sessionId = sessionId;
     this.#subscriptions.push(
       hide,
-      chrome.onStateChange((state) => this.#send({ type: 'chrome', status: statusOf(state) })),
+      chrome.onStateChange(() => this.#sendChrome()),
+      chrome.onSettingsChange(() => this.#sendChrome()),
       chrome.helpRequests.onChange(() => this.#sendHelp()),
       chrome.pages.onChange(() => {
         this.#sendHelp();
@@ -169,7 +224,7 @@ export class ViewerConnection implements ScreenViewer {
       }),
       chrome.screens.onChange(() => this.#sendScreen()),
     );
-    this.#send({ type: 'chrome', status: statusOf(chrome.state) });
+    this.#sendChrome();
     this.#sendHelp();
     this.#sendWindows();
     this.#ownership = ownershipOf(sessionId);
@@ -242,13 +297,40 @@ export class ViewerConnection implements ScreenViewer {
   }
 }
 
-function statusOf(state: ChromeState): ChromeStatus {
+function statusOf(state: ChromeState, restartFor: RestartReason | undefined): ChromeStatus {
   switch (state.kind) {
     case 'running':
-      return { kind: 'running', version: state.version, settingsChanged: state.settingsChanged };
+      return { kind: 'running', version: state.version, restartFor: restartFor ?? null };
     case 'failed':
       return { kind: 'failed', message: state.message };
     default:
       return { kind: state.kind };
+  }
+}
+
+/** A copy's state, as the protocol tells it. */
+function copyStatusOf(copy: ProfileCopyState): ProfileCopyStatus {
+  const { directory, startedAt } = copy;
+  switch (copy.kind) {
+    case 'copying-files':
+      return {
+        kind: 'copying-files',
+        directory,
+        startedAt,
+        copiedBytes: copy.copiedBytes,
+        totalBytes: copy.totalBytes,
+      };
+    case 'checking-databases':
+      return {
+        kind: 'checking-databases',
+        directory,
+        startedAt,
+        checked: copy.checked,
+        total: copy.total,
+      };
+    case 'failed':
+      return { kind: 'failed', directory, startedAt, message: copy.message };
+    default:
+      return { kind: copy.kind, directory, startedAt };
   }
 }

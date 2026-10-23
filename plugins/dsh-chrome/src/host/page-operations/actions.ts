@@ -86,20 +86,11 @@ export async function type(page: ChromePage, text: string, options: TypeOptions)
       });
   }
   if (options.replace) {
-    // The editing command selects all text in the focused field, whatever the platform.
-    await page.send('Input.dispatchKeyEvent', {
-      type: 'rawKeyDown',
-      key: 'a',
-      code: 'KeyA',
-      windowsVirtualKeyCode: 65,
-      commands: ['selectAll'],
-    });
-    await page.send('Input.dispatchKeyEvent', {
-      type: 'keyUp',
-      key: 'a',
-      code: 'KeyA',
-      windowsVirtualKeyCode: 65,
-    });
+    // Ctrl+A selects the focused field's text, in whichever frame it is, as Chrome on Linux
+    // takes it. An editing command sent with a key instead (`commands: ['selectAll']`)
+    // can reach the page after that key, and then acts on the next one: the agent's
+    // Backspace or Enter selected all instead.
+    await press(page, parseKeyCombo('Control+A'));
     if (text === '') await press(page, parseKeyCombo('Backspace'));
   }
   if (text !== '') await page.send('Input.insertText', { text });

@@ -3,6 +3,7 @@ import { constants } from 'node:fs';
 import {
   copyFile,
   cp,
+  lstat,
   mkdir,
   open,
   readdir,
@@ -123,6 +124,20 @@ export interface StagedProfile {
   discard(): Promise<void>;
 }
 
+/**
+ * How far a copy has come: while it copies files, the bytes of those it began and of all it
+ * takes, `final` once they are all copied; then how many of the databases it copied it has
+ * checked.
+ */
+export type ProfileCopyProgress =
+  | {
+      readonly step: 'files';
+      readonly copiedBytes: number;
+      readonly totalBytes: number;
+      readonly final: boolean;
+    }
+  | { readonly step: 'databases'; readonly checked: number; readonly total: number };
+
 export interface ProfileCopyOptions {
   readonly userChromeDir: string;
   /** The profile to copy: one {@link readUserChrome} lists. */
@@ -131,6 +146,8 @@ export interface ProfileCopyOptions {
   readonly profileDir: string;
   /** Stops the copy, which then leaves nothing behind. */
   readonly signal?: AbortSignal | undefined;
+  /** Hears how far the copy has come, as often as each file it copies. */
+  readonly onProgress?: ((progress: ProfileCopyProgress) => void) | undefined;
 }
 
 /**
@@ -148,23 +165,36 @@ export async function stageProfileCopy(options: ProfileCopyOptions): Promise<Sta
   if (!profiles.some((profile) => profile.directory === options.directory)) {
     throw new Error(`your Chrome has no profile "${options.directory}"`);
   }
-  const { signal } = options;
+  const { signal, onProgress } = options;
   signal?.throwIfAborted();
   const source = join(options.userChromeDir, options.directory);
   const staging = join(options.profileDir, STAGING_PREFIX + randomBytes(6).toString('hex'));
   await mkdir(options.profileDir, { recursive: true, mode: 0o700 });
   try {
+    const totalBytes = await bytesToCopy(source, signal);
+    let copiedBytes = 0;
+    onProgress?.({ step: 'files', copiedBytes, totalBytes, final: false });
     await cp(source, staging, {
       recursive: true,
       preserveTimestamps: true,
       verbatimSymlinks: true,
-      // Called for each file before it is copied: an aborted copy stops at the next.
-      filter: (path) => {
+      // Called for each file before it is copied: an aborted copy stops at the next, and a file
+      // counts as copied once begun.
+      filter: async (path) => {
         signal?.throwIfAborted();
-        return !leftOut(relative(source, path));
+        if (leftOut(relative(source, path))) return false;
+        const info = await lstat(path).catch(() => undefined);
+        if (info?.isFile()) {
+          copiedBytes += info.size;
+          onProgress?.({ step: 'files', copiedBytes, totalBytes, final: false });
+        }
+        return true;
       },
     });
-    await copyDatabasesWhole(source, staging, signal);
+    onProgress?.({ step: 'files', copiedBytes, totalBytes, final: true });
+    await copyDatabasesWhole(source, staging, signal, (checked, total) =>
+      onProgress?.({ step: 'databases', checked, total }),
+    );
     await makeDeviceOfItsOwn(join(staging, 'Preferences'));
     signal?.throwIfAborted();
   } catch (error) {
@@ -204,12 +234,18 @@ async function copyDatabasesWhole(
   source: string,
   copy: string,
   signal: AbortSignal | undefined,
+  onChecked: (checked: number, total: number) => void,
 ): Promise<void> {
   const sqlite = await import('node:sqlite').catch(() => undefined);
   // Without SQLite (an older Node), the copy stays as it is.
   if (sqlite === undefined) return;
+  const databases: string[] = [];
   for (const path of await files(copy)) {
-    if (!(await isSqlite(path))) continue;
+    signal?.throwIfAborted();
+    if (await isSqlite(path)) databases.push(path);
+  }
+  onChecked(0, databases.length);
+  for (const [index, path] of databases.entries()) {
     const name = relative(copy, path);
     for (let attempt = 1; ; attempt += 1) {
       signal?.throwIfAborted();
@@ -229,6 +265,7 @@ async function copyDatabasesWhole(
         );
       }
     }
+    onChecked(index + 1, databases.length);
   }
 }
 
@@ -292,6 +329,23 @@ async function chromeRuns(userChromeDir: string): Promise<boolean> {
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === 'EPERM';
   }
+}
+
+/** The bytes of the files a copy of the profile takes: all but what it leaves out. */
+async function bytesToCopy(source: string, signal: AbortSignal | undefined): Promise<number> {
+  let total = 0;
+  const visit = async (directory: string): Promise<void> => {
+    const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      signal?.throwIfAborted();
+      const path = join(directory, entry.name);
+      if (leftOut(relative(source, path))) continue;
+      if (entry.isDirectory()) await visit(path);
+      else if (entry.isFile()) total += (await lstat(path).catch(() => undefined))?.size ?? 0;
+    }
+  };
+  await visit(source);
+  return total;
 }
 
 async function files(directory: string): Promise<string[]> {

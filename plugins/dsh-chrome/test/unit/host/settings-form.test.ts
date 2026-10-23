@@ -37,9 +37,15 @@ test('the form shows each volatile setting as the kind that suits it', () => {
   const byKey = new Map(fields.map((field) => [field.key, field]));
   assert.equal(byKey.get('executable')?.kind, 'text');
   const scale = byKey.get('deviceScaleFactor');
-  assert.equal(scale?.kind, 'number');
-  if (scale?.kind === 'number') {
-    assert.deepEqual([scale.min, scale.max, scale.step, scale.defaultValue], [1, 4, 0.25, 2]);
+  assert.equal(scale?.kind, 'choice');
+  if (scale?.kind === 'choice') {
+    assert.deepEqual(
+      scale.options.map((option) => option.value),
+      ['auto'],
+    );
+    assert.equal(scale.defaultValue, 'auto');
+    assert.deepEqual([scale.number?.min, scale.number?.max, scale.number?.step], [1, 4, 0.25]);
+    assert.ok((scale.number?.description ?? '') !== '');
   }
   assert.equal(byKey.get('announceAutomation')?.kind, 'boolean');
   const webgl = byKey.get('webgl');
@@ -61,6 +67,6 @@ test('every field of the full schema carries a description, and the volatile one
   const volatile = settingFields(volatileOnly()).map((field) => field.key);
   assert.deepEqual(
     fields.filter((field) => volatile.includes(field.key)).map((field) => field.kind),
-    ['text', 'number', 'boolean', 'choice', 'boolean'],
+    ['text', 'choice', 'boolean', 'choice', 'boolean'],
   );
 });

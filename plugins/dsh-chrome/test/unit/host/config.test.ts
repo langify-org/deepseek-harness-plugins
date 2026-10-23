@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { Config } from '../../../src/host/index.ts';
 
-test('by default, runs Chrome on Xvnc under Openbox, at twice the pixels, in the DSH home', () => {
+test("by default, runs Chrome on Xvnc under Openbox, at the display's pixel ratio, in the DSH home", () => {
   // What DSH passes when the user sets nothing.
   const config = Config({});
   const home = process.env['DSH_HOME'] ?? '';
@@ -22,7 +22,7 @@ test('by default, runs Chrome on Xvnc under Openbox, at twice the pixels, in the
       executable: 'google-chrome-stable',
       xvncExecutable: 'Xvnc',
       windowManagerExecutable: 'openbox',
-      deviceScaleFactor: 2,
+      deviceScaleFactor: 'auto',
       webgl: 'gpu',
       shareNativeHosts: true,
       profileDir: join(home, 'dsh-chrome', 'chrome-profile'),

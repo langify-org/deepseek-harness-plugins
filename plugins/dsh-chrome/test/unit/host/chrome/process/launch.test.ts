@@ -48,10 +48,11 @@ test('opens no window by itself, since each session opens its own', () => {
   );
 });
 
-test('gives each WebGL mode its arguments', () => {
+test('gives each WebGL mode its arguments, compositing on the CPU whenever WebGL may use the GPU', () => {
   const expected = {
-    gpu: ['--use-angle=vulkan'],
-    'gpu-or-cpu': ['--use-angle=vulkan', '--ignore-gpu-blocklist'],
+    // Compositing on the GPU would read every frame back from it for the screen.
+    gpu: ['--use-angle=vulkan', '--disable-gpu-compositing'],
+    'gpu-or-cpu': ['--use-angle=vulkan', '--ignore-gpu-blocklist', '--disable-gpu-compositing'],
     off: [],
   };
   assert.deepEqual([...WEBGL_MODES].sort(), Object.keys(expected).sort());

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, beforeEach, test } from 'node:test';
 import {
+  type ProfileCopyProgress,
   REPLACED_PROFILE_DIRECTORY,
   readUserChrome,
   removeUnfinishedCopy,
@@ -347,4 +348,63 @@ test('an aborted copy stops, and leaves no copy behind', async () => {
     /the plugin stops/,
   );
   assert.equal(anyStagedCopy(), false);
+});
+
+test('says how many bytes it has copied of those it takes, caches left out, then how many databases it checked', async () => {
+  await writeLocalState({ Default: { name: 'Me' } });
+  const profile = await makeUserProfile();
+  // What the copy takes: every file but those it leaves out, by size.
+  const taken = [
+    'Cookies',
+    'Extensions/abc/1.0/manifest.json',
+    'Local Storage/leveldb/000003.log',
+    'Service Worker/Database/kept',
+  ];
+  let expected = 0;
+  for (const path of taken) expected += (await readFile(join(profile, ...path.split('/')))).length;
+  const reports: ProfileCopyProgress[] = [];
+  await stageProfileCopy({
+    userChromeDir: userDir,
+    directory: 'Default',
+    profileDir: ownDir,
+    onProgress: (progress) => reports.push(progress),
+  });
+  const files = reports.filter((report) => report.step === 'files');
+  assert.ok(files.length >= 2, 'a report before the files and as they go');
+  assert.ok(files.every((report) => report.totalBytes === files[0]?.totalBytes));
+  assert.ok((files[0]?.totalBytes ?? 0) >= expected);
+  assert.equal(files[0]?.copiedBytes, 0);
+  // The last count comes once all the files are copied, and says so.
+  assert.equal(files.at(-1)?.copiedBytes, files.at(-1)?.totalBytes);
+  assert.deepEqual(
+    files.map((report) => report.final),
+    [...files.slice(1).map(() => false), true],
+  );
+  for (let index = 1; index < files.length; index += 1) {
+    assert.ok((files[index]?.copiedBytes ?? 0) >= (files[index - 1]?.copiedBytes ?? 0));
+  }
+  // No database in this profile: the step says so, and ends at once.
+  assert.deepEqual(reports.at(-1), { step: 'databases', checked: 0, total: 0 });
+});
+
+test('counts the databases it checks, one after another', async () => {
+  await writeLocalState({ Default: { name: 'Me' } });
+  const profile = join(userDir, 'Default');
+  await mkdir(profile);
+  for (const name of ['History', 'Cookies', 'Web Data']) {
+    const database = new DatabaseSync(join(profile, name));
+    database.exec('CREATE TABLE t (x INTEGER); INSERT INTO t VALUES (1);');
+    database.close();
+  }
+  const reports: ProfileCopyProgress[] = [];
+  await stageProfileCopy({
+    userChromeDir: userDir,
+    directory: 'Default',
+    profileDir: ownDir,
+    onProgress: (progress) => reports.push(progress),
+  });
+  assert.deepEqual(
+    reports.filter((report) => report.step === 'databases'),
+    [0, 1, 2, 3].map((checked) => ({ step: 'databases', checked, total: 3 })),
+  );
 });

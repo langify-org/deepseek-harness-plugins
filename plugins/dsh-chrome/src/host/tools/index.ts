@@ -527,7 +527,10 @@ export function apply(ctx: Context): void {
         ref: { type: 'string', description: `${REF_DESCRIPTION} Defaults to the focused element.` },
         replace: {
           type: 'boolean',
-          description: "Replace the field's text instead of adding to it (default true).",
+          description:
+            "Replace the field's text instead of adding to it (default true): presses Ctrl+A " +
+            'first, which a web terminal or an editor may take as a shortcut of its own; pass ' +
+            'false there.',
         },
         submit: { type: 'boolean', description: 'Press Enter afterwards.' },
       },

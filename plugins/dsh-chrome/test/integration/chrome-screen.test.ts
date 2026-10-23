@@ -68,6 +68,8 @@ before(async () => {
     await import(pathToFileURL(join(distDir, 'host', 'index.js')).href),
     {
       executable: chromeExecutable,
+      // Twice the pixels, as on a high-density display: what scaling must get right.
+      deviceScaleFactor: 2,
       xvncExecutable,
       windowManagerExecutable,
       profileDir: join(workDir, 'chrome-profile'),
@@ -373,11 +375,17 @@ test('a change of the settings while Chrome runs says that Chrome takes it when 
   skip,
 }, async () => {
   const service = requireChrome();
-  assert.ok(service.state.kind === 'running' && !service.state.settingsChanged);
+  assert.equal(service.state.kind, 'running');
+  assert.equal(service.restartReason(2), undefined);
   changeSetting('deviceScaleFactor', 1.5);
-  assert.ok(service.state.kind === 'running' && service.state.settingsChanged);
+  assert.equal(service.restartReason(2), 'settings');
   changeSetting('deviceScaleFactor', 2);
-  assert.ok(service.state.kind === 'running' && !service.state.settingsChanged);
+  assert.equal(service.restartReason(2), undefined);
+  // `auto` on a display of the ratio Chrome draws at changes nothing; on another, it would.
+  changeSetting('deviceScaleFactor', 'auto');
+  assert.equal(service.restartReason(2), undefined);
+  assert.equal(service.restartReason(1), 'settings');
+  changeSetting('deviceScaleFactor', 2);
 });
 
 test('Chrome started again keeps the profile, and the sessions open their windows again', {

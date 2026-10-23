@@ -12,11 +12,13 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import packageJson from '../../package.json' with { type: 'json' };
 import type { ChromeService } from '../../src/host/chrome/chrome-service.ts';
 import type { ChromePage } from '../../src/host/chrome/pages/page.ts';
+import { VIEWER_PATH } from '../../src/protocol/viewer.ts';
 import { type DshHost, startDshHost } from '../support/dsh-host.ts';
 import {
   chromeExecutable,
@@ -62,8 +64,16 @@ before(async () => {
   });
   await new Promise<void>((resolve) => pageServer?.listen(0, '127.0.0.1', resolve));
   pageUrl = `http://127.0.0.1:${(pageServer.address() as AddressInfo).port}/`;
-  // A user's Chrome with one profile, as its Local State lists it.
-  await mkdir(join(workDir, 'user-chrome', 'Default'), { recursive: true });
+  // A user's Chrome with one profile, as its Local State lists it, with files and a database
+  // for a copy to count and check.
+  await mkdir(join(workDir, 'user-chrome', 'Default', 'Extensions'), { recursive: true });
+  await writeFile(
+    join(workDir, 'user-chrome', 'Default', 'Extensions', 'data.bin'),
+    Buffer.alloc(3_000_000, 1),
+  );
+  const history = new DatabaseSync(join(workDir, 'user-chrome', 'Default', 'History'));
+  history.exec("CREATE TABLE urls (url TEXT); INSERT INTO urls VALUES ('https://example.com/');");
+  history.close();
   await writeFile(
     join(workDir, 'user-chrome', 'Local State'),
     JSON.stringify({
@@ -84,7 +94,7 @@ before(async () => {
   });
   chrome = root.get('chrome');
   serveViewerHarness(root.webServer, packageJson.name, SESSION_ID, settingsFixture);
-  viewer = await openHeadlessTab(join(workDir, 'viewer'), `${host.origin}${HARNESS_PATH}/`);
+  viewer = await openDenseViewer(join(workDir, 'viewer'), `${host.origin}${HARNESS_PATH}/`);
 });
 
 after(async () => {
@@ -118,8 +128,9 @@ test("the tab starts Chrome, opens the session's window and shows its part of th
     "the session's window",
   );
   await waitFor(() => canvasShowsTheScreen(tab), 20_000, 'the screen in the tab');
-  // The canvas shows the session's part only, which has the tab's area in device pixels, at
-  // Chrome's two pixels per CSS pixel: not the whole screen, whatever other sessions add to it.
+  // The canvas shows the session's part only, which has the tab's area in device pixels, at the
+  // two pixels per CSS pixel of the tab's display: not the whole screen, whatever other
+  // sessions add to it.
   await waitFor(
     async () => {
       const { canvas, area } = await screenGeometry(tab);
@@ -134,6 +145,39 @@ test("the tab starts Chrome, opens the session's window and shows its part of th
   const { canvas } = await screenGeometry(tab);
   assert.deepEqual([canvas.width, canvas.height], [monitor.width, monitor.height]);
   assert.equal(await tab.evaluate('document.body.textContent.includes("Open a window")'), false);
+});
+
+test('Chrome draws at the pixel ratio of the display the tab is on, its scale being auto', {
+  skip,
+}, async () => {
+  const page = await requirePageInFront(SESSION_ID);
+  assert.equal(await evaluate<number>(page, 'devicePixelRatio'), 2);
+  // As the plugin runs when the user sets nothing.
+  assert.equal(requireChrome().deviceScaleFactor, 2);
+});
+
+test('a tab on a display of another pixel ratio offers to restart Chrome for it, and the others do not', {
+  skip,
+}, async () => {
+  const tab = requireViewer();
+  // The session's second tab, on a display of one pixel per CSS pixel.
+  const sparse = await openHeadlessTab(
+    join(workDir, 'viewer-sparse'),
+    `${requireHost().origin}${HARNESS_PATH}/`,
+  );
+  try {
+    await waitFor(
+      () => sparse.evaluate<boolean>(`document.body.textContent.includes('another sharpness')`),
+      20_000,
+      'the offer to restart Chrome for the display of ratio 1',
+    );
+    assert.equal(
+      await tab.evaluate<boolean>(`document.body.textContent.includes('Restart Chrome')`),
+      false,
+    );
+  } finally {
+    await sparse.close();
+  }
 });
 
 test('keys typed in the tab go to Chrome, which opens the page the user types', {
@@ -280,7 +324,7 @@ test("the page's text and the screen can be added to the message", { skip }, asy
 
 test("another session's tab shows that session's window, beside the first", { skip }, async () => {
   const tab = requireViewer();
-  otherViewer = await openHeadlessTab(
+  otherViewer = await openDenseViewer(
     join(workDir, 'viewer-other'),
     `${requireHost().origin}${HARNESS_PATH}/?session=${OTHER_SESSION_ID}`,
   );
@@ -425,6 +469,57 @@ test('the WebGL setting offers gpu, gpu-or-cpu and off', { skip }, async () => {
   );
 });
 
+test('the scale setting offers auto or a number; a number typed, then left for auto, is not set', {
+  skip,
+}, async () => {
+  const page = requireSettingsViewer();
+  const id = 'dsh-chrome-setting-deviceScaleFactor';
+  const radios = `[...document.querySelectorAll('input[type="radio"][name="${id}"]')]`;
+  assert.deepEqual(
+    await page.evaluate(
+      `${radios}.map((r) => [r.getAttribute('aria-label') ?? r.parentElement.querySelector('code').textContent, r.checked])`,
+    ),
+    [
+      ['auto', true],
+      ['A number', false],
+    ],
+  );
+  /** Clicks with the mouse, as the user does: the press comes before the field loses the focus. */
+  const clickOn = async (expression: string) => {
+    const { x, y } = await page.evaluate<{ x: number; y: number }>(
+      `(() => { const r = (${expression}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`,
+    );
+    await page.click(x, y);
+  };
+  const typeNumber = (text: string) =>
+    page.evaluate(`(() => {
+      const input = document.getElementById('${id}-number');
+      input.focus();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(text)});
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+  const mutations = () => page.evaluate<{ operations: unknown[] }[]>('window.__mutations');
+  const before = (await mutations()).length;
+
+  // A number typed, then auto chosen, on its text: the number is dropped, and nothing is set.
+  await typeNumber('2.5');
+  await clickOn(`${radios}[0].parentElement.querySelector('code')`);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal((await mutations()).length, before);
+  assert.equal(await page.evaluate<string>(`document.getElementById('${id}-number').value`), '');
+
+  // A number typed, then the number chosen: that number is set, once.
+  await typeNumber('2');
+  await clickOn(`${radios}[1]`);
+  await waitFor(async () => (await mutations()).length === before + 1, 10_000, 'the edit');
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const after = await mutations();
+  assert.equal(after.length, before + 1);
+  assert.deepEqual(after.at(-1)?.operations, [
+    { op: 'set', path: ['deviceScaleFactor'], value: 2 },
+  ]);
+});
+
 test('the settings page lists the profiles of the Chrome of the user and asks before copying one', {
   skip,
 }, async () => {
@@ -467,6 +562,24 @@ test("a confirmed copy replaces dsh-chrome's profile and keeps the one it replac
   skip,
 }, async () => {
   const page = requireSettingsViewer();
+  // Another settings page, as a socket of its own: it hears how the copy goes.
+  await page.evaluate(`(() => {
+    window.__copyEvents = [];
+    const socket = new WebSocket(new URL(${JSON.stringify(VIEWER_PATH)}, location.origin).href.replace(/^http/, 'ws'));
+    socket.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      if (message.type === 'profile-copy' && message.copy !== null) {
+        window.__copyEvents.push(message.copy);
+      }
+    };
+    socket.onopen = () => socket.send(JSON.stringify({ type: 'user-chrome' }));
+    window.__copySocket = socket;
+  })()`);
+  await waitFor(
+    () => page.evaluate<boolean>('window.__copySocket.readyState === 1'),
+    10_000,
+    'the second settings socket',
+  );
   await clickButton(page, 'Copy…');
   await page.evaluate(
     `[...document.querySelectorAll('[role="alertdialog"] button')].find((b) => b.textContent === 'Copy').click()`,
@@ -480,6 +593,48 @@ test("a confirmed copy replaces dsh-chrome's profile and keeps the one it replac
     'the copy',
   );
   assert.equal(await exists(join(workDir, 'chrome-profile', 'Default.before-copy')), true);
+
+  type CopyEvent = {
+    kind: string;
+    directory: string;
+    startedAt: number;
+    copiedBytes?: number;
+    totalBytes?: number;
+    checked?: number;
+    total?: number;
+  };
+  const events = await page.evaluate<CopyEvent[]>('window.__copyEvents');
+  // One copy, which every state names by when it started.
+  const startedAt = events[0]?.startedAt;
+  assert.ok(startedAt !== undefined && events.every((event) => event.startedAt === startedAt));
+  // Each step in turn, each once it began.
+  const steps = events
+    .map((event) => event.kind)
+    .filter((kind, index, all) => kind !== all[index - 1]);
+  assert.deepEqual(steps, ['copying-files', 'checking-databases', 'replacing', 'copied']);
+  // The files' last count is all of them, though they took less than a report's interval.
+  const files = events.filter((event) => event.kind === 'copying-files');
+  assert.ok((files.at(-1)?.totalBytes ?? 0) >= 3_000_000);
+  assert.equal(files.at(-1)?.copiedBytes, files.at(-1)?.totalBytes);
+  const databases = events.filter((event) => event.kind === 'checking-databases');
+  assert.deepEqual(databases.at(-1), {
+    kind: 'checking-databases',
+    directory: 'Default',
+    startedAt,
+    checked: 1,
+    total: 1,
+  });
+  // A page opened after the copy learns how it ended, as soon as it asks for the profiles.
+  const told = await page.evaluate<CopyEvent | null>(`new Promise((resolve) => {
+    const socket = new WebSocket(new URL(${JSON.stringify(VIEWER_PATH)}, location.origin).href.replace(/^http/, 'ws'));
+    socket.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      if (message.type === 'profile-copy') { socket.close(); resolve(message.copy); }
+    };
+    socket.onopen = () => socket.send(JSON.stringify({ type: 'user-chrome' }));
+  })`);
+  assert.deepEqual(told, { kind: 'copied', directory: 'Default', startedAt });
+  await page.evaluate('window.__copySocket.close()');
 });
 
 /** The settings the page shows: those a running plugin may change. */
@@ -575,6 +730,22 @@ function monitorOf(sessionId: string): { x: number; y: number; width: number; he
 
 function fieldValue(page: ChromePage): Promise<string> {
   return evaluate<string>(page, "document.getElementById('field').value");
+}
+
+/**
+ * Opens a tab on a display of two device pixels per CSS pixel, as on a high-density screen,
+ * at the URL: the Chrome tab there says so, and an `auto` scale takes it.
+ */
+async function openDenseViewer(userDataDir: string, url: string): Promise<HeadlessTab> {
+  const tab = await openHeadlessTab(userDataDir, 'about:blank');
+  await tab.send('Emulation.setDeviceMetricsOverride', {
+    width: 900,
+    height: 700,
+    deviceScaleFactor: 2,
+    mobile: false,
+  });
+  await tab.send('Page.navigate', { url });
+  return tab;
 }
 
 /** Whether noVNC has drawn the screen: its canvas has a size, and its middle is not empty. */

@@ -3,11 +3,12 @@ import {
   type CSSProperties,
   type ReactNode,
   useEffect,
+  useRef,
   useState,
   useSyncExternalStore,
 } from 'react';
 import { HOST_ROW_ID } from '../../protocol/settings.ts';
-import { type CopyPhase, ProfileCopier } from './profile-copier.ts';
+import { type CopyPhase, isCopying, ProfileCopier } from './profile-copier.ts';
 import {
   numberInput,
   type SettingField,
@@ -216,23 +217,14 @@ function SettingControl({
       );
     case 'choice':
       return (
-        <div role="radiogroup" id={id} style={choicesStyle}>
-          {field.options.map((option) => (
-            <label key={String(option.value)} style={choiceStyle}>
-              <input
-                type="radio"
-                name={id}
-                checked={value === option.value}
-                disabled={disabled}
-                onChange={() => onSet(option.value)}
-              />
-              <span>
-                <code>{String(option.value)}</code>
-                {option.description === undefined ? null : ` — ${option.description}`}
-              </span>
-            </label>
-          ))}
-        </div>
+        <ChoiceControl
+          id={id}
+          refused={refused}
+          field={field}
+          value={value}
+          disabled={disabled}
+          onSet={onSet}
+        />
       );
     case 'number':
     case 'text':
@@ -249,6 +241,152 @@ function SettingControl({
     case 'other':
       return <p style={noteStyle}>Set in the DSH profile's configuration.</p>;
   }
+}
+
+/**
+ * A choice of the schema's values, with a number field besides when the setting also takes a
+ * number. The number typed is the setting once the user presses Enter, leaves the field, or
+ * chooses the number; choosing another option instead drops it. Choosing the number with none
+ * typed sets the one the setting last had while this page showed it, or the least it takes.
+ */
+function ChoiceControl({
+  id,
+  refused,
+  field,
+  value,
+  disabled,
+  onSet,
+}: {
+  readonly id: string;
+  readonly refused: number;
+  readonly field: Extract<SettingField, { kind: 'choice' }>;
+  readonly value: unknown;
+  readonly disabled: boolean;
+  readonly onSet: (value: SettingValue) => void;
+}) {
+  const isOption = field.options.some((option) => option.value === value);
+  const number = typeof value === 'number' && !isOption ? value : undefined;
+  const shown = number === undefined ? '' : String(number);
+  const [lastNumber, setLastNumber] = useState(number);
+  const [draft, setDraft] = useState(shown);
+  const [error, setError] = useState<string>();
+  // The option a press in the choice went down on: the field loses the focus before the
+  // click that chooses, and a click on an option's text moves the focus to nothing.
+  const pressed = useRef<'value' | 'number'>(undefined);
+  useEffect(() => {
+    if (number !== undefined) setLastNumber(number);
+  }, [number]);
+  // The setting changed elsewhere, or DSH refused a change: the field shows the value in
+  // effect. (`refused` is read only to run the effect again.)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the count is the trigger
+  useEffect(() => {
+    setDraft(shown);
+    setError(undefined);
+  }, [shown, refused]);
+  const numberOption = field.number;
+  const drop = () => {
+    setDraft(shown);
+    setError(undefined);
+  };
+  /** Sets the number typed, if one is; else, when the number is chosen, the last or least. */
+  const takeNumber = (chosen: boolean) => {
+    if (numberOption === undefined) return;
+    if (draft.trim() !== '' && draft !== shown) {
+      const parsed = numberInput(numberOption, draft);
+      if ('error' in parsed) {
+        setError(parsed.error);
+        return;
+      }
+      setError(undefined);
+      onSet(parsed.value);
+      return;
+    }
+    if (chosen && number === undefined) onSet(lastNumber ?? numberOption.min ?? 0);
+  };
+  return (
+    <div
+      role="radiogroup"
+      id={id}
+      style={choicesStyle}
+      onPointerDownCapture={(event) => {
+        const option = (event.target as Element).closest('[data-option]');
+        const kind = option?.getAttribute('data-option');
+        pressed.current = kind === 'value' || kind === 'number' ? kind : undefined;
+      }}
+    >
+      {field.options.map((option) => (
+        <label key={String(option.value)} style={choiceStyle} data-option="value">
+          <input
+            type="radio"
+            name={id}
+            checked={value === option.value}
+            disabled={disabled}
+            onChange={() => {
+              pressed.current = undefined;
+              drop();
+              onSet(option.value);
+            }}
+          />
+          <span>
+            <code>{String(option.value)}</code>
+            {option.description === undefined ? null : ` — ${option.description}`}
+          </span>
+        </label>
+      ))}
+      {numberOption === undefined ? null : (
+        <div style={choiceStyle}>
+          <input
+            type="radio"
+            name={id}
+            aria-label="A number"
+            data-option="number"
+            checked={number !== undefined}
+            disabled={disabled}
+            readOnly
+            // A click, not a change: the number typed is taken when the number is chosen already.
+            onClick={() => {
+              pressed.current = undefined;
+              takeNumber(true);
+            }}
+          />
+          <div>
+            <input
+              id={`${id}-number`}
+              type="number"
+              value={draft}
+              disabled={disabled}
+              min={numberOption.min}
+              max={numberOption.max}
+              step={numberOption.step}
+              style={inputStyle}
+              onFocus={() => {
+                // A press that went down on an option and was let go elsewhere is over.
+                pressed.current = undefined;
+              }}
+              onChange={(event) => setDraft(event.target.value)}
+              onBlur={() => {
+                // Another option is being chosen: the number typed is not the setting.
+                if (pressed.current === 'value') drop();
+                // The number is being chosen: its click takes what was typed.
+                else if (pressed.current !== 'number') takeNumber(false);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') takeNumber(false);
+              }}
+            />
+            {error === undefined ? null : (
+              <p role="alert" style={noteStyle}>
+                {error}
+              </p>
+            )}
+            {numberOption.description === undefined ? null : (
+              <span>{numberOption.description}</span>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** A text or number setting, taken when the user leaves the field or presses Enter. */
@@ -364,7 +502,7 @@ function ProfileCopyForm({ copier }: { readonly copier: ProfileCopier }) {
           <select
             aria-label="Profile to copy"
             value={directory}
-            disabled={phase.kind === 'copying' || confirming}
+            disabled={isCopying(phase) || confirming}
             style={inputStyle}
             onChange={(event) => setSelected(event.target.value)}
           >
@@ -378,7 +516,7 @@ function ProfileCopyForm({ copier }: { readonly copier: ProfileCopier }) {
           <button
             type="button"
             style={buttonStyle}
-            disabled={phase.kind === 'copying' || confirming || chosen === undefined}
+            disabled={isCopying(phase) || confirming || chosen === undefined}
             onClick={() => {
               copier.refresh();
               setConfirming(true);
@@ -433,27 +571,65 @@ function CopyStatus({
   const nameOf = (directory: string) =>
     profiles.find((profile) => profile.directory === directory)?.name ?? directory;
   switch (phase.kind) {
-    case 'copying':
-      return (
-        <p role="status" style={noteStyle}>
-          Copying “{nameOf(phase.directory)}”…
-        </p>
-      );
-    case 'copied':
-      return (
-        <p role="status" style={noteStyle}>
-          dsh-chrome's profile is now a copy of “{nameOf(phase.directory)}”. Open Chrome in a
-          session's sidebar to use it.
-        </p>
-      );
+    case 'asked':
+      return <CopyProgress text={`Starting the copy of “${nameOf(phase.directory)}”…`} />;
+    case 'host': {
+      const { status } = phase;
+      const name = nameOf(status.directory);
+      switch (status.kind) {
+        case 'copying-files':
+          // Until the copy has counted what it takes, it says only that it copies.
+          return status.totalBytes === 0 ? (
+            <CopyProgress text={`Copying “${name}”…`} />
+          ) : (
+            <CopyProgress
+              text={`Copying “${name}”: ${megabytes(status.copiedBytes)} of ${megabytes(status.totalBytes)}.`}
+              value={status.copiedBytes}
+              max={status.totalBytes}
+            />
+          );
+        case 'checking-databases':
+          return (
+            <CopyProgress
+              text={`Checking the databases copied from “${name}”: ${status.checked} of ${status.total}.`}
+              value={status.checked}
+              max={status.total}
+            />
+          );
+        case 'replacing':
+          return <CopyProgress text="Closing Chrome, and putting the copy in place…" />;
+        case 'copied':
+          return (
+            <p role="status" style={noteStyle}>
+              dsh-chrome's profile is now a copy of “{name}”. Open Chrome in a session's sidebar to
+              use it.
+            </p>
+          );
+        case 'failed':
+          return (
+            <p role="alert" style={noteStyle}>
+              The profile was not copied: {status.message}
+            </p>
+          );
+      }
+      return null;
+    }
     case 'connection-lost':
       return (
         <p role="alert" style={noteStyle}>
-          The connection to DSH was lost while copying “{nameOf(phase.directory)}”. The copy may
-          still finish: open this page again to see the profile.
+          The connection to DSH was lost while copying “{nameOf(phase.directory)}”, which goes on in
+          DSH: connecting again…
         </p>
       );
-    case 'failed':
+    case 'unfinished':
+      return (
+        <p role="alert" style={noteStyle}>
+          The copy of “{nameOf(phase.directory)}” may not have finished: DSH knows of it no more, as
+          when dsh-chrome starts anew, which stops a copy before it takes the profile's place. Copy
+          it again to be sure.
+        </p>
+      );
+    case 'refused':
       return (
         <p role="alert" style={noteStyle}>
           The profile was not copied: {phase.message}
@@ -462,6 +638,34 @@ function CopyStatus({
     default:
       return null;
   }
+}
+
+/** A step of the copy: a bar that fills while files are copied, and moves otherwise. */
+function CopyProgress({
+  text,
+  value,
+  max,
+}: {
+  readonly text: string;
+  readonly value?: number;
+  readonly max?: number;
+}) {
+  return (
+    <div role="status" style={progressStyle}>
+      <progress
+        aria-label="Copy progress"
+        style={{ width: '100%' }}
+        {...(value === undefined || max === undefined || max === 0 ? {} : { value, max })}
+      />
+      <p style={noteStyle}>{text}</p>
+    </div>
+  );
+}
+
+/** Bytes as megabytes, as file managers count them. */
+function megabytes(bytes: number): string {
+  const value = bytes / 1_000_000;
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} MB`;
 }
 
 const pageStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 24 };
@@ -481,6 +685,7 @@ const checkStyle: CSSProperties = {
 };
 const choiceStyle: CSSProperties = { display: 'flex', gap: 6, alignItems: 'baseline' };
 const copyRowStyle: CSSProperties = { display: 'flex', gap: 8, alignItems: 'center' };
+const progressStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4 };
 const confirmStyle: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',

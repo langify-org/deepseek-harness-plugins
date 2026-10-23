@@ -118,6 +118,11 @@ export async function launchChrome(options: ChromeOptions): Promise<ChromeProces
  * included. Chrome warns of that flag with a bar in the window it opens at its start, which
  * only a managed policy turns off; opening none, it shows no bar. It warns of none of the
  * others.
+ *
+ * WebGL on the GPU draws through Vulkan, and Chrome composites pages on the CPU: the screen is
+ * in memory, so a frame composited on the GPU is read back from it. That cost Chrome three to
+ * four times the CPU on an animation, and twice on a page that is one WebGL canvas (measured
+ * in docs/design.md).
  */
 export function chromeArguments(
   options: Pick<ChromeOptions, 'profileDir' | 'deviceScaleFactor' | 'announceAutomation' | 'webgl'>,
@@ -136,7 +141,7 @@ export function chromeArguments(
 }
 
 const WEBGL_ARGUMENTS: Readonly<Record<WebglMode, readonly string[]>> = {
-  gpu: ['--use-angle=vulkan'],
-  'gpu-or-cpu': ['--use-angle=vulkan', '--ignore-gpu-blocklist'],
+  gpu: ['--use-angle=vulkan', '--disable-gpu-compositing'],
+  'gpu-or-cpu': ['--use-angle=vulkan', '--ignore-gpu-blocklist', '--disable-gpu-compositing'],
   off: [],
 };

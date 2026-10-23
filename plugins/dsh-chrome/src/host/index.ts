@@ -17,6 +17,7 @@ import z from '@deepseek-ai/schemastery';
 import {
   ChromeService,
   type ChromeSettings,
+  DEVICE_SCALE_FACTORS,
   WEBGL_MODES,
   type WebglMode,
 } from './chrome/chrome-service.ts';
@@ -62,15 +63,22 @@ export const Config = z.object({
     .description('The Chrome to run: a command, or its path.')
     .volatile(),
   deviceScaleFactor: z
-    .number()
-    .min(1)
-    .max(4)
-    .step(0.25)
-    .default(2)
-    .description(
-      "How many of the screen's pixels a CSS pixel of Chrome takes. 2 is sharp on high-density " +
-        'displays and still clear on others; 1 sends a quarter of the pixels.',
-    )
+    .union([
+      z
+        .const('auto')
+        .description(
+          'The pixel ratio of the display you work in Chrome on, when Chrome starts: sharp on ' +
+            'high-density displays, and no more pixels than other displays show.',
+        ),
+      z
+        .number()
+        .min(DEVICE_SCALE_FACTORS.min)
+        .max(DEVICE_SCALE_FACTORS.max)
+        .step(DEVICE_SCALE_FACTORS.step)
+        .description('This many, whatever the display: 2 sends four times the pixels of 1.'),
+    ])
+    .default('auto')
+    .description("How many of the screen's pixels a CSS pixel of Chrome takes.")
     .volatile(),
   announceAutomation: z
     .boolean()

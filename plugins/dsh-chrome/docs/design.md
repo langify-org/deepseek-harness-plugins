@@ -26,6 +26,11 @@ screen: its sidebar shows that part, its agent opens its pages there, and sessio
 once, in two browser windows or on two devices, do not take each other's view. Before, every
 session showed the one Chrome window, laid out for whichever viewer the user looked at last.
 
+Since 0.5, Chrome draws at the pixel ratio of the display the user works on, and composites
+its pages on the CPU: on the user's displays, at a pixel ratio of 1, that is a quarter of the
+pixels 0.4 drew and sent, at a third to two thirds of the CPU. Why the screen still goes as
+VNC, and the numbers, are under [How the screen reaches the sidebar](#how-the-screen-reaches-the-sidebar).
+
 ## Concepts
 
 | Concept | Meaning | In code |
@@ -144,7 +149,10 @@ DSH web client (Desktop window, or any browser signed in to DSH)
   session), and an X connection of its own, with the screen's cookie, to read and give the
   keyboard's focus (`XConnection`: `GetInputFocus`, `SetInputFocus`, a window's place).
 * **The viewer WebSocket** carries JSON messages (`src/protocol/viewer.ts`), parsed into
-  fresh values with the protocol's fields only on each side.
+  fresh values with the protocol's fields only on each side. A sidebar tab gives its size and
+  display first, then the session it watches, which its other requests need. The protocol is
+  between one version's client and host, which ship together: neither keeps to another
+  version's terms, so DSH's pages are reloaded after an update.
 * **Processes.** Chrome is spawned directly, since DSH's subprocess service cannot give it
   file descriptors 3 and 4. Xvnc and Openbox would outlive a DSH that crashed, so their pids
   are recorded in the runtime directory, and the next start ends those that still run for it,
@@ -170,10 +178,24 @@ rectangle of the screen, scaled to the view, to ask Xvnc for that rectangle's pi
 to keep the pointer in it, so that a drag does not reach another session's windows
 (`viewRegion`).
 
-A session's monitor has its owner viewer's area, in CSS pixels, times the device scale factor
-(2), and Chrome draws at that factor (`--force-device-scale-factor`). A CSS pixel of the viewer
-thus takes as many of the screen's pixels as a CSS pixel of Chrome: Chrome looks as large as a
-page in the viewer would, and on a high-density display the screen is drawn pixel for pixel.
+A session's monitor has its owner viewer's area, in CSS pixels, times Chrome's device scale
+factor, which Chrome draws at (`--force-device-scale-factor`). A CSS pixel of the viewer thus
+takes as many of the screen's pixels as a CSS pixel of Chrome: Chrome looks as large as a page
+in the viewer would. With `auto`, the default, the factor is the pixel ratio of the display
+of the viewer that last asked for Chrome, its windows or pages (a tab that opens, a page the
+user opens, a restart), rounded to a quarter from 1 to 4: the screen is drawn pixel for
+pixel, as sharp as that display shows, and no larger. Chrome takes one factor for all its
+windows, when it starts. A viewer whose display would give another factor (another monitor,
+or the page zoomed by a quarter or more) shows the screen scaled, and offers a restart, which
+starts Chrome at its display's ratio; the others offer none, and a viewer whose display is
+not known yet is offered none for its display. The ratio is kept in the data directory
+(`start-pixel-ratio.json`), so that a Chrome the agent starts before any viewer asks, after
+DSH starts, draws for the display last used; before any viewer said, `auto` is 1. A restart
+takes its viewer's ratio right before Chrome starts, so another viewer's request meanwhile
+does not take its place. A tab asks for its window, and for the pages that wait, only once
+the host knows its size and display, so that Chrome starts at its ratio: a tab hidden when it opens (in a collapsed
+sidebar) opens its window, and starts Chrome, once shown. When Chrome starts, the monitors
+no viewer sizes, the parking one, take its factor too.
 Chrome keeps its windows at least 500 CSS pixels wide, so a narrower viewer gets a monitor
 that wide, in proportion, which it shows scaled to fit. The session's other viewers show the
 monitor scaled to fit as well, until one takes it: the owner is the session's viewer that most
@@ -209,6 +231,60 @@ A tab that is not in view (a hidden sidebar tab, a background browser tab) close
 screen WebSocket, and Xvnc sends nothing to it; its viewer WebSocket stays open, so it comes
 back at once. Passing notices float over the screen, since notices in the layout would
 resize it, and Chrome would lay its page out anew, as they come and go.
+
+## How the screen reaches the sidebar
+
+The screen goes as VNC: Xvnc encodes what changed (Tight, as JPEG where the picture is
+photographic), and noVNC draws it. These measurements, on the host machine (an NVIDIA RTX
+4090, displays at a pixel ratio of 1), chose 0.5's way of drawing, and kept VNC.
+
+The sidebar path itself: DSH's web server with the built plugin, the built sidebar module in a
+headless Chrome, a sidebar of 900 × 576 CSS pixels, one session. "Shown" counts how often the
+sidebar's picture changed, sampled at each of its frames; CPU is percent of one core over ten
+seconds, Xvnc, Chrome and the viewer together (DSH's host took 2–15 % more):
+
+| Chrome composites | Scale | A small animation: shown, data, CPU | Text scrolling: shown, data, CPU |
+| --- | --- | --- | --- |
+| on the GPU (0.4) | 2 (0.4) | 59/s, 0.5 Mbit/s, 138 % | 58/s, 65 Mbit/s, 189 % |
+| on the GPU | 1 | 56/s, 0.3 Mbit/s, 113 % | 56/s, 50 Mbit/s, 139 % |
+| on the CPU | 2 | 58/s, 0.7 Mbit/s, 72 % | 57/s, 123 Mbit/s, 190 % |
+| on the CPU (0.5) | 1 (0.5: `auto` on these displays) | 58/s, 0.3 Mbit/s, 51 % | 54/s, 51 Mbit/s, 133 % |
+
+A page still: no frames, a few percent. A page that is one WebGL shader changing every frame,
+at a scale of 1: 52 frames a second at 144 % compositing on the GPU, 54 at 131 % on the CPU.
+Composited on the GPU, each frame is read back from the GPU into the screen's memory: Chrome
+itself took 81 % against 23 % on the animation at a scale of 1, 108 % against 28 % at 2, and
+70 % against 38 % on the WebGL page. WebGL still draws on the GPU (`--use-angle=vulkan` with
+`--disable-gpu-compositing`). A scale of 2 draws four times the pixels of 1, which a display
+of ratio 1 shows a quarter of: it cost 1.2 to 1.4 times the CPU, and up to 2.4 times the data
+of the scrolling text. Every configuration showed the sidebar at 52 to 59 frames a second on
+an idle machine: choppiness the user sees comes from these costs competing with the rest of
+the machine, the browser that shows DSH included.
+
+noVNC's quality levels (3, the default 6, and 9) changed the data of the scrolling text (33,
+51 and 125 Mbit/s) and not its CPU; its compression levels (0, the default 2, and 6) changed
+neither; Xvnc comparing each update with the screen before it (`CompareFB`, on by default)
+saves data. They stay at their defaults.
+
+Other ways, measured in spikes on the same machine (a sidebar of 720 × 900 CSS pixels at
+twice the pixels):
+
+| Way | What it showed | Why not |
+| --- | --- | --- |
+| A page's pictures from a headless Chrome: the CDP screencast (JPEG), or the tab captured and encoded as H.264 by Chrome itself (`chrome.tabCapture`, WebCodecs) | 60 frames a second at 10 ms; scrolling text at 201 Mbit/s as JPEG, 35 as H.264; Chrome at 120–175 % | It shows the page only: Chrome's menus, `<select>` lists, context menus, extension popups, permission prompts and dialogs, its address bar and tabs would each be drawn again in the sidebar. It needs no X server, so it would run on macOS and Windows unchanged. |
+| The screen as video: ffmpeg grabbing the X screen, H.264 encoded on the GPU (NVENC), over the screen's WebSocket, decoded with WebCodecs | Scrolling text at 3.6 Mbit/s against VNC's 87, at like CPU; but 60 frames a second of a still page too, which the viewer decoded at 92 % against VNC's 1 % | Video is encoded and decoded whether or not anything changed, and Chrome on Linux decodes H.264, VP9 and AV1 in software on this machine (`VideoDecoder.isConfigSupported` with `prefer-hardware`). It pays where data is dear: a viewer on another device, on a slow link. |
+| KasmVNC | Not measured | Not in nixpkgs. Its client is a noVNC fork, and its protocol departs from VNC's, so the screen bridge and the tests would follow it; it has no view of one region of the screen either, so the patch below would move to that fork. |
+| Selkies | Not measured | A Python application with its own server and client for a whole desktop, Linux only; DSH's routes, sessions and keyboard would sit beside it. |
+
+The sidebar's noVNC carries one patch (`patches/@novnc__novnc@1.7.0.patch`), of two parts.
+One removes noVNC's top-level `await`, which DSH's module loader cannot run; noVNC removed it
+itself after 1.7.0 (in its nightly of 2026-10-21), so that part goes with its next release.
+The other is the view of one region of the screen (`viewRegion`): showing one rectangle of
+the remote screen, scaled to the view, asking Xvnc for that rectangle's changes only, and
+keeping the pointer in it. noVNC has no way to do that; without it, every viewer would get
+every session's changes, and a drag would reach another session's windows. A screen of its
+own for each session would need no region, but one Chrome draws on one X display, and the
+sessions share one Chrome, with its profile and sign-ins.
 
 ## Input
 
@@ -333,13 +409,18 @@ it provides, through the service's configuration.
 The browser client registers a page for the row in DSH's Plugins page (the
 `plugins.row.config` slot, keyed `<package>#<row id>`), and draws its form from the schema the
 settings service serves: a checkbox for a boolean, a number or text field with the schema's
-bounds, a choice of the union's constants with their descriptions, and the descriptions as
-help; a field of another type is shown as one to set in the configuration. Adding a setting
+bounds, a choice of the union's constants with their descriptions (and a number field
+besides, within its bounds, when the union also takes a number, as `deviceScaleFactor` takes
+`auto` or a number), and the descriptions as help; a field of another type is shown as one to set in the configuration. Adding a setting
 to the schema adds it to the page. DSH 0.2.1-rc.2 ships no such form, and no types of its
 settings services, so the client declares the few it uses.
 
-Chrome reads the settings when it starts. While it runs with others, the sidebar says so and
+Chrome reads the settings when it starts. While it runs with others, each viewer says so and
 offers to restart it, which closes every session's windows: a restart is the user's choice.
+A viewer also offers it when an `auto` scale would draw for its display at another factor
+than Chrome does. Each viewer hears why Chrome would start otherwise for it (`restartFor` in
+its Chrome status), worked out for its own display's ratio (`restartReasonFor`); scales are
+compared as Chrome takes them, so `auto` and the number it resolves to are the same.
 
 ## Copying a profile
 
@@ -371,6 +452,27 @@ plugin that stops (DSH restarts it, say) stops its copy, which leaves nothing be
 not take the profile's place: the plugin that starts after it removes what an unfinished copy
 left.
 
+The host keeps where the last copy since the plugin started stands, and tells every settings
+page that asked for the user's profiles, at once and on every change (`profile-copy`):
+copying the files (the bytes of those begun, of all the copy takes, a few times a second, and
+all of them once copied), checking the databases (how many of them, of all), replacing (Chrome
+closes, and the copy takes the profile's place), then copied or failed; or that it knows of
+none. How the host stands is what the page shows, so a page opened or reloaded during or after
+a copy shows how it went. Each state names its copy by when it started: a page that asked for
+a copy waits for one other than the copy the host told of before, which a host that has not
+begun it yet still tells of. A page whose connection drops connects again, and learns it; so
+does one that hears nothing for twenty seconds of a copy, after asking again at ten, as a
+connection a proxy left half open reports no drop. A host that, connected again, knows of no
+copy the page waited for has started anew since, which stops a copy before it takes the
+profile's place, or never got the request: the page says the copy may not have finished. The
+request for a copy fails as well when the copy does, or does not begin; the page goes by the
+copy's own state, and by the request's failure only for a copy that never began, such as
+while another runs. On this machine's file system (btrfs, which clones a
+file rather than copy its data), a stand-in profile's 1.5 GB of files copied in a tenth of a
+second, and checking its ten databases took ten seconds; each check reads its database
+whole. A copy of a profile of 1.8 GB, of which 1.3 GB were
+caches it leaves out, took about two minutes while the user's Chrome ran.
+
 ## Trust boundaries
 
 * The pipe gives whoever holds it full control of Chrome, and only the DSH Host holds it.
@@ -391,6 +493,9 @@ left.
 * The host's X connection shows the screen's cookie, as Openbox and Chrome do, and asks only
   for the keyboard's focus and windows' places, and gives the focus. A failure of it, at any
   moment, ends in a rejection the host handles: DSH exits on one that is not.
+* A viewer's display's pixel ratio sets Chrome's scale, when `auto`, from 1 to 4 only, in
+  quarters, when the viewer asks for Chrome, its windows or pages, and only when Chrome
+  starts; what it costs at 4 is what a user setting 4 costs.
 * A viewer's keys go to its session's windows only: the screen bridge knows the viewer's
   session from its socket's address, which any viewer DSH admits may name. Sessions are not a
   boundary between people: whoever can use the DSH web UI can use every session.
@@ -406,6 +511,21 @@ left.
   it names this home's relay, so another DSH home's stays.
 
 ## Decisions to revisit
+
+* The screen goes as VNC, which sends only what changes and costs nothing while nothing
+  does. Video encoded on the GPU takes a twentieth of the data where text scrolls, which a
+  viewer on another device, on a slow link, would gain from; it would capture frames only as
+  they change, as Selkies' pixelflux does, and fall back to VNC where the viewer's browser
+  decodes video in software.
+* Chrome draws at one scale for every session: the pixel ratio of the display of the viewer
+  that last asked for it when it started. Viewers on displays of other ratios show it scaled,
+  and offer a restart for theirs.
+* The view of one region of the screen is a patch of noVNC, which noVNC could take upstream.
+* `chrome_type` replaces a field's text by pressing Ctrl+A first, as Chrome on Linux takes
+  it: a page that binds Ctrl+A itself, such as a web terminal, takes it as its own shortcut,
+  which the tool's description tells the agent. An editing command sent with a key
+  (`commands: ['selectAll']`) would press nothing, but Chrome sometimes applies it to the next
+  key instead, which then selects all.
 
 * One Chrome per DSH home, with one profile, shared by every session; sessions have their own
   windows. The agents' actions take the keyboard's focus in turns with the user's keys: a

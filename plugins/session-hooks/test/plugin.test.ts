@@ -328,10 +328,14 @@ describe('project hooks', () => {
     assert.equal(archived['hook_event_name'], 'SessionArchive');
     assert.equal(archived['workdir'], worktree);
 
-    const log = (await readFile(join(dir, 'state', 'hooks.log'), 'utf8'))
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line));
+    // The hook's output exists once its command started; its run is logged after it ends.
+    const log = await waitFor(async () => {
+      const entries = (await readFile(join(dir, 'state', 'hooks.log'), 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      return entries.some((entry) => entry.event === 'SessionArchive') ? entries : undefined;
+    });
     assert.deepEqual(
       log.map((entry) => [entry.event, entry.hooks, entry.status]),
       [

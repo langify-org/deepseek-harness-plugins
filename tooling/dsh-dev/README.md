@@ -6,13 +6,13 @@ DSH you use every day, and its sessions, profiles and keys, are left alone.
 
 ```console
 pnpm dev                      # build and install the plugins, then serve DSH's web UI
-pnpm dev --port 3390 --no-open
+pnpm dev --port 3391 --no-open
 pnpm dsh plugin --profile web list
 ```
 
 | Command | What it does |
 | --- | --- |
-| `dsh-dev start [web options]` (`pnpm dev`) | Builds and installs the plugins, then runs `dsh web` with the options given. Stop it with Ctrl+C. |
+| `dsh-dev start [web options]` (`pnpm dev`) | Builds and installs the plugins, then runs `dsh web` with the options given, on port 3390 unless they name one. Stop it with Ctrl+C. |
 | `dsh-dev install` | Builds and installs the plugins without starting DSH. |
 | `dsh-dev dsh <arguments>` (`pnpm dsh`) | Runs the development DSH's own `dsh` command, for example `dsh web --help`. |
 
@@ -33,7 +33,9 @@ DSH's default workspace is the directory `pnpm dev` runs from.
 4. **Installs the packs** into the home's `web` profile with `dsh plugin add`, as DSH
    installs any plugin: only the packs that changed, and it removes plugins that left the
    workspace. Plugins installed into the profile by hand are left alone.
-5. **Starts `dsh web`** in the foreground.
+5. **Starts `dsh web`** in the foreground, on port 3390 unless the options name a port:
+   `dsh web`'s own default, 3080, is where the DSH you use every day may run, and a
+   browser shares its stored data with whatever serves that origin.
 
 The home holds what any DSH home holds: profiles, sessions, and the keys entered on the
 Models page. Delete `.dsh-home` to start afresh.

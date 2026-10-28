@@ -12,6 +12,7 @@ import { DshDevError } from './errors.ts';
 import { packPlugin, prunePacks } from './plugin-packs.ts';
 import { run, runForeground } from './processes.ts';
 import { installedDependencies, planProfileSync } from './profile-sync.ts';
+import { DEV_PORT, webOptions } from './web-options.ts';
 import { workspacePlugins } from './workspace-plugins.ts';
 
 const USAGE = `Usage: dsh-dev <command> [arguments]
@@ -19,9 +20,9 @@ const USAGE = `Usage: dsh-dev <command> [arguments]
 Runs a development DSH, with this workspace's plugins installed, in .dsh-home.
 
 Commands:
-  start [web options]  Build and install the plugins, then serve DSH's web UI.
-                       Options go to \`dsh web\` (see: dsh-dev dsh web --help),
-                       such as --port 3390 or --no-open.
+  start [web options]  Build and install the plugins, then serve DSH's web UI,
+                       on port ${DEV_PORT} unless --port says otherwise. Options go
+                       to \`dsh web\` (see: dsh-dev dsh web --help), such as --no-open.
   install              Build the plugins and install them, without starting DSH.
   dsh <arguments>      Run the development DSH's own \`dsh\` command,
                        such as: dsh-dev dsh plugin --profile web list
@@ -75,11 +76,11 @@ async function prepare(): Promise<Session> {
   return { runtime, home };
 }
 
-async function start(webOptions: readonly string[]): Promise<number> {
+async function start(given: readonly string[]): Promise<number> {
   const session = await prepare();
   await install(session);
   report('starting DSH; stop it with Ctrl+C');
-  return dsh(session, ['web', ...webOptions]);
+  return dsh(session, ['web', ...webOptions(given)]);
 }
 
 /** Builds and packs every workspace plugin, and makes them the profile's workspace plugins. */

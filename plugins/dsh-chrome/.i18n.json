@@ -1,0 +1,83 @@
+{
+  "note": "Written by scripts/i18n.mjs --write. Do not edit by hand.",
+  "sections": [
+    {
+      "section": "dsh-chrome",
+      "en": "e63c4686aeb52af4",
+      "ja": "3478c0344d2b4e8d",
+      "zh": "165c0a60d064d7c4"
+    },
+    {
+      "section": "Requirements",
+      "en": "2fe0bc9a92e72eda",
+      "ja": "c331d1c9b7fc39b0",
+      "zh": "f1c4e8668df44ac1"
+    },
+    {
+      "section": "Install",
+      "en": "0381cf5de0c6f4bb",
+      "ja": "e1a30b4847cf177c",
+      "zh": "1d9362da311ed4cb"
+    },
+    {
+      "section": "From 0.4",
+      "en": "e73a5d04606fc55a",
+      "ja": "a8b8477cbf715e39",
+      "zh": "0d2553aae110f9b0"
+    },
+    {
+      "section": "From 0.3",
+      "en": "058387d028a6b714",
+      "ja": "6f96ebc0e9f142c9",
+      "zh": "57f4df07d6788a77"
+    },
+    {
+      "section": "From 0.2 or 0.1",
+      "en": "51f8e5a7651ae37e",
+      "ja": "e5418c25e4d4adb0",
+      "zh": "a5cb59752680af64"
+    },
+    {
+      "section": "Set it up",
+      "en": "2cfc272a8f9eeb98",
+      "ja": "e0d8210cd9365327",
+      "zh": "3f63e9bff8f38c71"
+    },
+    {
+      "section": "Use",
+      "en": "78bb899cb39a9ea9",
+      "ja": "d134a7d7a7397160",
+      "zh": "8873b74b9707b8b2"
+    },
+    {
+      "section": "Configure",
+      "en": "d670383622ffbb9b",
+      "ja": "c63e9210a3c56165",
+      "zh": "9ab02f62cddd4861"
+    },
+    {
+      "section": "Limits",
+      "en": "7fb9ff402124cce1",
+      "ja": "4a29af58d10d1ad0",
+      "zh": "b13e3004794416f9"
+    },
+    {
+      "section": "Security",
+      "en": "f02383482c4fa8c9",
+      "ja": "935fdc8bbcd8ab74",
+      "zh": "bff5ef11bc3a6e46"
+    },
+    {
+      "section": "Troubleshooting",
+      "en": "e82e8d42789967cf",
+      "ja": "09eeb457b63942a9",
+      "zh": "b5059b305e5898db"
+    },
+    {
+      "section": "Develop",
+      "en": "dd9b0de42c31b2f7",
+      "ja": "d6af1ae69f879ab2",
+      "zh": "b58094479670a526"
+    }
+  ]
+}

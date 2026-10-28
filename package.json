@@ -2,17 +2,23 @@
   "name": "langify-dsh-plugins",
   "private": true,
   "type": "module",
-  "description": "DeepSeek Harness plugins published under the @langify-org npm scope",
+  "description": "DeepSeek Harness plugins by langify, as @langify-org/dsh-* packages",
   "license": "MIT",
-  "packageManager": "pnpm@11.27.0",
+  "packageManager": "pnpm@12.3.4",
   "engines": {
-    "node": ">=22.18"
+    "node": ">=24"
   },
   "scripts": {
-    "build": "pnpm -r --filter \"./plugins/*\" run build",
-    "typecheck": "pnpm -r --filter \"./plugins/*\" run typecheck",
-    "test": "pnpm -r --filter \"./plugins/*\" run test",
-    "check": "pnpm run docs:check && pnpm run typecheck && pnpm run test && pnpm run build",
+    "dev": "dsh-dev start",
+    "dsh": "dsh-dev dsh",
+    "build": "pnpm -r run build",
+    "lint": "biome check",
+    "format": "biome check --write",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "test:compat": "pnpm -r --if-present run test:compat",
+    "test:integration": "pnpm -r --if-present run test:integration",
+    "check": "pnpm lint && pnpm docs:check && pnpm typecheck && pnpm test && pnpm build && pnpm test:compat",
     "docs:check": "node scripts/i18n.mjs",
     "docs:record": "node scripts/i18n.mjs --write",
     "e2e": "node e2e/session-hooks/run.mjs",
@@ -20,8 +26,10 @@
     "release": "pnpm run build && changeset publish"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.15",
     "@changesets/cli": "catalog:",
+    "@langify-org/dsh-dev": "workspace:*",
     "@types/node": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "7.0.2"
   }
 }

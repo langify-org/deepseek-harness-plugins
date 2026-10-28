@@ -1,9 +1,12 @@
 packages:
   - plugins/*
+  - tooling/*
 
-# One place for every shared version. DSH packages are pinned to the runtime the
-# plugins are developed and tested against; each plugin's peerDependencies state
-# the range it supports. Bump them together (see AGENTS.md, "Upgrading DSH").
+# Shared versions for the plugins that take them from the catalog (session-hooks).
+# DSH packages are pinned to the runtime the plugins are developed and tested
+# against; each plugin's peerDependencies state the range it supports. Bump them
+# together (see AGENTS.md, "Upgrading DSH"). dsh-chrome and the tooling pin exact
+# versions in their own package.json instead.
 catalog:
   '@deepseek-ai/cordis': ~4.0.4
   '@deepseek-ai/schemastery': ~3.18.4
@@ -18,3 +21,13 @@ catalog:
   js-yaml: ^5.4.3
   '@types/node': ^24.19.1
   typescript: ~6.0.3
+
+# esbuild resolves its platform binary from an optional dependency package. Its
+# install script only verifies that binary, so it is not run.
+allowBuilds:
+  esbuild: false
+
+# Dependencies patched as they are installed, each for a reason its patch states.
+patchedDependencies:
+  # noVNC awaits at the top level of a module, which a DSH client module cannot.
+  '@novnc/novnc@1.7.0': patches/@novnc__novnc@1.7.0.patch

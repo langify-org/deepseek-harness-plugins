@@ -1,8 +1,13 @@
 {
+  // The declarations `build:types` emits beside the esbuild bundle, under lib/.
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "types": ["node"],
     "rootDir": "src",
-    "outDir": "lib"
+    "outDir": "lib",
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true
   },
   "include": ["src"]
 }

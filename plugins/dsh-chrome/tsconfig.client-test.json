@@ -1,0 +1,8 @@
+{
+  // Tests of the browser client: its code with the DOM's types, run on Node.
+  "extends": "./tsconfig.client.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["src/protocol", "src/client", "test/unit/client"]
+}

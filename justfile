@@ -7,7 +7,7 @@ devdir := root / ".dsh-dev"
 # DSH places its first-use workspace at <documentsDirectory>/deepseek-harness/default-workspace.
 playground := devdir / "documents" / "deepseek-harness" / "default-workspace"
 
-# Type check, test, and build every plugin
+# Lint, check the README translations, type check, test, and build every package, then test the plugins against DSH's packages
 check:
     pnpm run check
 
@@ -36,6 +36,7 @@ e2e-tarball plugin="session-hooks":
 #
 # A development DSH Web UI with one plugin, opened in your browser (--no-open to skip)
 dev plugin port="3091" *flags:
+    test -f "{{root}}/plugins/{{plugin}}/cordis.patch.yml" || { echo "plugins/{{plugin}} has no cordis.patch.yml to load with --patch (its build writes one into dist/); run pnpm dev, which installs every plugin" >&2; exit 1; }
     pnpm --filter ./plugins/{{plugin}} run build
     mkdir -p "{{devdir}}"
     printf -- '- id: hmr\n  disabled: false\n  config:\n    root: ["%s"]\n- id: workspace-controller\n  config:\n    documentsDirectory: "%s"\n' \
@@ -73,7 +74,7 @@ dev-use-profile profile="web":
 watch plugin:
     pnpm --filter ./plugins/{{plugin}} run watch
 
-# Build the Nix packages, which also runs every plugin's tests in the sandbox
+# Build every plugin with Nix, running its checks in the sandbox, and the workspace check (lint, READMEs, every package's tests)
 nix-check:
     nix flake check -L
 

@@ -3,9 +3,9 @@
   "sections": [
     {
       "section": "DeepSeek Harness plugins by langify",
-      "en": "a65d65653877656b",
-      "ja": "41ebf838762a61b3",
-      "zh": "7b59f7d070fa9b74"
+      "en": "15d8ab137cee8647",
+      "ja": "034f7f0fe26c94d7",
+      "zh": "64aacfa6eeec8d79"
     },
     {
       "section": "Install",
@@ -15,27 +15,27 @@
     },
     {
       "section": "npm (recommended)",
-      "en": "97553b197b882ac5",
-      "ja": "38ef4070f3ae6691",
-      "zh": "9abc0f8bad2c9b4b"
+      "en": "a75e41a2bf538e8f",
+      "ja": "2191b7978b49fb83",
+      "zh": "c9b929ee9ff623a7"
     },
     {
       "section": "Tarball or checkout",
-      "en": "3c36366477386be6",
-      "ja": "26db44c222d39ec6",
-      "zh": "9a73d9448348a1bd"
+      "en": "8744522ec570e7ff",
+      "ja": "163ebe924353a12b",
+      "zh": "88e98d90dc3bd1bc"
     },
     {
       "section": "Nix",
-      "en": "ea63857d3bdd4db1",
-      "ja": "1cd50a33382b9c3e",
-      "zh": "9ad73b5578ec3d89"
+      "en": "3097f19b806299f3",
+      "ja": "f5d606ee10444c33",
+      "zh": "63a3bec8ca572762"
     },
     {
       "section": "Develop",
-      "en": "2496f294205b1379",
-      "ja": "a96bdf332693a2f2",
-      "zh": "3ea505ea055f3c1a"
+      "en": "47e9bf72cf1fcab6",
+      "ja": "381fedc069f28f6d",
+      "zh": "7f6441e0d7c143bc"
     },
     {
       "section": "License",

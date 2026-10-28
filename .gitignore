@@ -1,12 +1,23 @@
 node_modules/
+# Build output: dsh-plugin-build's dist/, the bundle builds' lib/
+dist/
 plugins/*/lib/
 *.tsbuildinfo
 *.tgz
+coverage/
+*.log
 
-# Nix build links
-result
-result-*
-
-# Local development DSH home, generated overlays and personal patches
+# Development DSH homes: pnpm dev's .dsh-home, just dev's .dsh-dev, and your own patch
+/.dsh-home/
 .dsh-dev/
 dev/local.patch.yml
+
+# Nix
+result
+result-*
+.direnv/
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/

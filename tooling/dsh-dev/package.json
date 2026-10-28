@@ -1,0 +1,15 @@
+{
+  "name": "@langify-org/dsh-dev",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Runs a development DeepSeek Harness with the workspace's plugins installed",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "dsh-dev": "./src/cli.ts"
+  },
+  "scripts": {
+    "test": "node --test 'test/**/*.test.ts'",
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}

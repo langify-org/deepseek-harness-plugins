@@ -1,4 +1,5 @@
-# Make a built plugin loadable by one DSH installation.
+# Make a built plugin loadable by one DSH installation with `dsh --patch`: one whose
+# patch names its entries relative to itself (the plugin's `loadsWithPatch`).
 #
 # DSH resolves a plugin's `@deepseek-ai/*` peers to its own copies only for
 # packages installed in a profile. A plugin loaded with `--patch` from the Nix
@@ -6,8 +7,9 @@
 # modules: the bundle is copied (not linked, Node follows real paths) beside a
 # `node_modules` link to the installation's own `node_modules`.
 #
-# The result's `patch` attribute is the bundle's cordis.patch.yml, ready for
-# `dsh --patch`. Its relative entry (./lib/index.js) resolves beside it.
+# The result's `patch` attribute is the bundle's patch (its package.json's
+# `dsh.bundle.patch`), ready for `dsh --patch`. Its relative entries resolve
+# beside it.
 {
   lib,
   stdenvNoCC,
@@ -38,7 +40,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   installCheckPhase = ''
     runHook preInstallCheck
     node --input-type=module -e "
-      const plugin = await import('$out/lib/${plugin.dir}/lib/index.js')
+      const plugin = await import('$out/lib/${plugin.dir}/${plugin.entry}')
       if (typeof plugin.apply !== 'function') process.exit(1)
     "
     runHook postInstallCheck
@@ -47,7 +49,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   passthru = {
     inherit (plugin) dir;
     unwrapped = plugin;
-    patch = "${finalAttrs.finalPackage}/lib/${plugin.dir}/cordis.patch.yml";
+    patch = "${finalAttrs.finalPackage}/lib/${plugin.dir}/${plugin.bundlePatch}";
   };
 
   meta = plugin.meta // {

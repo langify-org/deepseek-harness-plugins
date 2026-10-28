@@ -1,0 +1,11 @@
+{
+  // Code that runs on Node: the host plugin, the build, and the tests.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "resolveJsonModule": true
+  },
+  "include": ["src/protocol", "src/host", "test", "build.ts"],
+  // Tests of the browser client run on Node too, and are checked with the client's types.
+  "exclude": ["test/unit/client"]
+}

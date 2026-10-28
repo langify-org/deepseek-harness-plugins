@@ -1,0 +1,18 @@
+{
+  "name": "@langify-org/dsh-plugin-build",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Builds a DeepSeek Harness plugin package: host plugin bundles, the browser client module, and the bundle patch",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test 'test/**/*.test.ts'",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "esbuild": "0.28.2"
+  }
+}

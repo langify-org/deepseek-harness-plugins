@@ -1,18 +1,30 @@
 {
+  // Shared compiler settings. Each package extends this per runtime target
+  // (Node host, browser client) and adds its own `lib` and `types`.
+  //
+  // Sources are run directly by Node's type stripping in tests and scripts, so only
+  // erasable syntax is allowed and relative imports spell their `.ts` extension. A
+  // package that emits declarations turns `noEmit` off in its build configuration.
   "compilerOptions": {
     "target": "es2023",
-    "lib": ["es2023"],
     "module": "nodenext",
     "moduleResolution": "nodenext",
-    "types": ["node"],
+    "lib": ["es2023"],
+    "types": [],
     "strict": true,
     "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
     "noImplicitOverride": true,
-    "erasableSyntaxOnly": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "useUnknownInCatchVariables": true,
     "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "allowImportingTsExtensions": true,
     "isolatedModules": true,
-    "rewriteRelativeImportExtensions": true,
-    "declaration": true,
-    "skipLibCheck": true
+    "noEmit": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
   }
 }

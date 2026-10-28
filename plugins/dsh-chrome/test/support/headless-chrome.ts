@@ -1,0 +1,120 @@
+import { type ChildProcess, spawn } from 'node:child_process';
+import type { Readable, Writable } from 'node:stream';
+import { PipeTransport } from '../../src/host/chrome/cdp/pipe-transport.ts';
+import { chromeExecutable } from './environment.ts';
+
+/**
+ * A CDP client of the test's own, for the headless Chrome that stands in for the user's
+ * browser: unlike the plugin's connection, it may send any command, as DevTools may.
+ */
+class RawCdp {
+  readonly #transport: PipeTransport;
+  readonly #pending = new Map<
+    number,
+    { resolve(value: unknown): void; reject(error: Error): void }
+  >();
+  #nextId = 1;
+
+  constructor(chrome: ChildProcess) {
+    this.#transport = new PipeTransport(chrome.stdio[3] as Writable, chrome.stdio[4] as Readable);
+    this.#transport.onMessage((text) => {
+      const { id, result, error } = JSON.parse(text) as {
+        id?: number;
+        result?: unknown;
+        error?: { message: string };
+      };
+      if (id === undefined) return;
+      const pending = this.#pending.get(id);
+      this.#pending.delete(id);
+      if (error !== undefined) pending?.reject(new Error(error.message));
+      else pending?.resolve(result);
+    });
+    this.#transport.onClose((reason) => {
+      for (const pending of this.#pending.values()) pending.reject(reason);
+      this.#pending.clear();
+    });
+  }
+
+  call(method: string, params: object, sessionId?: string): Promise<unknown> {
+    const id = this.#nextId++;
+    return new Promise((resolve, reject) => {
+      this.#pending.set(id, { resolve, reject });
+      this.#transport.send(
+        JSON.stringify({ id, method, params, ...(sessionId === undefined ? {} : { sessionId }) }),
+      );
+    });
+  }
+}
+
+/** One tab of a headless Chrome the test drives over CDP, as a user would use it. */
+export interface HeadlessTab {
+  /** Evaluates an expression in the page, awaiting a returned promise. */
+  evaluate<T>(expression: string): Promise<T>;
+  /** Sends a CDP command to the tab. */
+  send(method: string, params?: object): Promise<unknown>;
+  click(x: number, y: number): Promise<void>;
+  /** Presses and releases a key that types nothing (Backspace, Tab, …). */
+  pressKey(key: string, code: string, keyCode: number): Promise<void>;
+  close(): Promise<void>;
+}
+
+/** Starts a headless Chrome on a throwaway profile and opens one tab at the URL. */
+export async function openHeadlessTab(userDataDir: string, url: string): Promise<HeadlessTab> {
+  const chrome: ChildProcess = spawn(
+    chromeExecutable,
+    [
+      '--headless=new',
+      '--remote-debugging-pipe',
+      `--user-data-dir=${userDataDir}`,
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--window-size=900,700',
+      'about:blank',
+    ],
+    { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] },
+  );
+  const exited = new Promise<void>((resolve) => chrome.once('exit', () => resolve()));
+  const pipe = new RawCdp(chrome);
+  const { targetId } = (await pipe.call('Target.createTarget', { url: 'about:blank' })) as {
+    targetId: string;
+  };
+  const { sessionId } = (await pipe.call('Target.attachToTarget', { targetId, flatten: true })) as {
+    sessionId: string;
+  };
+  const send = (method: string, params: object = {}) => pipe.call(method, params, sessionId);
+  await send('Page.navigate', { url });
+
+  return {
+    send,
+    evaluate: async <T>(expression: string): Promise<T> => {
+      const { result, exceptionDetails } = (await send('Runtime.evaluate', {
+        expression,
+        returnByValue: true,
+        awaitPromise: true,
+      })) as {
+        result: { value?: unknown };
+        exceptionDetails?: { text: string; exception?: { description?: string } };
+      };
+      if (exceptionDetails !== undefined) {
+        throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text);
+      }
+      return result.value as T;
+    },
+    click: async (x, y) => {
+      const base = { x, y, button: 'left', clickCount: 1 };
+      await send('Input.dispatchMouseEvent', { ...base, type: 'mousePressed', buttons: 1 });
+      await send('Input.dispatchMouseEvent', { ...base, type: 'mouseReleased', buttons: 0 });
+    },
+    pressKey: async (key, code, keyCode) => {
+      const base = { key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode };
+      await send('Input.dispatchKeyEvent', { ...base, type: 'rawKeyDown' });
+      await send('Input.dispatchKeyEvent', { ...base, type: 'keyUp' });
+    },
+    close: async () => {
+      await pipe.call('Browser.close', {}).catch(() => {});
+      const timer = setTimeout(() => chrome.kill('SIGKILL'), 5000);
+      await exited;
+      clearTimeout(timer);
+    },
+  };
+}

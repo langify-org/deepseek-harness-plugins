@@ -1,5 +1,7 @@
 # dsh-chrome
 
+English | [日本語](README.ja.md) | [简体中文](README.zh.md)
+
 Share a real Chrome between you and the agent, in the right sidebar of DeepSeek Harness
 (DSH).
 

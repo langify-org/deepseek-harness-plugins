@@ -1,0 +1,30 @@
+name: Bug report
+description: A plugin does not behave as documented.
+labels: [bug]
+body:
+  - type: input
+    id: package
+    attributes:
+      label: Package and version
+      placeholder: '@langify-org/dsh-greet@0.1.0'
+    validations:
+      required: true
+  - type: input
+    id: dsh
+    attributes:
+      label: DSH version and surface
+      description: Output of `dsh --version`, and Web, Desktop, or CLI.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true

@@ -1,0 +1,34 @@
+{
+  "name": "deepseek-harness-plugins",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm --filter './packages/*' run build",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm publint && pnpm docs:check && pnpm smoke",
+    "dev": "node scripts/dev.ts",
+    "docs:check": "node scripts/check-translations.ts",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "lint": "oxlint --type-aware --deny-warnings",
+    "publint": "pnpm --filter './packages/*' exec publint --strict",
+    "smoke": "node scripts/smoke.ts",
+    "test": "vitest run --dir packages",
+    "typecheck": "tsc"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh": "catalog:",
+    "@types/node": "^24.12.0",
+    "lefthook": "^2.2.2",
+    "oxfmt": "^0.75.0",
+    "oxlint": "^1.90.0",
+    "oxlint-tsgolint": "^7.0.2005",
+    "publint": "^0.3.25",
+    "tsdown": "^0.23.4",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  },
+  "engines": {
+    "node": ">=24.9.0"
+  },
+  "packageManager": "pnpm@11.27.0"
+}

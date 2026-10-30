@@ -1,0 +1,19 @@
+packages:
+  - packages/*
+
+# DSH versions used for development, tests, and CI. Keep in step with each
+# package's `engines.dsh` lower bound. DSH packages pin their peers exactly.
+catalog:
+  '@deepseek-ai/cordis': 4.0.5
+  '@deepseek-ai/dsh': 0.2.1-rc.3
+  '@deepseek-ai/dsh-tools': 0.2.1-rc.3
+
+# Dependency install scripts. Only lefthook (installs the git hooks) runs;
+# the DSH runtime's native extras are not needed by `--dump-config` or `pnpm dev`.
+allowBuilds:
+  lefthook: true
+  '@deepseek-ai/dsh-subprocess-local': false
+  '@google/genai': false
+  koffi: false
+  node-pty: false
+  protobufjs: false

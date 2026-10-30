@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.tgz
+.direnv/
+.envrc.local
+# Isolated DSH home used by `pnpm dev`.
+.dsh/

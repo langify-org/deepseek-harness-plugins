@@ -1,0 +1,4 @@
+# Bundle layer: inserts the greet plugin when a profile enables this package.
+- insert:
+    - id: langify-greet
+      name: '@langify-org/dsh-greet'

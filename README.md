@@ -6,9 +6,10 @@ Open-source plugins for [DeepSeek Harness](https://github.com/deepseek-ai/deepse
 
 ## Plugins
 
-| Package                                    | Description                                                        |
-| ------------------------------------------ | ------------------------------------------------------------------ |
-| [`@langify-org/dsh-greet`](packages/greet) | Example and template that registers a `greet` tool. Not published. |
+| Package                                                | Description                                                        |
+| ------------------------------------------------------ | ------------------------------------------------------------------ |
+| [`@langify-org/dsh-code-server`](packages/code-server) | Edit the session's working folder in code-server inside DSH.       |
+| [`@langify-org/dsh-greet`](packages/greet)             | Example and template that registers a `greet` tool. Not published. |
 
 ## Install
 

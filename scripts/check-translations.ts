@@ -14,7 +14,9 @@ const files = execFileSync(
   },
 )
   .split('\n')
-  .filter((file) => file !== '' && !file.startsWith('.github/') && existsSync(join(root, file)))
+  // Release notes (changesets and the changelogs they write) and GitHub templates stay in English.
+  .filter((file) => file !== '' && !/^(\.github|\.changeset)\/|(^|\/)CHANGELOG\.md$/.test(file))
+  .filter((file) => existsSync(join(root, file)))
 const english = files.filter((file) => !languages.some((lang) => file.endsWith(`.${lang}.md`)))
 const missing = english.flatMap((file) =>
   languages

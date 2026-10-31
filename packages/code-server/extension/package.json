@@ -1,0 +1,33 @@
+{
+  "name": "dsh-code-bridge",
+  "displayName": "DSH Code Bridge",
+  "version": "0.1.0",
+  "description": "Shows files from DeepSeek Harness in the code-server window that DSH opened. Bundled with @langify-org/dsh-code-server.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/langify-org/deepseek-harness-plugins.git",
+    "directory": "packages/code-server"
+  },
+  "publisher": "langify-org",
+  "files": [
+    "dist/extension.js"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "engines": {
+    "vscode": "^1.140.0"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true,
+      "description": "Only shows files DSH asks for; it runs nothing from the workspace."
+    },
+    "virtualWorkspaces": false
+  }
+}

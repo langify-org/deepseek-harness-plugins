@@ -6,9 +6,15 @@
     "suspicious": "error",
     "perf": "error"
   },
+  "rules": {
+    // Sequential awaits are deliberate where they appear (serialized editor calls, polling);
+    // parallel work is written with Promise.all.
+    "no-await-in-loop": "off"
+  },
   "ignorePatterns": ["**/dist/**"],
   "overrides": [
     {
+      // Test doubles stand in for only part of a type.
       "files": ["**/*.test.ts"],
       "rules": {
         "typescript/no-unsafe-type-assertion": "off"

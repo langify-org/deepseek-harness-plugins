@@ -1,4 +1,10 @@
 {
   "extends": "./tsconfig.base.json",
-  "include": ["packages/*/src", "scripts"]
+  "compilerOptions": {
+    "lib": ["esnext"],
+    "types": ["node"]
+  },
+  "include": ["*.ts", "scripts", "packages/*/src", "packages/*/*.config.ts"],
+  // Browser halves need DOM types and their own Context augmentations: see src/client/tsconfig.json.
+  "exclude": ["packages/*/src/client"]
 }

@@ -1,0 +1,7 @@
+# Applied by `pnpm dev` only (not published): keeps code-server's settings and
+# extensions under the isolated DSH home, away from your own code-server.
+- id: langify-code-server
+  name: '@langify-org/dsh-code-server'
+  config:
+    userDataDir: !!js dshHomePath('code-server', 'data')
+    extensionsDir: !!js dshHomePath('code-server', 'extensions')

@@ -1,8 +1,9 @@
 // Runs DSH Web from an isolated home (.dsh/) with every plugin package linked.
 // tsdown rebuilds on change and DSH's HMR reloads the rebuilt plugins.
+// A package's dev.patch.yml, when present, overlays its development-only settings.
 // Extra arguments go to `dsh web`, e.g. `pnpm dev --port 3081`.
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pluginPackages, root } from './plugins.ts'
 
@@ -19,16 +20,27 @@ for (const { dir } of plugins) {
   })
 }
 
-const patch = join(home, 'dev.patch.yml')
+const hmrPatch = join(home, 'dev.patch.yml')
 const watched = plugins.map(({ dir }) => `      - ${JSON.stringify(join(dir, 'dist'))}\n`)
-writeFileSync(patch, `- id: hmr\n  config:\n    root:\n${watched.join('')}`)
+writeFileSync(hmrPatch, `- id: hmr\n  config:\n    root:\n${watched.join('')}`)
+const patches = [
+  hmrPatch,
+  ...plugins.map(({ dir }) => join(dir, 'dev.patch.yml')).filter(existsSync),
+]
 
 const children: ChildProcess[] = [
   spawn('pnpm', ['--filter', './packages/*', '--parallel', 'exec', 'tsdown', '--watch'], {
     cwd: root,
     stdio: 'inherit',
   }),
-  spawn('dsh', ['web', '--patch', patch, ...process.argv.slice(2)], { env, stdio: 'inherit' }),
+  spawn(
+    'dsh',
+    ['web', ...patches.flatMap((patch) => ['--patch', patch]), ...process.argv.slice(2)],
+    {
+      env,
+      stdio: 'inherit',
+    },
+  ),
 ]
 for (const child of children) {
   child.on('exit', (code) => {

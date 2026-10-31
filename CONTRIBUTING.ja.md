@@ -34,6 +34,8 @@ pre-commit フック（lefthook）が staged ファイルを整形・lint しま
 
 `pnpm dev` は DSH の状態を `.dsh/` に置き、普段使いの DSH とは分けます。パッケージをビルドし、そこの `web` プロファイルにリンクし、`tsdown --watch` と DSH Web を起動します。ソースを保存するとパッケージが再ビルドされ、DSH の HMR が再起動なしで動作中のプラグインを差し替えます。`pnpm dev` の後ろの引数は `dsh web` に渡ります（例: `pnpm dev --port 3081`）。
 
+開発時だけの設定は、パッケージの `package.json` の隣の `dev.patch.yml` に置けます。`pnpm dev` がこれを適用し、公開物には含まれません。プラグインが DSH の外に書き込むものは、ここで `!!js dshHomePath(...)` を使って `.dsh/` の中に向けます。例は、code-server の設定と拡張の置き場所を向けている [`packages/code-server/dev.patch.yml`](packages/code-server/dev.patch.yml) です。
+
 モデルには API キーが必要です。git の管理外で direnv が読み込む `.envrc.local` に書いてください。
 
 ```sh

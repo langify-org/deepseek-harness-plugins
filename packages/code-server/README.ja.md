@@ -49,17 +49,7 @@ code-server とそのターミナル・拡張は、あなたの権限で、DSH �
 
 ## 手動確認
 
-ブラウザーと実際の code-server が必要なため、`pnpm check` には含めていません。リリース前に `pnpm dev` で確認します。普段の code-server の設定や拡張を混ぜないよう、プラグインの向き先を変える patch を渡します。
-
-```yaml
-# pnpm dev --patch ./check.patch.yml
-- id: langify-code-server
-  name: '@langify-org/dsh-code-server'
-  config:
-    command: code-server
-    userDataDir: /tmp/dsh-check/data
-    extensionsDir: /tmp/dsh-check/extensions
-```
+ブラウザーと実際の code-server が必要なため、`pnpm check` には含めていません。リリース前に `pnpm dev` で確認します。`pnpm dev` では [dev.patch.yml](dev.patch.yml) により、code-server の設定と拡張は `.dsh/code-server/` に置かれ、普段の code-server とは分かれます。
 
 1. **Code** に「Connected」と作業フォルダーが表示される。Restricted Mode の画面でも接続する。
 2. **Workspace files** で選んだテキストファイルが Code ページの該当行で開く。画像は DSH のビューアーのまま開く。

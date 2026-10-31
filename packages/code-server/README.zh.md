@@ -49,17 +49,7 @@ code-server 及其终端和扩展以你的身份运行，不受 DSH 沙箱和审
 
 ## 手动检查
 
-这些检查需要浏览器和真实的 code-server，因此不包含在 `pnpm check` 中。发布前请用 `pnpm dev` 进行检查。为了不影响你平时使用的 code-server 的设置和扩展，可以传入一个让插件改用其他目录的 patch：
-
-```yaml
-# pnpm dev --patch ./check.patch.yml
-- id: langify-code-server
-  name: '@langify-org/dsh-code-server'
-  config:
-    command: code-server
-    userDataDir: /tmp/dsh-check/data
-    extensionsDir: /tmp/dsh-check/extensions
-```
+这些检查需要浏览器和真实的 code-server，因此不包含在 `pnpm check` 中。发布前请用 `pnpm dev` 进行检查。在 `pnpm dev` 下，[dev.patch.yml](dev.patch.yml) 会把 code-server 的设置和扩展放在 `.dsh/code-server/` 中，与你平时使用的 code-server 分开。
 
 1. **Code** 显示“已连接”和工作文件夹；处于受限模式的窗口也能连接。
 2. 在 **Workspace files** 中选择的文本文件会在 Code 页面的对应行打开；图片仍使用 DSH 的查看器。

@@ -49,17 +49,7 @@ code-server runs as you, and so do its terminal and extensions, outside DSH's sa
 
 ## Manual checks
 
-These need a browser and a real code-server, so they are not part of `pnpm check`. Run them with `pnpm dev` before a release. To keep your own code-server's settings and extensions out of it, pass a patch that points the plugin elsewhere:
-
-```yaml
-# pnpm dev --patch ./check.patch.yml
-- id: langify-code-server
-  name: '@langify-org/dsh-code-server'
-  config:
-    command: code-server
-    userDataDir: /tmp/dsh-check/data
-    extensionsDir: /tmp/dsh-check/extensions
-```
+These need a browser and a real code-server, so they are not part of `pnpm check`. Run them with `pnpm dev` before a release. Under `pnpm dev`, [dev.patch.yml](dev.patch.yml) keeps code-server's settings and extensions in `.dsh/code-server/`, apart from your own code-server.
 
 1. **Code** shows _Connected_ and the working folder; a window in Restricted Mode connects as well.
 2. A text file chosen in **Workspace files** opens in the Code page at its line; an image keeps DSH's viewer.

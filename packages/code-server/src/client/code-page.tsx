@@ -258,5 +258,10 @@ const styles = {
     minHeight: 0,
     border: 0,
     borderRadius: 'var(--dsw-radius-sm, 8px)',
+    // code-server declares no color scheme. Inheriting DSH's dark one would make
+    // Chrome back the frame with an opaque white canvas, which shows while the
+    // editor loads and along edges it leaves uncovered; matching keeps the frame
+    // transparent over DSH's own background.
+    colorScheme: 'normal',
   },
 } satisfies Record<string, CSSProperties>

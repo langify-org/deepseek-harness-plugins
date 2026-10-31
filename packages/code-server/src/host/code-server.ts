@@ -114,6 +114,8 @@ export class CodeServer {
         'none',
         '--disable-telemetry',
         '--disable-update-check',
+        // Its /proxy/<port> routes would serve any local web server from DSH's origin.
+        '--disable-proxy',
       ],
       cwd: homedir(),
       env: this.#options.env,

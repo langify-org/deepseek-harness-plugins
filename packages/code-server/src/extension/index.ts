@@ -1,28 +1,36 @@
 // VS Code extension, active in code-server windows the DSH page opened: it
-// claims the window's binding over the host plugin's private socket and shows
-// the files the page asks for in this window only.
+// claims the window's binding over the host plugin's private socket, shows the
+// files the page asks for in this window only, and is where the user hears
+// about this connection while the window is connected.
 import { lstatSync, realpathSync } from 'node:fs'
 import { createConnection } from 'node:net'
 import * as vscode from 'vscode'
 import { z } from 'zod'
+import { format, messagesFor, type Messages } from '../messages.ts'
 import {
   BINDING_FRAGMENT,
   SOCKET_ENV,
   frame,
   handshakeReplySchema,
-  openRequestSchema,
+  hostFrameSchema,
   readFrames,
   type OpenRequest,
   type OpenResult,
-} from '../protocol.ts'
-import type { OpenErrorCode } from '../rpc.ts'
-import { messages } from './messages.ts'
+} from '../bridge-protocol.ts'
+import type { ErrorCode, OpenErrorCode } from '../rpc.ts'
 import { checkSocket } from './socket-check.ts'
 
 const HANDSHAKE_TIMEOUT_MS = 10_000
-const SHOW_LOG = 'langify-org.dsh-code-bridge.showLog'
+const MENU = 'langify-org.dsh-code-bridge.menu'
 
 type ConnectionState = 'connecting' | 'connected' | 'disconnected'
+
+interface Connection {
+  readonly connected: () => boolean
+  /** Ask the page for a new window, after the user dealt with unsaved changes. */
+  readonly reconnect: () => Promise<void>
+  readonly dispose: () => void
+}
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   // Stay silent in code-server instances DSH did not start and in windows its page did not open.
@@ -30,38 +38,42 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   if (socketPath === undefined) return
   const bindingId = await windowBinding()
   if (bindingId === undefined) return
+  const text = messagesFor(vscode.env.language)
   const output = vscode.window.createOutputChannel('DSH Code Bridge')
   const log = (message: string): void => output.appendLine(message)
-  const status = statusItem()
-  context.subscriptions.push(
-    output,
-    status.item,
-    vscode.commands.registerCommand(SHOW_LOG, () => output.show()),
-  )
+  const status = statusItem(text)
+  let connection: Connection | undefined
+  const menu = async (): Promise<void> => {
+    const reconnect = { label: text.reconnect }
+    const showLog = { label: text['status.showLog'] }
+    const items = connection?.connected() === true ? [reconnect, showLog] : [showLog]
+    const choice = await vscode.window.showQuickPick(items, { title: text['status.name'] })
+    if (choice === reconnect) await connection?.reconnect()
+    if (choice === showLog) output.show()
+  }
+  context.subscriptions.push(output, status.item, vscode.commands.registerCommand(MENU, menu))
   try {
     checkSocket(socketPath)
     const cwd = workspaceFolder()
-    context.subscriptions.push(
-      connect(bindingId, socketPath, cwd, log, (state) => status.show(state, cwd)),
-    )
+    connection = connect(bindingId, socketPath, cwd, text, log, (state) => status.show(state, cwd))
+    context.subscriptions.push(connection)
   } catch (error) {
     log(`Not connected: ${messageOf(error)}`)
     status.show('disconnected')
   }
 }
 
-/** The connection's state in the status bar; clicking it shows the log. */
-function statusItem(): {
+/** The connection's state in the status bar; clicking it opens the connection menu. */
+function statusItem(text: Messages): {
   readonly item: vscode.StatusBarItem
   readonly show: (state: ConnectionState, cwd?: string) => void
 } {
-  const text = messages(vscode.env.language)
   const item = vscode.window.createStatusBarItem(
     'langify-org.dsh-code-bridge.status',
     vscode.StatusBarAlignment.Left,
   )
-  item.name = text.name
-  item.command = { command: SHOW_LOG, title: text.showLog }
+  item.name = text['status.name']
+  item.command = { command: MENU, title: text['status.name'] }
   const icons: Record<ConnectionState, string> = {
     connecting: '$(sync~spin)',
     connected: '$(plug)',
@@ -70,9 +82,8 @@ function statusItem(): {
   const show = (state: ConnectionState, cwd?: string): void => {
     item.text = `${icons[state]} DSH`
     const lines = [
-      text[state],
+      text[`status.${state}`],
       ...(state === 'connected' && cwd !== undefined ? [cwd] : []),
-      text.showLog,
     ]
     item.tooltip = lines.join('\n')
     item.backgroundColor =
@@ -113,9 +124,10 @@ function connect(
   bindingId: string,
   socketPath: string,
   cwd: string,
+  text: Messages,
   log: (message: string) => void,
   report: (state: ConnectionState) => void,
-): vscode.Disposable {
+): Connection {
   const socket = createConnection({ path: socketPath })
   const queue: OpenRequest[] = []
   let accepted = false
@@ -134,6 +146,33 @@ function connect(
   report('connecting')
   const handshake = setTimeout(() => close('No answer from DSH'), HANDSHAKE_TIMEOUT_MS)
 
+  const showError = (code: ErrorCode, message: string): void => {
+    void vscode.window.showWarningMessage(format(text[`error.${code}`], { message }))
+  }
+
+  const reconnect = async (): Promise<void> => {
+    if (!accepted || closed) return
+    if (vscode.workspace.textDocuments.some((document) => document.isDirty)) {
+      const saveAll = text['reconnect.saveAll']
+      const choice = await vscode.window.showWarningMessage(
+        text['reconnect.unsaved'],
+        { modal: true },
+        saveAll,
+      )
+      if (choice !== saveAll || !(await vscode.workspace.saveAll(true))) return
+    }
+    if (!closed) socket.write(frame({ type: 'reconnect' }))
+  }
+
+  const offerReopen = async (folder: string): Promise<void> => {
+    const reopen = text['cwd.reopen']
+    const choice = await vscode.window.showInformationMessage(
+      format(text['cwd.changed'], { cwd: folder }),
+      reopen,
+    )
+    if (choice === reopen) await reconnect()
+  }
+
   // Requests run one at a time; a request the editor never answers holds the rest.
   const drain = async (): Promise<void> => {
     if (draining) return
@@ -141,6 +180,8 @@ function connect(
     for (let request = queue.shift(); request !== undefined; request = queue.shift()) {
       const result = await openFile(request)
       if (closed) break
+      // This window found the failure, so it shows it; the host only passes it on.
+      if (!result.ok) showError(result.error.code, result.error.message)
       socket.write(frame(result))
     }
     draining = false
@@ -165,14 +206,25 @@ function connect(
         report('connected')
         return
       }
-      const request = openRequestSchema.safeParse(value)
-      if (!request.success) return close('Invalid request from DSH')
-      queue.push(request.data)
-      void drain()
+      const message = hostFrameSchema.safeParse(value)
+      if (!message.success) return close('Invalid request from DSH')
+      switch (message.data.type) {
+        case 'open':
+          queue.push(message.data)
+          return void drain()
+        case 'cwd-changed':
+          return void offerReopen(message.data.cwd)
+        case 'notice':
+          return showError(message.data.code, message.data.message)
+      }
     },
     (error) => close(`Invalid data from DSH: ${error.message}`),
   )
-  return new vscode.Disposable(() => close('Stopped', true))
+  return {
+    connected: () => accepted && !closed,
+    reconnect,
+    dispose: () => close('Stopped', true),
+  }
 }
 
 /**

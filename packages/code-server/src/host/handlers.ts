@@ -9,13 +9,12 @@ import {
 import { SessionId } from '@deepseek-ai/dsh-session/types'
 import { parseFileAddress } from '@deepseek-ai/dsh-util-workspace-path'
 import { z } from 'zod'
-import { BINDING_FRAGMENT } from '../protocol.ts'
+import { BINDING_FRAGMENT } from '../bridge-protocol.ts'
 import {
   METHODS,
   RPC_CHANNEL,
   RPC_PREFIX,
   requestSchemas,
-  type ErrorCode,
   type Method,
   type Requests,
   type Responses,
@@ -52,29 +51,28 @@ export function rpcRoutes(
       // Start first: the window must load before its binding's connect timeout runs out.
       await codeServer.ensure()
       signal.throwIfAborted()
-      const binding = bridge.create(sessionId, ownerId, folder)
-      return {
-        bindingId: binding.bindingId,
-        cwd: folder,
-        url: editorUrl(binding.bindingId, folder),
-      }
+      const bindingId = bridge.create(sessionId, ownerId, folder)
+      return { bindingId, cwd: folder, url: editorUrl(bindingId, folder) }
     },
-    async ping({ sessionId, bindingId }, signal) {
-      const state = bridge.ping(sessionId, bindingId)
+    async watch({ sessionId, bindingId, revision }, signal) {
+      // The page watches continuously, so this is where a changed working folder is noticed.
       const { cwd } = await sessionFolders(services, sessionId, signal)
-      return { state, currentCwd: await realpath(cwd).catch(() => cwd) }
+      bridge.announceCwd(sessionId, bindingId, await realpath(cwd).catch(() => cwd))
+      return bridge.watch(sessionId, bindingId, revision, signal)
     },
     async close({ sessionId, bindingId }) {
       bridge.close(sessionId, bindingId)
       return { state: 'closed' }
     },
     async open({ sessionId, bindingId, address, line = 1 }, signal) {
-      const file = parseFileAddress(address)
-      if (file === undefined) throw new CodeServerError('not_a_local_file', 'Not a local file link')
-      // A relative link belongs to the folder its session started in, not to the current one.
-      const owner = file.scope === 'session' ? file.sessionId : sessionId
-      const { original } = await sessionFolders(services, owner, signal)
-      const path = await localPath(services, file.path, original, 'file', signal)
+      let path: string
+      try {
+        path = await filePath(services, sessionId, address, signal)
+      } catch (error) {
+        // Found before the editor was asked: show it there, where the user is looking.
+        bridge.report(sessionId, bindingId, asCodeServerError(error))
+        throw error
+      }
       return bridge.open(sessionId, bindingId, { path, line })
     },
   }
@@ -98,8 +96,7 @@ export function rpcRoutes(
     try {
       return { ok: true, value: await dispatch(method, payload, signal) }
     } catch (error) {
-      const code: ErrorCode = error instanceof CodeServerError ? error.code : 'internal_error'
-      const message = error instanceof Error ? error.message : String(error)
+      const { code, message } = asCodeServerError(error)
       return { ok: false, error: { code, message, details: {} } }
     }
   }
@@ -131,6 +128,32 @@ export function rpcRoutes(
 function editorUrl(bindingId: string, cwd: string): string {
   const query = new URLSearchParams({ folder: cwd })
   return `${RELAY_PREFIX.slice(1)}/?${query.toString()}#${BINDING_FRAGMENT}=${bindingId}`
+}
+
+function asCodeServerError(error: unknown): CodeServerError {
+  if (error instanceof CodeServerError) return error
+  return new CodeServerError(
+    'internal_error',
+    error instanceof Error ? error.message : String(error),
+    {
+      cause: error,
+    },
+  )
+}
+
+/** The local file a `dsh-resource://file/...` address names. */
+async function filePath(
+  services: Services,
+  sessionId: string,
+  address: string,
+  signal: AbortSignal,
+): Promise<string> {
+  const file = parseFileAddress(address)
+  if (file === undefined) throw new CodeServerError('not_a_local_file', 'Not a local file link')
+  // A relative link belongs to the folder its session started in, not to the current one.
+  const owner = file.scope === 'session' ? file.sessionId : sessionId
+  const { original } = await sessionFolders(services, owner, signal)
+  return localPath(services, file.path, original, 'file', signal)
 }
 
 async function sessionFolders(

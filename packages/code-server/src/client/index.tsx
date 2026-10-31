@@ -10,7 +10,8 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client
 import { CodePage } from './code-page.tsx'
 import { CODE_KIND, createFace, type Face } from './face.ts'
 import { FileRedirect } from './file-redirect.tsx'
-import { NAMESPACE, en, ja, zh } from './locales.ts'
+import { en, ja, zh } from '../messages.ts'
+import { NAMESPACE } from './locales.ts'
 import { isTextFileAddress } from './text-files.ts'
 
 // DSH 0.2 provides the browser connection without declaring it on Context.

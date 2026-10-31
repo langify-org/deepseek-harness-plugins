@@ -1,10 +1,17 @@
 // The bridge protocol between the host plugin and the VS Code extension: NDJSON
 // over a private Unix socket. Both ends ship from this package, so the frames
-// are defined once here and validated on receipt.
+// are defined once here and validated on receipt. Node only: the page talks to
+// the host through ./rpc.ts instead.
 import { isAbsolute } from 'node:path'
 import type { Readable } from 'node:stream'
 import { z } from 'zod'
-import type { FileLocation, OpenErrorCode } from './rpc.ts'
+import {
+  HOST_ERROR_CODES,
+  OPEN_ERROR_CODES,
+  type ErrorCode,
+  type FileLocation,
+  type OpenErrorCode,
+} from './rpc.ts'
 
 /** Largest frame, newline included. */
 export const MAX_FRAME_BYTES: number = 64 * 1024
@@ -35,6 +42,27 @@ export interface OpenRequest extends FileLocation {
   readonly type: 'open'
   readonly requestId: string
   readonly deadline: number
+}
+
+/** The session's working folder moved away from the folder this window shows. */
+export interface CwdChanged {
+  readonly type: 'cwd-changed'
+  readonly cwd: string
+}
+
+/** A failure the host found while acting for this window; the editor shows it. */
+export interface Notice {
+  readonly type: 'notice'
+  readonly code: ErrorCode
+  readonly message: string
+}
+
+/** Every frame the host sends after accepting the window. */
+export type HostFrame = OpenRequest | CwdChanged | Notice
+
+/** Ask the page for a new window; the extension has already dealt with unsaved changes. */
+export interface ReconnectRequest {
+  readonly type: 'reconnect'
 }
 
 /** The extension's answer to one open request; success reports the line the cursor landed on. */
@@ -86,20 +114,32 @@ export const openResultSchema: z.ZodType<OpenResult> = z.discriminatedUnion('ok'
     requestId,
     ok: z.literal(false),
     error: z.strictObject({
-      code: z.enum([
-        'invalid_path',
-        'deadline_exceeded',
-        'outcome_unknown',
-        'open_failed',
-        'show_failed',
-      ]),
+      code: z.enum(OPEN_ERROR_CODES),
       message: z.string().max(2048),
     }),
   }),
 ])
 
+/** Every frame the extension sends after the host accepted it. */
+export type EditorFrame = OpenResult | ReconnectRequest
+
+export const hostFrameSchema: z.ZodType<HostFrame> = z.union([
+  openRequestSchema,
+  z.strictObject({ type: z.literal('cwd-changed'), cwd: absolutePath }),
+  z.strictObject({
+    type: z.literal('notice'),
+    code: z.enum([...OPEN_ERROR_CODES, ...HOST_ERROR_CODES]),
+    message: z.string().max(2048),
+  }),
+])
+
+export const editorFrameSchema: z.ZodType<EditorFrame> = z.union([
+  openResultSchema,
+  z.strictObject({ type: z.literal('reconnect') }),
+])
+
 /** Serialize one frame. */
-export function frame(value: Hello | HandshakeReply | OpenRequest | OpenResult): string {
+export function frame(value: Hello | HandshakeReply | HostFrame | EditorFrame): string {
   return `${JSON.stringify(value)}\n`
 }
 

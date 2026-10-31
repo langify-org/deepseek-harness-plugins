@@ -22,9 +22,9 @@ In DSH Web or Desktop, use the **Plugins** page instead.
 
 Open the right sidebar, add a tab, and choose **Code**. The page opens the session's working folder; the first time, starting code-server takes a few seconds. Choosing a text file elsewhere in DSH, for example in **Workspace files** or a link in the conversation, shows it in the Code page. Images, PDFs and other files keep DSH's own viewers.
 
-- The editor's status bar shows **DSH** with the connection's state; click it for the connection log. The page adds a line above the editor only when something needs your attention, such as an ended connection or a file that could not be opened.
-- **Reconnect**, offered on those lines, reloads the editor; DSH's refresh command for the tab does the same. Save your changes first. Files you chose before reconnecting are not reopened.
-- When the session's working folder changes, the page tells you; reconnect to open the new folder.
+- While the editor is connected, it is where you hear about it. Its status bar shows **DSH** with the connection's state; click it to **Reconnect** or to see the connection log. A file that cannot be opened is reported there, and when the session's working folder changes, a notification offers to reopen the editor on it.
+- Reconnecting from the editor asks you to save unsaved changes first, then reloads the editor. Files you chose before reconnecting are not reopened.
+- The page speaks only when the editor cannot: while code-server starts or if it fails, and after the connection ends. The editor then stays, with **Reconnect** above it; DSH's refresh command for the tab does the same.
 - A file request that the editor did not confirm in time is reported as unknown and never sent again, because the editor may still show it later.
 
 ## Configuration
@@ -50,12 +50,13 @@ code-server runs as you, and so do its terminal and extensions, outside DSH's sa
 
 ## Manual checks
 
-These need a browser and a real code-server, so they are not part of `pnpm check`. Run them with `pnpm dev` before a release. Under `pnpm dev`, [dev.patch.yml](dev.patch.yml) keeps code-server's settings and extensions in `.dsh/code-server/`, apart from your own code-server.
+These need a browser and a real code-server, so they are not part of `pnpm check`. Run them with `pnpm dev` before a release. Under `pnpm dev`, [dev.patch.yml](dev.patch.yml) keeps code-server's settings and extensions in `.dsh/code-server/`, apart from your own code-server. Changes to the host and the page reload while `pnpm dev` runs; a change under `src/extension/` takes effect only after restarting `pnpm dev`, because code-server installs the extension when it starts.
 
 1. **Code** shows the editor with nothing above it, and the editor's status bar shows **DSH** as connected, also in Restricted Mode. After the connection ends, the editor stays and a line above it offers **Reconnect**.
 2. A text file chosen in **Workspace files** opens in the Code page at its line; an image keeps DSH's viewer.
 3. Without signing in, `/code-server/` and `POST /api/langify-code-server/create` answer 401, and a WebSocket upgrade from another origin answers 403.
-4. Closing the Code tab closes its binding; stopping DSH stops code-server and removes its sockets.
+4. After the session's working folder changes, the editor offers to reopen; with an unsaved file it asks to save first, then the page reloads the editor on the new folder.
+5. Closing the Code tab closes its binding; stopping DSH stops code-server and removes its sockets.
 
 ## Known limitations
 

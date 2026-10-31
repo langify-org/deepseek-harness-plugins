@@ -22,37 +22,45 @@ export type BindingState = 'pending' | 'ready' | 'disconnected' | 'expired' | 'c
  * Why the extension could not open a file. `outcome_unknown` means the editor
  * was already asked and may still show the file later.
  */
-export type OpenErrorCode =
-  | 'invalid_path'
-  | 'deadline_exceeded'
-  | 'outcome_unknown'
-  | 'open_failed'
-  | 'show_failed'
+export const OPEN_ERROR_CODES = [
+  'invalid_path',
+  'deadline_exceeded',
+  'outcome_unknown',
+  'open_failed',
+  'show_failed',
+] as const
+export type OpenErrorCode = (typeof OPEN_ERROR_CODES)[number]
 
-/** Every failure code the host returns; the page translates each one. */
-export type ErrorCode =
-  | OpenErrorCode
-  | 'invalid_request'
-  | 'session_not_found'
-  | 'session_migration_required'
-  | 'not_a_directory'
-  | 'not_a_file'
-  | 'not_a_local_file'
-  | 'different_host'
-  | 'code_server_not_found'
-  | 'code_server_failed'
-  | 'unknown_binding'
-  | 'not_ready'
-  | 'binding_disconnected'
-  | 'binding_expired'
-  | 'binding_closed'
-  | 'internal_error'
+/** Failures the host finds itself. */
+export const HOST_ERROR_CODES = [
+  'invalid_request',
+  'session_not_found',
+  'session_migration_required',
+  'not_a_directory',
+  'not_a_file',
+  'not_a_local_file',
+  'different_host',
+  'code_server_not_found',
+  'code_server_failed',
+  'unknown_binding',
+  'not_ready',
+  'binding_disconnected',
+  'binding_expired',
+  'binding_closed',
+  'internal_error',
+] as const
+
+/** Every failure code; each one has a translated message. */
+export type ErrorCode = OpenErrorCode | (typeof HOST_ERROR_CODES)[number]
 
 export interface Requests {
   /** Prepare a new editor window for the session's working folder. */
   create: { readonly sessionId: string; readonly ownerId: string }
-  /** Keep the binding alive and read the session's current working folder. */
-  ping: { readonly sessionId: string; readonly bindingId: string }
+  /**
+   * Keep the binding alive and wait, up to 20 seconds, for it to move past
+   * `revision`: -1 answers at once.
+   */
+  watch: { readonly sessionId: string; readonly bindingId: string; readonly revision: number }
   close: { readonly sessionId: string; readonly bindingId: string }
   /** Open a `dsh-resource://file/...` address in the window, at `line` when given. */
   open: {
@@ -66,7 +74,8 @@ export interface Requests {
 export interface Responses {
   /** `url` is relative to the DSH page and loads the window into an iframe. */
   create: { readonly bindingId: string; readonly cwd: string; readonly url: string }
-  ping: { readonly state: BindingState; readonly currentCwd: string }
+  /** `reconnect`: the editor asked for a new window, after handling unsaved changes itself. */
+  watch: { readonly state: BindingState; readonly revision: number; readonly reconnect: boolean }
   close: { readonly state: 'closed' }
   open: FileLocation
 }
@@ -83,7 +92,7 @@ const binding = { sessionId: id, bindingId: z.uuid() }
 
 export const requestSchemas: { readonly [M in Method]: z.ZodType<Requests[M]> } = {
   create: z.strictObject({ sessionId: id, ownerId: id }),
-  ping: z.strictObject(binding),
+  watch: z.strictObject({ ...binding, revision: z.int().min(-1) }),
   close: z.strictObject(binding),
   open: z.strictObject({
     ...binding,
@@ -94,12 +103,13 @@ export const requestSchemas: { readonly [M in Method]: z.ZodType<Requests[M]> } 
 
 export const responseSchemas: { readonly [M in Method]: z.ZodType<Responses[M]> } = {
   create: z.strictObject({ bindingId: z.uuid(), cwd: z.string(), url: z.string() }),
-  ping: z.strictObject({
+  watch: z.strictObject({
     state: z.enum(['pending', 'ready', 'disconnected', 'expired', 'closed']),
-    currentCwd: z.string(),
+    revision: z.int().nonnegative(),
+    reconnect: z.boolean(),
   }),
   close: z.strictObject({ state: z.literal('closed') }),
   open: z.strictObject({ path: z.string(), line: position }),
 }
 
-export const METHODS: readonly Method[] = ['create', 'ping', 'close', 'open']
+export const METHODS: readonly Method[] = ['create', 'watch', 'close', 'open']

@@ -9,9 +9,10 @@ import {
 } from 'react'
 import type { UseSidebarRightTabInfo } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+import { isMessageKey } from '../messages.ts'
 import type { ErrorCode, Responses } from '../rpc.ts'
 import { RpcFailure, type Face } from './face.ts'
-import { isKey, type NAMESPACE } from './locales.ts'
+import type { NAMESPACE } from './locales.ts'
 import { FINAL_PHASES, type Notice } from './session-bus.ts'
 
 export interface CodePageProps extends Face {
@@ -22,11 +23,8 @@ export interface CodePageProps extends Face {
 // Same-origin with DSH: this keeps code-server from navigating the DSH page.
 const SANDBOX =
   'allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-downloads'
-const PING_PENDING_MS = 1_000
-const PING_READY_MS = 20_000
 /** After these, the binding is gone and the page must reconnect. */
 const FINAL_ERRORS: ReadonlySet<string> = new Set<ErrorCode>([
-  'outcome_unknown',
   'unknown_binding',
   'binding_disconnected',
   'binding_expired',
@@ -37,7 +35,6 @@ export function CodePage({ bus, call, reveal, t, useTabInfo }: CodePageProps): J
   const { tab } = useTabInfo()
   const state = useSyncExternalStore(bus.subscribe, bus.getSnapshot)
   const [view, setView] = useState<Responses['create']>()
-  const [currentCwd, setCurrentCwd] = useState<string>()
   const [attempt, setAttempt] = useState(0)
   const [drains, setDrains] = useState(0)
   const generation = useRef<string>(undefined)
@@ -46,8 +43,9 @@ export function CodePage({ bus, call, reveal, t, useTabInfo }: CodePageProps): J
   const visible = useRef(tab.visible)
   visible.current = tab.visible
 
-  const reconnect = (): void => {
-    if (view !== undefined && !window.confirm(t('reconnect.confirm'))) return
+  /** `confirm` is false when the editor asked: it has dealt with unsaved changes itself. */
+  const reconnect = (confirm = true): void => {
+    if (confirm && view !== undefined && !window.confirm(t('reconnect.confirm'))) return
     bus.clear()
     bus.notice(undefined)
     setAttempt((value) => value + 1)
@@ -69,7 +67,6 @@ export function CodePage({ bus, call, reveal, t, useTabInfo }: CodePageProps): J
     }
     let disposed = false
     let binding: Responses['create'] | undefined
-    let timer: ReturnType<typeof setTimeout> | undefined
     generation.current = undefined
     setView(undefined)
     bus.phase('pending')
@@ -80,25 +77,21 @@ export function CodePage({ bus, call, reveal, t, useTabInfo }: CodePageProps): J
     }
     const close = (): void => {
       disposed = true
-      clearTimeout(timer)
       generation.current = undefined
       if (binding !== undefined)
         void call('close', { bindingId: binding.bindingId }).catch(() => {})
     }
     tab.signal.addEventListener('abort', close, { once: true })
-    const ping = async (bindingId: string): Promise<void> => {
-      try {
-        const status = await call('ping', { bindingId })
+    // Each watch answers as soon as the binding changes, and keeps it alive.
+    const watch = async (bindingId: string): Promise<void> => {
+      let revision = -1
+      for (;;) {
+        const status = await call('watch', { bindingId, revision })
         if (disposed) return
+        if (status.reconnect) return reconnectRef.current(false)
         bus.phase(status.state)
-        setCurrentCwd(status.currentCwd)
         if (FINAL_PHASES.has(status.state)) return bus.notice({ key: 'notice.ended' })
-        timer = setTimeout(
-          () => void ping(bindingId),
-          status.state === 'pending' ? PING_PENDING_MS : PING_READY_MS,
-        )
-      } catch (error) {
-        fail(error)
+        revision = status.revision
       }
     }
     void (async () => {
@@ -110,8 +103,7 @@ export function CodePage({ bus, call, reveal, t, useTabInfo }: CodePageProps): J
         }
         generation.current = binding.bindingId
         setView(binding)
-        setCurrentCwd(binding.cwd)
-        await ping(binding.bindingId)
+        await watch(binding.bindingId)
       } catch (error) {
         fail(error)
       }
@@ -143,8 +135,13 @@ export function CodePage({ bus, call, reveal, t, useTabInfo }: CodePageProps): J
           if (visible.current) frame.current?.focus()
         } catch (error) {
           if (generation.current !== bindingId) return
-          bus.notice(noticeOf(error))
-          if (error instanceof RpcFailure && FINAL_ERRORS.has(error.code)) return bus.phase('error')
+          // The editor shows the failures the host could report; the page shows
+          // a lost connection and failures that never reached the host.
+          if (!(error instanceof RpcFailure)) bus.notice(noticeOf(error))
+          else if (FINAL_ERRORS.has(error.code)) {
+            bus.notice(noticeOf(error))
+            return bus.phase('error')
+          }
         }
         if (generation.current !== bindingId || bus.getSnapshot().phase !== 'ready') return
       }
@@ -156,10 +153,9 @@ export function CodePage({ bus, call, reveal, t, useTabInfo }: CodePageProps): J
   }, [view, state.phase, state.queue, bus, call, drains])
 
   const ended = FINAL_PHASES.has(state.phase)
-  const cwdChanged = view !== undefined && currentCwd !== undefined && currentCwd !== view.cwd
   const notice = state.notice === undefined ? undefined : t(state.notice.key, state.notice.params)
   const reconnectButton = (
-    <button type="button" style={styles.button} onClick={reconnect}>
+    <button type="button" style={styles.button} onClick={() => reconnect()}>
       {t('reconnect')}
     </button>
   )
@@ -193,12 +189,6 @@ export function CodePage({ bus, call, reveal, t, useTabInfo }: CodePageProps): J
               )}
             </div>
           )}
-          {cwdChanged && !ended && (
-            <div role="status" style={styles.banner}>
-              <span style={styles.text}>{t('cwd.changed', { cwd: currentCwd })}</span>
-              {reconnectButton}
-            </div>
-          )}
           <iframe
             ref={frame}
             key={view.bindingId}
@@ -218,7 +208,7 @@ export function CodePage({ bus, call, reveal, t, useTabInfo }: CodePageProps): J
 function noticeOf(error: unknown): Notice {
   const message = error instanceof Error ? error.message : String(error)
   const key = error instanceof RpcFailure ? `error.${error.code}` : 'error.unexpected'
-  return { key: isKey(key) ? key : 'error.unexpected', params: { message } }
+  return { key: isMessageKey(key) ? key : 'error.unexpected', params: { message } }
 }
 
 const styles = {

@@ -4,16 +4,25 @@
 import { randomUUID } from 'node:crypto'
 import { chmod } from 'node:fs/promises'
 import { createServer, type Server, type Socket } from 'node:net'
-import { frame, helloSchema, openResultSchema, readFrames, type OpenRequest } from '../protocol.ts'
-import type { BindingState, ErrorCode, FileLocation } from '../rpc.ts'
+import {
+  editorFrameSchema,
+  frame,
+  helloSchema,
+  readFrames,
+  type HostFrame,
+  type OpenRequest,
+} from '../bridge-protocol.ts'
+import type { BindingState, ErrorCode, FileLocation, Responses } from '../rpc.ts'
 import { CodeServerError } from './errors.ts'
 
 /** An unclaimed binding expires this long after creation. */
 export const CONNECT_TIMEOUT_MS = 60_000
-/** A binding expires this long after the page's last ping. */
+/** A binding expires this long after the page last watched it. */
 export const LEASE_MS = 120_000
 /** An open request without an answer by then has an unknown outcome. */
 export const OPEN_TIMEOUT_MS = 15_000
+/** The longest a watch waits for a change. */
+export const WATCH_MS = 20_000
 const HELLO_TIMEOUT_MS = 5_000
 
 type FinalState = Exclude<BindingState, 'pending' | 'ready'>
@@ -31,15 +40,16 @@ interface Binding {
   readonly cwd: string
   readonly connectBy: number
   state: BindingState
+  /** Counts the changes a watching page has not seen: state and reconnect requests. */
+  revision: number
+  reconnect: boolean
+  /** The last working folder the editor was told about. */
+  announcedCwd: string
   leaseUntil: number
   timer?: NodeJS.Timeout
   peer?: Socket
   readonly opens: Map<string, PendingOpen>
-}
-
-export interface CreatedBinding {
-  readonly bindingId: string
-  readonly cwd: string
+  readonly watchers: Set<() => void>
 }
 
 const finalError: Record<FinalState, ErrorCode> = {
@@ -75,8 +85,11 @@ export class Bridge {
     return new Bridge(server, socketPath)
   }
 
-  /** `cwd` must be a canonical path; the extension proves it opened the same folder. */
-  create(sessionId: string, ownerId: string, cwd: string): CreatedBinding {
+  /**
+   * Start a binding for a window that will open `cwd`, a canonical path the
+   * extension must match, and return its id.
+   */
+  create(sessionId: string, ownerId: string, cwd: string): string {
     for (const binding of this.#bindings.values()) {
       if (binding.sessionId === sessionId && binding.ownerId === ownerId)
         this.#finish(binding, 'closed')
@@ -89,22 +102,47 @@ export class Bridge {
       cwd,
       connectBy: now + CONNECT_TIMEOUT_MS,
       state: 'pending',
+      revision: 0,
+      reconnect: false,
+      announcedCwd: cwd,
       leaseUntil: now + LEASE_MS,
       opens: new Map(),
+      watchers: new Set(),
     }
     this.#bindings.set(binding.id, binding)
     this.#schedule(binding)
-    return { bindingId: binding.id, cwd }
+    return binding.id
   }
 
-  /** Extend a live binding's lease and report its state. */
-  ping(sessionId: string, bindingId: string): BindingState {
+  /**
+   * Extend a live binding's lease, then wait until its revision differs from
+   * `revision` or {@link WATCH_MS} passes, and report it.
+   */
+  async watch(
+    sessionId: string,
+    bindingId: string,
+    revision: number,
+    signal: AbortSignal,
+  ): Promise<Responses['watch']> {
     const binding = this.#get(sessionId, bindingId)
     if (binding.state === 'pending' || binding.state === 'ready') {
       binding.leaseUntil = Date.now() + LEASE_MS
       this.#schedule(binding)
     }
-    return binding.state
+    if (binding.revision === revision) {
+      await new Promise<void>((resolve) => {
+        const done = (): void => {
+          clearTimeout(timer)
+          binding.watchers.delete(done)
+          signal.removeEventListener('abort', done)
+          resolve()
+        }
+        const timer = setTimeout(done, WATCH_MS)
+        binding.watchers.add(done)
+        signal.addEventListener('abort', done, { once: true })
+      })
+    }
+    return { state: binding.state, revision: binding.revision, reconnect: binding.reconnect }
   }
 
   close(sessionId: string, bindingId: string): void {
@@ -112,7 +150,27 @@ export class Bridge {
     if (binding?.sessionId === sessionId) this.#finish(binding, 'closed')
   }
 
-  /** Ask the window to show a file. Never retried: a lost answer is `outcome_unknown`. */
+  /** Tell a connected editor that the session's working folder is now `cwd`, once per new folder. */
+  announceCwd(sessionId: string, bindingId: string, cwd: string): void {
+    const binding = this.#get(sessionId, bindingId)
+    if (cwd === binding.announcedCwd) return
+    binding.announcedCwd = cwd
+    // Moving back to the window's own folder needs no action.
+    if (cwd !== binding.cwd) this.#send(binding, { type: 'cwd-changed', cwd })
+  }
+
+  /** Show a failure the host found for this window in its editor, when it is connected. */
+  report(sessionId: string, bindingId: string, error: CodeServerError): void {
+    const binding = this.#bindings.get(bindingId)
+    if (binding?.sessionId !== sessionId) return
+    this.#send(binding, { type: 'notice', code: error.code, message: error.message })
+  }
+
+  /**
+   * Ask the window to show a file. Never retried: a lost answer is
+   * `outcome_unknown`. The editor reports its own failures; a timeout found
+   * here is reported to it too.
+   */
   open(sessionId: string, bindingId: string, location: FileLocation): Promise<FileLocation> {
     const binding = this.#get(sessionId, bindingId)
     const peer = binding.peer
@@ -132,7 +190,9 @@ export class Bridge {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         binding.opens.delete(requestId)
-        reject(new CodeServerError('outcome_unknown', 'No answer from the editor window'))
+        const error = new CodeServerError('outcome_unknown', 'No answer from the editor window')
+        this.#send(binding, { type: 'notice', code: error.code, message: error.message })
+        reject(error)
       }, OPEN_TIMEOUT_MS)
       binding.opens.set(requestId, { resolve, reject, timer })
       peer.write(frame(request))
@@ -158,6 +218,16 @@ export class Bridge {
     return binding
   }
 
+  #send(binding: Binding, message: HostFrame): void {
+    if (binding.state === 'ready') binding.peer?.write(frame(message))
+  }
+
+  /** Wake the page's watch. */
+  #changed(binding: Binding): void {
+    binding.revision += 1
+    for (const wake of binding.watchers) wake()
+  }
+
   /** Arm the binding's single timer for its next deadline. */
   #schedule(binding: Binding): void {
     clearTimeout(binding.timer)
@@ -168,7 +238,7 @@ export class Bridge {
     binding.timer = setTimeout(() => this.#finish(binding, 'expired'), deadline - Date.now())
   }
 
-  /** Enter a final state once; the record stays for a lease so pings can read it. */
+  /** Enter a final state once; the record stays for a lease so watches can read it. */
   #finish(binding: Binding, state: FinalState): void {
     if (binding.state !== 'pending' && binding.state !== 'ready') return
     binding.state = state
@@ -185,6 +255,7 @@ export class Bridge {
     binding.opens.clear()
     clearTimeout(binding.timer)
     binding.timer = setTimeout(() => this.#bindings.delete(binding.id), LEASE_MS)
+    this.#changed(binding)
   }
 
   #accept(socket: Socket): void {
@@ -221,16 +292,23 @@ export class Bridge {
           binding.state = 'ready'
           this.#schedule(binding)
           socket.write(frame({ type: 'accepted', bindingId: binding.id }))
+          this.#changed(binding)
           return
         }
-        const result = openResultSchema.safeParse(value)
-        if (!result.success) return void socket.destroy()
-        const open = binding.opens.get(result.data.requestId)
+        const message = editorFrameSchema.safeParse(value)
+        if (!message.success) return void socket.destroy()
+        if (message.data.type === 'reconnect') {
+          binding.reconnect = true
+          this.#changed(binding)
+          return
+        }
+        const result = message.data
+        const open = binding.opens.get(result.requestId)
         if (open === undefined) return // answered after its timeout: already reported as unknown
-        binding.opens.delete(result.data.requestId)
+        binding.opens.delete(result.requestId)
         clearTimeout(open.timer)
-        if (result.data.ok) open.resolve({ path: result.data.path, line: result.data.line })
-        else open.reject(new CodeServerError(result.data.error.code, result.data.error.message))
+        if (result.ok) open.resolve({ path: result.path, line: result.line })
+        else open.reject(new CodeServerError(result.error.code, result.error.message))
       },
       () => socket.destroy(),
     )

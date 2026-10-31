@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream'
 import { expect, it } from 'vitest'
-import { MAX_FRAME_BYTES, readFrames } from './protocol.ts'
+import { MAX_FRAME_BYTES, readFrames } from './bridge-protocol.ts'
 
 function collect(): { stream: PassThrough; frames: unknown[]; errors: Error[] } {
   const stream = new PassThrough()

@@ -1,6 +1,6 @@
 import type { TabId } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type { BindingState } from '../rpc.ts'
-import type { CodeServerKey } from './locales.ts'
+import type { MessageKey } from '../messages.ts'
 
 /** The page's view of its connection: `idle` until a Code tab owns it, `error` after a failed call. */
 export type Phase = 'idle' | 'error' | BindingState
@@ -14,7 +14,7 @@ export const FINAL_PHASES: ReadonlySet<Phase> = new Set<Phase>([
 ])
 
 export interface Notice {
-  readonly key: CodeServerKey
+  readonly key: MessageKey
   readonly params?: Readonly<Record<string, string | number>>
 }
 

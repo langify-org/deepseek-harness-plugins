@@ -22,8 +22,9 @@ jobs:
         with:
           node-version-file: .node-version
           cache: pnpm
-          # pnpm 11 publishes through OIDC only for a configured registry.
-          registry-url: https://registry.npmjs.org
+          # No registry-url: it writes an auth line reading ${NODE_AUTH_TOKEN}, which
+          # pnpm then uses instead of exchanging the job's OIDC token, and npm
+          # answers the publish with 404. pnpm publishes to npmjs.org by default.
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       # Opens or updates the Version Packages pull request; once it is merged,

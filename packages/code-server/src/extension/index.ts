@@ -16,9 +16,13 @@ import {
   type OpenResult,
 } from '../protocol.ts'
 import type { OpenErrorCode } from '../rpc.ts'
+import { messages } from './messages.ts'
 import { checkSocket } from './socket-check.ts'
 
 const HANDSHAKE_TIMEOUT_MS = 10_000
+const SHOW_LOG = 'langify-org.dsh-code-bridge.showLog'
+
+type ConnectionState = 'connecting' | 'connected' | 'disconnected'
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   // Stay silent in code-server instances DSH did not start and in windows its page did not open.
@@ -27,14 +31,57 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const bindingId = await windowBinding()
   if (bindingId === undefined) return
   const output = vscode.window.createOutputChannel('DSH Code Bridge')
-  context.subscriptions.push(output)
   const log = (message: string): void => output.appendLine(message)
+  const status = statusItem()
+  context.subscriptions.push(
+    output,
+    status.item,
+    vscode.commands.registerCommand(SHOW_LOG, () => output.show()),
+  )
   try {
     checkSocket(socketPath)
-    context.subscriptions.push(connect(bindingId, socketPath, workspaceFolder(), log))
+    const cwd = workspaceFolder()
+    context.subscriptions.push(
+      connect(bindingId, socketPath, cwd, log, (state) => status.show(state, cwd)),
+    )
   } catch (error) {
     log(`Not connected: ${messageOf(error)}`)
+    status.show('disconnected')
   }
+}
+
+/** The connection's state in the status bar; clicking it shows the log. */
+function statusItem(): {
+  readonly item: vscode.StatusBarItem
+  readonly show: (state: ConnectionState, cwd?: string) => void
+} {
+  const text = messages(vscode.env.language)
+  const item = vscode.window.createStatusBarItem(
+    'langify-org.dsh-code-bridge.status',
+    vscode.StatusBarAlignment.Left,
+  )
+  item.name = text.name
+  item.command = { command: SHOW_LOG, title: text.showLog }
+  const icons: Record<ConnectionState, string> = {
+    connecting: '$(sync~spin)',
+    connected: '$(plug)',
+    disconnected: '$(debug-disconnect)',
+  }
+  const show = (state: ConnectionState, cwd?: string): void => {
+    item.text = `${icons[state]} DSH`
+    const lines = [
+      text[state],
+      ...(state === 'connected' && cwd !== undefined ? [cwd] : []),
+      text.showLog,
+    ]
+    item.tooltip = lines.join('\n')
+    item.backgroundColor =
+      state === 'disconnected'
+        ? new vscode.ThemeColor('statusBarItem.warningBackground')
+        : undefined
+    item.show()
+  }
+  return { item, show }
 }
 
 /**
@@ -67,20 +114,24 @@ function connect(
   socketPath: string,
   cwd: string,
   log: (message: string) => void,
+  report: (state: ConnectionState) => void,
 ): vscode.Disposable {
   const socket = createConnection({ path: socketPath })
   const queue: OpenRequest[] = []
   let accepted = false
   let closed = false
   let draining = false
-  const close = (reason: string): void => {
+  /** `quietly` when the extension stops: its status bar item is going away too. */
+  const close = (reason: string, quietly = false): void => {
     if (closed) return
     closed = true
     queue.length = 0
     clearTimeout(handshake)
     log(reason)
+    if (!quietly) report('disconnected')
     socket.destroy()
   }
+  report('connecting')
   const handshake = setTimeout(() => close('No answer from DSH'), HANDSHAKE_TIMEOUT_MS)
 
   // Requests run one at a time; a request the editor never answers holds the rest.
@@ -111,6 +162,7 @@ function connect(
         accepted = true
         clearTimeout(handshake)
         log(`Connected to DSH for ${cwd}`)
+        report('connected')
         return
       }
       const request = openRequestSchema.safeParse(value)
@@ -120,7 +172,7 @@ function connect(
     },
     (error) => close(`Invalid data from DSH: ${error.message}`),
   )
-  return new vscode.Disposable(() => close('Stopped'))
+  return new vscode.Disposable(() => close('Stopped', true))
 }
 
 /**

@@ -1,5 +1,4 @@
 import type { ErrorCode } from '../rpc.ts'
-import type { Phase } from './session-bus.ts'
 
 export const NAMESPACE = 'langify.codeServer'
 
@@ -9,15 +8,14 @@ export type CodeServerKey =
   | 'frame'
   | 'loading'
   | 'opening'
-  | 'opened'
   | 'reconnect'
+  | 'dismiss'
   | 'reconnect.confirm'
   | 'cwd.changed'
   | 'notice.ended'
   | 'queue.ended'
   | 'queue.full'
   | 'queue.expired'
-  | `state.${Phase}`
   | `error.${ErrorCode}`
   | 'error.unexpected'
 
@@ -38,7 +36,7 @@ export const en: Record<CodeServerKey, string> = {
   frame: 'code-server: {cwd}',
   loading: 'Starting code-server…',
   opening: 'Opening in Code…',
-  opened: 'Opened {path}:{line}',
+  dismiss: 'Dismiss',
   reconnect: 'Reconnect',
   'reconnect.confirm':
     'Reload the editor? Save your changes first. Files you chose before reconnecting are not reopened.',
@@ -48,13 +46,6 @@ export const en: Record<CodeServerKey, string> = {
   'queue.ended': 'The editor connection has ended. Reconnect, then choose the file again.',
   'queue.full': 'Too many files are waiting. Choose them again once the editor is ready.',
   'queue.expired': 'A file waited too long and was dropped. Choose it again.',
-  'state.idle': 'Not connected',
-  'state.pending': 'Connecting…',
-  'state.ready': 'Connected',
-  'state.disconnected': 'Disconnected',
-  'state.expired': 'Expired',
-  'state.closed': 'Closed',
-  'state.error': 'Error',
   'error.invalid_path': 'Only regular files can be opened.',
   'error.deadline_exceeded': 'The editor did not open the file in time. Choose it again.',
   'error.outcome_unknown':
@@ -87,7 +78,7 @@ export const zh: Record<CodeServerKey, string> = {
   frame: 'code-server：{cwd}',
   loading: '正在启动 code-server…',
   opening: '正在用 Code 打开…',
-  opened: '已打开 {path}:{line}',
+  dismiss: '关闭',
   reconnect: '重新连接',
   'reconnect.confirm': '要重新加载编辑器吗？请先保存更改。重新连接前选择的文件不会重新打开。',
   'cwd.changed': '工作文件夹已变为 {cwd}。请保存更改，然后重新连接以打开它。',
@@ -95,13 +86,6 @@ export const zh: Record<CodeServerKey, string> = {
   'queue.ended': '与编辑器的连接已结束。请重新连接，然后再次选择该文件。',
   'queue.full': '等待打开的文件过多。请在编辑器就绪后重新选择。',
   'queue.expired': '有文件等待时间过长，已被取消。请重新选择。',
-  'state.idle': '未连接',
-  'state.pending': '正在连接…',
-  'state.ready': '已连接',
-  'state.disconnected': '已断开',
-  'state.expired': '已过期',
-  'state.closed': '已关闭',
-  'state.error': '错误',
   'error.invalid_path': '只能打开普通文件。',
   'error.deadline_exceeded': '编辑器未能及时打开文件。请重新选择。',
   'error.outcome_unknown': '无法确认编辑器是否打开了文件，它可能稍后才显示。不会自动重新发送。',
@@ -131,7 +115,7 @@ export const ja: Record<CodeServerKey, string> = {
   frame: 'code-server: {cwd}',
   loading: 'code-server を起動しています…',
   opening: 'Code で開いています…',
-  opened: '{path}:{line} を開きました',
+  dismiss: '閉じる',
   reconnect: '再接続',
   'reconnect.confirm':
     'エディターを再読み込みします。先に変更を保存してください。再接続前に選んだファイルは開き直しません。',
@@ -142,13 +126,6 @@ export const ja: Record<CodeServerKey, string> = {
     'エディターとの接続が終了しています。再接続してから、もう一度ファイルを選んでください。',
   'queue.full': '待機中のファイルが多すぎます。エディターの準備ができてから選び直してください。',
   'queue.expired': '待機が長すぎたファイルを取り消しました。もう一度選んでください。',
-  'state.idle': '未接続',
-  'state.pending': '接続しています…',
-  'state.ready': '接続済み',
-  'state.disconnected': '切断されました',
-  'state.expired': '期限切れ',
-  'state.closed': '終了しました',
-  'state.error': 'エラー',
   'error.invalid_path': '開けるのは通常のファイルだけです。',
   'error.deadline_exceeded':
     'エディターが時間内にファイルを開けませんでした。もう一度選んでください。',

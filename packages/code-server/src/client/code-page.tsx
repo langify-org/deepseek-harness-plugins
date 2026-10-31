@@ -137,9 +137,9 @@ export function CodePage({ bus, call, reveal, t, useTabInfo }: CodePageProps): J
     const drain = async (): Promise<void> => {
       for (let file = bus.take(); file !== undefined; file = bus.take()) {
         try {
-          const opened = await call('open', { bindingId, address: file.address, line: file.line })
+          await call('open', { bindingId, address: file.address, line: file.line })
           if (generation.current !== bindingId) return
-          bus.notice({ key: 'opened', params: { path: opened.path, line: opened.line } })
+          // The editor showing the file is the confirmation.
           if (visible.current) frame.current?.focus()
         } catch (error) {
           if (generation.current !== bindingId) return
@@ -155,38 +155,61 @@ export function CodePage({ bus, call, reveal, t, useTabInfo }: CodePageProps): J
     })
   }, [view, state.phase, state.queue, bus, call, drains])
 
+  const ended = FINAL_PHASES.has(state.phase)
   const cwdChanged = view !== undefined && currentCwd !== undefined && currentCwd !== view.cwd
+  const notice = state.notice === undefined ? undefined : t(state.notice.key, state.notice.params)
+  const reconnectButton = (
+    <button type="button" style={styles.button} onClick={reconnect}>
+      {t('reconnect')}
+    </button>
+  )
+  // Without an editor, the page itself explains the state. With one, it shows
+  // only what needs attention, and keeps the editor even when the connection
+  // ended: it may hold unsaved changes.
   return (
     <div data-dsh-code-server={state.phase} style={styles.page}>
-      <div style={styles.toolbar}>
-        <strong>{t('title')}</strong>
-        <span role="status">{t(`state.${state.phase}`)}</span>
-        <span title={view?.cwd} style={styles.cwd}>
-          {view?.cwd}
-        </span>
-        <button type="button" style={styles.button} onClick={reconnect}>
-          {t('reconnect')}
-        </button>
-      </div>
-      {cwdChanged && <div style={styles.message}>{t('cwd.changed', { cwd: currentCwd })}</div>}
-      {state.notice !== undefined && (
-        <div role="status" style={styles.message}>
-          {t(state.notice.key, state.notice.params)}
-        </div>
-      )}
       {view === undefined ? (
-        <div style={styles.placeholder}>{t('loading')}</div>
+        <div role={ended ? 'alert' : 'status'} style={styles.panel}>
+          <span>{notice ?? t('loading')}</span>
+          {ended && reconnectButton}
+        </div>
       ) : (
-        <iframe
-          ref={frame}
-          key={view.bindingId}
-          src={view.url}
-          title={t('frame', { cwd: view.cwd })}
-          sandbox={SANDBOX}
-          allow="clipboard-read; clipboard-write"
-          referrerPolicy="no-referrer"
-          style={styles.frame}
-        />
+        <>
+          {notice !== undefined && (
+            <div role={ended ? 'alert' : 'status'} style={styles.banner}>
+              <span style={styles.text}>{notice}</span>
+              {ended ? (
+                reconnectButton
+              ) : (
+                <button
+                  type="button"
+                  aria-label={t('dismiss')}
+                  title={t('dismiss')}
+                  style={styles.button}
+                  onClick={() => bus.notice(undefined)}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          )}
+          {cwdChanged && !ended && (
+            <div role="status" style={styles.banner}>
+              <span style={styles.text}>{t('cwd.changed', { cwd: currentCwd })}</span>
+              {reconnectButton}
+            </div>
+          )}
+          <iframe
+            ref={frame}
+            key={view.bindingId}
+            src={view.url}
+            title={t('frame', { cwd: view.cwd })}
+            sandbox={SANDBOX}
+            allow="clipboard-read; clipboard-write"
+            referrerPolicy="no-referrer"
+            style={styles.frame}
+          />
+        </>
       )}
     </div>
   )
@@ -205,16 +228,30 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
+    // Sets the editor apart from the tab strip whatever the two themes are.
+    padding: 4,
+    boxSizing: 'border-box',
   },
-  toolbar: {
+  panel: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    padding: 16,
+    textAlign: 'center',
+    overflowWrap: 'anywhere',
+  },
+  banner: {
     display: 'flex',
     alignItems: 'center',
     gap: 8,
-    padding: '6px 8px',
+    padding: '4px 8px',
     fontSize: 12,
     borderBottom: '1px solid var(--dsw-alias-border-l3, #888)',
   },
-  cwd: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  text: { flex: 1, minWidth: 0, overflowWrap: 'anywhere' },
   button: {
     font: 'inherit',
     padding: '3px 8px',
@@ -224,7 +261,12 @@ const styles = {
     color: 'inherit',
     cursor: 'pointer',
   },
-  message: { fontSize: 12, padding: '4px 8px', overflowWrap: 'anywhere' },
-  placeholder: { padding: 16 },
-  frame: { display: 'block', flex: 1, width: '100%', minHeight: 0, border: 0 },
+  frame: {
+    display: 'block',
+    flex: 1,
+    width: '100%',
+    minHeight: 0,
+    border: 0,
+    borderRadius: 'var(--dsw-radius-sm, 8px)',
+  },
 } satisfies Record<string, CSSProperties>

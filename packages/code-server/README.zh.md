@@ -29,25 +29,26 @@ dsh plugin --profile <profile> add @langify-org/dsh-code-server
 
 ## 配置
 
-| 设置            | 默认值        | 含义                                                    |
-| --------------- | ------------- | ------------------------------------------------------- |
-| `command`       | `code-server` | 可执行文件的名称或路径。                                |
-| `userDataDir`   | 空            | code-server 的 `--user-data-dir`。为空时使用其默认值。  |
-| `extensionsDir` | 空            | code-server 的 `--extensions-dir`。为空时使用其默认值。 |
+| 设置            | 默认值        | 含义                                                                                                  |
+| --------------- | ------------- | ----------------------------------------------------------------------------------------------------- |
+| `command`       | `code-server` | 可执行文件的名称或路径。                                                                              |
+| `userDataDir`   | 空            | code-server 的 `--user-data-dir`。为空时使用其默认值。                                                |
+| `extensionsDir` | 空            | code-server 的 `--extensions-dir`。为空时使用其默认值。                                               |
+| `desktopPort`   | `41820`       | DSH Desktop 加载编辑器所用的 `127.0.0.1` 端口。请保持固定：编辑器的状态（如受信任的文件夹）按源保存。 |
 
 使用默认值时，编辑器会与你平时使用的 code-server 共享设置和扩展。请不要同时运行使用相同目录的另一个 code-server。
 
 ## 工作原理
 
-- 插件在需要时为 DSH 启动一个 code-server，监听只有你能打开的 Unix 套接字（位于 `0700` 目录中，权限为 `0600`），并关闭 code-server 自身的认证。它不会打开任何网络端口。
-- DSH 在自己的源下通过 `/code-server` 提供 code-server。每个请求和 WebSocket 都会先经过 DSH 的认证和来源检查，因此只有能访问 DSH 的地方（例如通过 Tailscale）才能访问 code-server。
-- 在 DSH Desktop 中，页面位于 `dsh-app://app`，code-server 会向该地址建立 WebSocket。中继会向 code-server 的页面注入一段小脚本，把 WebSocket 改为发往 Desktop 提供的 Host 地址（`__DSH_TRANSPORT__.streamBaseUrl`），Desktop 会为发往该地址的连接附加 DSH 的凭据。在浏览器中，该脚本不做任何改动。
+- 插件在需要时为 DSH 启动一个 code-server，监听只有你能打开的 Unix 套接字（位于 `0700` 目录中，权限为 `0600`），并关闭 code-server 自身的认证。code-server 本身不会打开任何网络端口。
+- 在浏览器中，DSH 在自己的源下通过 `/code-server` 提供编辑器。每个请求和 WebSocket 都会先经过 DSH 的认证和来源检查，因此只有能访问 DSH 的地方（例如通过 Tailscale）才能访问编辑器。
+- DSH Desktop 在 `dsh-app://app` 显示 DSH，code-server 无法在那里运行：它根据自身页面的地址构造服务器地址，而且该协议不支持 webview 所需的 Service Worker。Desktop 还会拒绝来自其他源、发往其 Host 的 WebSocket。因此在 Desktop 中，插件自己在 `127.0.0.1:<desktopPort>` 提供编辑器，这是一个独立于 DSH 的普通 http 源。Desktop 第一次打开 Code 页面时才开始监听。编辑器地址的路径中带有一个随机令牌，插件每次启动时重新生成；code-server 的所有地址都相对于其页面，因此每个请求都会带上它。只有经过 DSH 认证的页面才能拿到该令牌。该端口还会拒绝声明为其他主机名的请求，以防 DNS rebinding。
 - 每次启动前，插件都会把内置的 VS Code 扩展 **DSH Code Bridge**（`langify-org.dsh-code-bridge`）安装到 code-server 中，替换旧版本。
 - 每个 Code 页面都有自己的连接（binding）。页面把 binding 放在编辑器 URL 的片段中（这一部分不会发送到服务器），该编辑器窗口中的扩展读取它，并通过另一个私有套接字连接到插件。即使多个页面打开了同一个文件夹，文件也只会在对应的窗口中打开。
 
 ## 安全
 
-code-server 及其终端和扩展以你的身份运行，不受 DSH 沙箱和审批的约束。由于它与 DSH 同源，在 code-server 中运行的代码（包括扩展及其 webview）也能以你的会话使用 DSH。请只安装你信任的扩展。另请参阅 [SECURITY.zh.md](../../SECURITY.zh.md)。
+code-server 及其终端和扩展以你的身份运行，不受 DSH 沙箱和审批的约束。在浏览器中，编辑器与 DSH 同源，因此在 code-server 中运行的代码（包括扩展及其 webview）也能以你的会话使用 DSH。请只安装你信任的扩展。另请参阅 [SECURITY.zh.md](../../SECURITY.zh.md)。
 
 ## 手动检查
 
@@ -57,7 +58,8 @@ code-server 及其终端和扩展以你的身份运行，不受 DSH 沙箱和审
 2. 在 **Workspace files** 中选择的文本文件会在 Code 页面的对应行打开；图片仍使用 DSH 的查看器。
 3. 未登录时，`/code-server/` 和 `POST /api/langify-code-server/create` 返回 401，来自其他源的 WebSocket upgrade 返回 403。
 4. 会话的工作文件夹变化后，编辑器会询问是否重新打开；如有未保存的文件，会先要求保存，然后页面在新文件夹中重新打开编辑器。
-5. 关闭 Code 标签页会关闭其 binding；停止 DSH 会停止 code-server 并删除其套接字。
+5. 在 DSH Desktop 中，编辑器从 `http://127.0.0.1:41820/…` 加载，显示你的主题和文件图标，Markdown 预览可以打开；没有令牌时该端口返回 404。
+6. 关闭 Code 标签页会关闭其 binding；停止 DSH 会停止 code-server 并删除其套接字。
 
 ## 已知限制
 

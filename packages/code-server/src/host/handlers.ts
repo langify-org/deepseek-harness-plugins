@@ -15,6 +15,7 @@ import {
   RPC_CHANNEL,
   RPC_PREFIX,
   requestSchemas,
+  type Ingress,
   type Method,
   type Requests,
   type Responses,
@@ -22,7 +23,6 @@ import {
 import type { Bridge } from './bridge.ts'
 import type { CodeServer } from './code-server.ts'
 import { CodeServerError } from './errors.ts'
-import { RELAY_PREFIX } from './relay.ts'
 import type { Services } from './services.ts'
 
 type Handlers = {
@@ -35,6 +35,9 @@ interface SessionFolders {
   readonly original: string
 }
 
+/** Each ingress's address for the editor, ending in a slash. */
+export type EditorBases = { readonly [I in Ingress]: () => Promise<string> }
+
 /**
  * One exact route per method on DSH's shared RPC channel. DSH authenticates the
  * browser before a request reaches these routes.
@@ -43,16 +46,18 @@ export function rpcRoutes(
   services: Services,
   bridge: Bridge,
   codeServer: CodeServer,
+  editors: EditorBases,
 ): ConnectionFetchRoute[] {
   const handlers: Handlers = {
-    async create({ sessionId, ownerId }, signal) {
+    async create({ sessionId, ownerId, ingress }, signal) {
       const { cwd } = await sessionFolders(services, sessionId, signal)
       const folder = await localPath(services, cwd, cwd, 'directory', signal)
       // Start first: the window must load before its binding's connect timeout runs out.
       await codeServer.ensure()
+      const base = await editors[ingress]()
       signal.throwIfAborted()
       const bindingId = bridge.create(sessionId, ownerId, folder)
-      return { bindingId, cwd: folder, url: editorUrl(bindingId, folder) }
+      return { bindingId, cwd: folder, url: editorUrl(base, bindingId, folder) }
     },
     async watch({ sessionId, bindingId, revision }, signal) {
       // The page watches continuously, so this is where a changed working folder is noticed.
@@ -124,10 +129,10 @@ export function rpcRoutes(
   }))
 }
 
-/** The iframe URL, relative to the DSH page; its fragment tells the window's extension its binding. */
-function editorUrl(bindingId: string, cwd: string): string {
+/** The iframe URL; its fragment tells the window's extension its binding. */
+function editorUrl(base: string, bindingId: string, cwd: string): string {
   const query = new URLSearchParams({ folder: cwd })
-  return `${RELAY_PREFIX.slice(1)}/?${query.toString()}#${BINDING_FRAGMENT}=${bindingId}`
+  return `${base}?${query.toString()}#${BINDING_FRAGMENT}=${bindingId}`
 }
 
 function asCodeServerError(error: unknown): CodeServerError {

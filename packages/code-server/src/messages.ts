@@ -64,6 +64,8 @@ export const en: Messages = {
   'error.code_server_not_found':
     'code-server was not found. Install it, or set its command in the plugin settings.',
   'error.code_server_failed': 'code-server failed to start: {message}',
+  'error.desktop_port_in_use':
+    "The editor's port for DSH Desktop is taken: {message}. Choose another one with the plugin's desktopPort setting.",
   'error.unknown_binding': 'This editor connection is gone. Reconnect.',
   'error.not_ready': 'The editor is still starting.',
   'error.binding_disconnected': 'The editor window disconnected. Reconnect.',
@@ -109,6 +111,8 @@ export const zh: Messages = {
   'error.different_host': '此会话运行在其他文件系统上，Code 无法打开。',
   'error.code_server_not_found': '未找到 code-server。请安装它，或在插件设置中指定其命令。',
   'error.code_server_failed': 'code-server 启动失败：{message}',
+  'error.desktop_port_in_use':
+    '供 DSH Desktop 使用的编辑器端口已被占用：{message}。请在插件设置 desktopPort 中改用其他端口。',
   'error.unknown_binding': '与此编辑器的连接已不存在。请重新连接。',
   'error.not_ready': '编辑器仍在启动中。',
   'error.binding_disconnected': '编辑器窗口已断开。请重新连接。',
@@ -162,6 +166,8 @@ export const ja: Messages = {
   'error.code_server_not_found':
     'code-server が見つかりません。インストールするか、プラグインの設定でコマンドを指定してください。',
   'error.code_server_failed': 'code-server を起動できませんでした: {message}',
+  'error.desktop_port_in_use':
+    'DSH Desktop 用のエディターのポートが使われています: {message}。プラグインの設定 desktopPort で別の番号にしてください。',
   'error.unknown_binding': 'このエディターとの接続はもうありません。再接続してください。',
   'error.not_ready': 'エディターはまだ起動中です。',
   'error.binding_disconnected': 'エディターの画面が切断されました。再接続してください。',

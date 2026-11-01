@@ -11,7 +11,9 @@ import type { AddressInfo, Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest'
-import { RELAY_PREFIX, relayRequests, relayUpgrades, type Admission } from './relay.ts'
+import { relayRequests, relayUpgrades, type RelayOptions } from './relay.ts'
+
+const RELAY_PREFIX = '/code-server'
 
 /** Requests that reached the fake code-server. */
 const reached: { url: string | undefined; headers: IncomingHttpHeaders }[] = []
@@ -20,20 +22,11 @@ let codeServer: Server
 let dsh: Server
 let port: number
 
-// Stands in for DSH's browser authentication.
-const admission: Admission = ({ headers }) =>
-  !(headers instanceof Headers) && headers.cookie === 'dsh=ok' ? undefined : 401
-
 beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), 'relay-'))
   const socketPath = join(dir, 'code-server.sock')
   codeServer = createServer((req, res) => {
     reached.push({ url: req.url, headers: req.headers })
-    if (req.url?.startsWith('/?') === true) {
-      res.writeHead(200, { 'content-type': 'text/html', 'content-length': 36 })
-      res.end('<html><head lang="en"></head></html>')
-      return
-    }
     res.end('code-server')
   })
   codeServer.on('upgrade', (req, socket: Socket) => {
@@ -45,9 +38,15 @@ beforeAll(async () => {
   })
   codeServer.listen(socketPath)
   await once(codeServer, 'listening')
-  const relay = relayRequests(admission, async () => ({ socketPath, commit: 'commit' }))
-  dsh = createServer((req, res) => void relay(req, res))
-  dsh.on('upgrade', relayUpgrades(admission, socketPath))
+  const relay: RelayOptions = {
+    prefix: RELAY_PREFIX,
+    // Stands in for an ingress's authentication.
+    admit: (req) => (req.headers.cookie === 'dsh=ok' ? undefined : 401),
+    start: async () => ({ socketPath, commit: 'commit' }),
+  }
+  const handle = relayRequests(relay)
+  dsh = createServer((req, res) => void handle(req, res))
+  dsh.on('upgrade', relayUpgrades(relay))
   dsh.listen(0, '127.0.0.1')
   await once(dsh, 'listening')
   port = (dsh.address() as AddressInfo).port
@@ -121,18 +120,4 @@ it('relays authenticated WebSocket upgrades in both directions', async () => {
   expect(String(echo)).toBe('ping')
   expect(reached[0]?.headers).not.toHaveProperty('cookie')
   socket.destroy()
-})
-
-it("puts Desktop's WebSocket script ahead of code-server's page and serves it", async () => {
-  const page = await get(`${RELAY_PREFIX}/?folder=/tmp`, {
-    cookie: 'dsh=ok',
-    'accept-encoding': 'gzip',
-  })
-  expect(page.body).toBe(
-    '<html><head lang="en"><script src="./_dsh/desktop-websocket.js"></script></head></html>',
-  )
-  expect(reached[0]?.headers['accept-encoding']).toBe('identity')
-  const script = await get(`${RELAY_PREFIX}/_dsh/desktop-websocket.js`, { cookie: 'dsh=ok' })
-  expect(script.body).toContain('streamBaseUrl')
-  expect(reached).toHaveLength(1)
 })

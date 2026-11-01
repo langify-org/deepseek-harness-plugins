@@ -10,7 +10,7 @@ DSH 插件在 DSH Host 进程内，以启动 DSH 的用户权限运行，不受 
 
 ## 各插件的注意事项
 
-- **[@langify-org/dsh-code-server](packages/code-server)** 在 DSH 的认证之后，从 DSH 自己的源提供 code-server；code-server 本身只监听私有的 Unix 套接字。在 code-server 中运行的代码（包括终端、扩展及其 webview）会在 DSH 沙箱之外以你的身份运行，并且由于同源，它还能以你的会话使用 DSH。请像安装 DSH 插件一样对待安装 code-server 扩展。
+- **[@langify-org/dsh-code-server](packages/code-server)** 在 DSH 的认证之后提供 code-server：在浏览器中从 DSH 自己的源提供，在 DSH Desktop 中从 `127.0.0.1` 上的专用端口提供，该端口只能用交给经 DSH 认证页面的令牌打开。code-server 本身只监听私有的 Unix 套接字。在 code-server 中运行的代码（包括终端、扩展及其 webview）会在 DSH 沙箱之外以你的身份运行，并且在浏览器中由于同源，它还能以你的会话使用 DSH。请像安装 DSH 插件一样对待安装 code-server 扩展。
 
 ## 报告漏洞
 

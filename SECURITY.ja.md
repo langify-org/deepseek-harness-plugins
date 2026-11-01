@@ -10,7 +10,7 @@ DSH プラグインは DSH の Host プロセス内で、DSH を起動したユ�
 
 ## プラグインごとの注意
 
-- **[@langify-org/dsh-code-server](packages/code-server)** は、DSH の認証の内側で、DSH 自身のオリジンから code-server を配信します。code-server 自体は非公開の Unix socket でしか待ち受けません。code-server の中で動くコード（ターミナル、拡張、その webview）は、DSH のサンドボックスの外であなたとして動きます。さらに同一オリジンなので、あなたのセッションで DSH を操作することもできます。code-server の拡張を入れることは、DSH のプラグインを入れることと同じように扱ってください。
+- **[@langify-org/dsh-code-server](packages/code-server)** は、DSH の認証の内側で code-server を配信します。ブラウザーでは DSH 自身のオリジンから、DSH Desktop では `127.0.0.1` の専用ポートから配信し、専用ポートは DSH が認証したページに渡すトークンでしか開けません。code-server 自体は非公開の Unix socket でしか待ち受けません。code-server の中で動くコード（ターミナル、拡張、その webview）は、DSH のサンドボックスの外であなたとして動きます。さらにブラウザーでは同一オリジンなので、あなたのセッションで DSH を操作することもできます。code-server の拡張を入れることは、DSH のプラグインを入れることと同じように扱ってください。
 
 ## 脆弱性の報告
 

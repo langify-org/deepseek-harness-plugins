@@ -29,25 +29,26 @@ DSH の Web 版や Desktop 版では **Plugins** ページから追加できま�
 
 ## 設定
 
-| 設定            | 既定値        | 意味                                                           |
-| --------------- | ------------- | -------------------------------------------------------------- |
-| `command`       | `code-server` | 実行ファイルの名前またはパス。                                 |
-| `userDataDir`   | 空            | code-server の `--user-data-dir`。空なら code-server の既定。  |
-| `extensionsDir` | 空            | code-server の `--extensions-dir`。空なら code-server の既定。 |
+| 設定            | 既定値        | 意味                                                                                                                                                    |
+| --------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `command`       | `code-server` | 実行ファイルの名前またはパス。                                                                                                                          |
+| `userDataDir`   | 空            | code-server の `--user-data-dir`。空なら code-server の既定。                                                                                           |
+| `extensionsDir` | 空            | code-server の `--extensions-dir`。空なら code-server の既定。                                                                                          |
+| `desktopPort`   | `41820`       | DSH Desktop がエディターを読み込む `127.0.0.1` のポート。固定のままにしてください。信頼済みフォルダーなどエディターの状態はオリジンごとに保存されます。 |
 
 既定のままなら、普段使いの code-server と設定・拡張を共有します。同じディレクトリを使う別の code-server を同時に動かさないでください。
 
 ## 仕組み
 
-- プラグインは必要になったときに DSH 用の code-server を1つ起動します。待ち受けは本人だけが開ける Unix socket（`0700` のディレクトリ内の `0600`）で、code-server 自身の認証は無効にしています。ネットワークのポートは開きません。
-- DSH は自分のオリジンの `/code-server` で code-server を配信します。すべてのリクエストと WebSocket は、先に DSH の認証とオリジンの検査を通ります。そのため code-server には、DSH に届く場所（Tailscale 経由など）からだけ届きます。
-- DSH Desktop のページは `dsh-app://app` にあり、code-server はその宛先に WebSocket をつなごうとします。中継は code-server のページに小さなスクリプトを差し込み、WebSocket を Desktop が示す Host の宛先（`__DSH_TRANSPORT__.streamBaseUrl`）に付け替えます。Desktop はそこへの接続に DSH の認証情報を付けます。ブラウザーではこのスクリプトは何もしません。
+- プラグインは必要になったときに DSH 用の code-server を1つ起動します。待ち受けは本人だけが開ける Unix socket（`0700` のディレクトリ内の `0600`）で、code-server 自身の認証は無効にしています。code-server 自体はネットワークのポートを開きません。
+- ブラウザーでは、DSH が自分のオリジンの `/code-server` でエディターを配信します。すべてのリクエストと WebSocket は、先に DSH の認証とオリジンの検査を通ります。そのためエディターには、DSH に届く場所（Tailscale 経由など）からしか届きません。
+- DSH Desktop は DSH を `dsh-app://app` で表示します。code-server はここでは動きません。サーバーの宛先を自分のページのアドレスから作り、このスキームでは webview に必要な Service Worker も使えないためです。また Desktop は、自分以外のオリジンから Host への WebSocket を遮断します。そこで Desktop では、プラグイン自身が `127.0.0.1:<desktopPort>` でエディターを配信します。DSH とは別の、ふつうの http のオリジンです。待ち受けは、Desktop が初めて Code ページを開いたときに始めます。エディターのアドレスのパスには、プラグインの起動ごとに作るランダムなトークンが入ります。code-server はすべてをページからの相対パスで指すので、どのリクエストにもトークンが付きます。トークンを受け取れるのは、DSH が認証したページだけです。さらに、別のホスト名を名乗るリクエストは拒否し、DNS rebinding を防ぎます。
 - 起動のたびに、同梱の VS Code 拡張 **DSH Code Bridge**（`langify-org.dsh-code-bridge`）を code-server に入れ、古いものを置き換えます。
 - Code ページごとに専用の接続（binding）を作ります。ページは binding をエディターの URL の断片（サーバーには送られない部分）に入れ、そのエディター画面の拡張がそれを読み取って、別の非公開 socket でプラグインに接続します。同じフォルダーを複数のページで開いていても、ファイルはその画面にだけ開きます。
 
 ## セキュリティ
 
-code-server とそのターミナル・拡張は、あなたの権限で、DSH のサンドボックスや承認の外で動きます。さらに DSH と同じオリジンなので、code-server の中で動くコード（拡張やその webview を含む）は、あなたのセッションで DSH を操作することもできます。信頼できる拡張だけを入れてください。[SECURITY.ja.md](../../SECURITY.ja.md) も参照してください。
+code-server とそのターミナル・拡張は、あなたの権限で、DSH のサンドボックスや承認の外で動きます。ブラウザーではエディターが DSH と同じオリジンなので、code-server の中で動くコード（拡張やその webview を含む）は、あなたのセッションで DSH を操作することもできます。信頼できる拡張だけを入れてください。[SECURITY.ja.md](../../SECURITY.ja.md) も参照してください。
 
 ## 手動確認
 
@@ -57,7 +58,8 @@ code-server とそのターミナル・拡張は、あなたの権限で、DSH �
 2. **Workspace files** で選んだテキストファイルが Code ページの該当行で開く。画像は DSH のビューアーのまま開く。
 3. サインインしていないと `/code-server/` と `POST /api/langify-code-server/create` が 401 を返し、別オリジンからの WebSocket の upgrade は 403 を返す。
 4. セッションの作業フォルダーが変わると、エディターが開き直すかを尋ねる。未保存のファイルがあれば先に保存を求め、そのあとページが新しいフォルダーでエディターを開き直す。
-5. Code タブを閉じると binding が閉じる。DSH を止めると code-server も止まり、socket が消える。
+5. DSH Desktop では、エディターが `http://127.0.0.1:41820/…` から読み込まれ、テーマとファイルアイコンが出て、Markdown のプレビューが開く。トークンが無いとポートは 404 を返す。
+6. Code タブを閉じると binding が閉じる。DSH を止めると code-server も止まり、socket が消える。
 
 ## 既知の制約
 

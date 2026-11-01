@@ -1,5 +1,5 @@
 // Starts code-server on demand and keeps one instance for every page.
-import { rm } from 'node:fs/promises'
+import { rm, stat } from 'node:fs/promises'
 import { get } from 'node:http'
 import { homedir } from 'node:os'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -35,6 +35,11 @@ export class CodeServer {
   #starting: Promise<RunningCodeServer> | undefined
   #child: SubprocessHandle | undefined
   #disposed = false
+  /** The CLI with its directories, once resolved, to install the extension with. */
+  #cli: readonly string[] | undefined
+  /** The installed VSIX's modification time and size. */
+  #installed = ''
+  #installing: Promise<void> = Promise.resolve()
 
   /**
    * @param extension - VSIX installed before every start.
@@ -63,6 +68,19 @@ export class CodeServer {
     return this.#starting
   }
 
+  /**
+   * Install the bundled extension again if its VSIX changed since it was
+   * installed, so that windows opened from now on run it. Only a linked
+   * development copy of the plugin changes while it runs.
+   */
+  syncExtension(): Promise<void> {
+    const installing = this.#installing.then(async () => {
+      if (this.#cli !== undefined) await this.#installExtension(this.#cli)
+    })
+    this.#installing = installing.catch(() => {})
+    return installing
+  }
+
   async dispose(): Promise<void> {
     this.#disposed = true
     const child = this.#child
@@ -89,6 +107,7 @@ export class CodeServer {
         ? []
         : ['--extensions-dir', this.#options.extensionsDir]),
     ]
+    this.#cli = [command, ...directories]
     const version = await this.#run([command, '--version'])
     const commit = /^\S+ ([0-9a-f]{40}) /.exec(version)?.[1]
     if (commit === undefined) {
@@ -97,8 +116,9 @@ export class CodeServer {
         `Unrecognized code-server version: ${version}`,
       )
     }
-    // Same-version reinstalls are skipped without --force, which would keep a stale build.
-    await this.#run([command, ...directories, '--install-extension', this.#extension, '--force'])
+    // A fresh start installs the extension even when the VSIX is unchanged.
+    this.#installed = ''
+    await this.syncExtension()
     await rm(this.#socketPath, { force: true })
     // Disposed while the commands above ran: starting now would leave code-server behind.
     if (this.#disposed) throw new CodeServerError('code_server_failed', 'The plugin has stopped')
@@ -134,6 +154,15 @@ export class CodeServer {
     void child.done.then(exited, exited)
     await waitUntilListening(this.#socketPath, child)
     return running
+  }
+
+  async #installExtension(cli: readonly string[]): Promise<void> {
+    const { mtimeMs, size } = await stat(this.#extension)
+    const stamp = `${mtimeMs}:${size}`
+    if (stamp === this.#installed) return
+    // Same-version reinstalls are skipped without --force, which would keep a stale build.
+    await this.#run([...cli, '--install-extension', this.#extension, '--force'])
+    this.#installed = stamp
   }
 
   /** Run a short code-server CLI command and return its stdout. */

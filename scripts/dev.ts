@@ -2,8 +2,10 @@
 // tsdown rebuilds on change and DSH's HMR reloads the rebuilt plugins.
 // A package's dev.patch.yml, when present, overlays its development-only settings.
 // Extra arguments go to `dsh web`, e.g. `pnpm dev --port 3081`.
+// Only one runs at a time: two would share .dsh/, the builds, and the
+// directories a package's dev.patch.yml points at.
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pluginPackages, root } from './plugins.ts'
 
@@ -12,6 +14,13 @@ const env = { ...process.env, DSH_HOME: home }
 const plugins = pluginPackages()
 
 mkdirSync(home, { recursive: true })
+const lock = join(home, 'dev.pid')
+if (!acquire(lock)) {
+  console.error(`pnpm dev is already running (pid ${readFileSync(lock, 'utf8')}).`)
+  process.exit(1)
+}
+process.on('exit', () => rmSync(lock, { force: true }))
+
 execFileSync('pnpm', ['run', 'build'], { cwd: root, stdio: 'inherit' })
 for (const { dir } of plugins) {
   execFileSync('dsh', ['plugin', '--profile', 'web', 'add', `link:${dir}`], {
@@ -47,4 +56,35 @@ for (const child of children) {
     process.exitCode ??= code ?? 1
     for (const other of children) other.kill()
   })
+}
+// Stop the children and let their exit end this process, which releases the lock.
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => {
+    for (const child of children) child.kill(signal)
+  })
+}
+
+/** Create the lock file, replacing one whose process has ended. */
+function acquire(path: string): boolean {
+  try {
+    writeFileSync(path, String(process.pid), { flag: 'wx' })
+    return true
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error
+  }
+  if (running(Number(readFileSync(path, 'utf8')))) return false
+  rmSync(path)
+  return acquire(path)
+}
+
+function running(pid: number): boolean {
+  // An empty or damaged lock names no process; 0 would mean this process group.
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    // EPERM: the process exists but belongs to someone else.
+    return error instanceof Error && 'code' in error && error.code === 'EPERM'
+  }
 }

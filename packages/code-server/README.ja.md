@@ -52,7 +52,7 @@ code-server とそのターミナル・拡張は、あなたの権限で、DSH �
 
 ## 手動確認
 
-ブラウザーと実際の code-server が必要なため、`pnpm check` には含めていません。リリース前に `pnpm dev` で確認します。`pnpm dev` では [dev.patch.yml](dev.patch.yml) により、code-server の設定と拡張は `.dsh/code-server/` に置かれ、普段の code-server とは分かれます。Host とページの変更は `pnpm dev` の実行中に反映されますが、`src/extension/` の変更は `pnpm dev` を起動し直すまで反映されません。code-server が拡張を入れるのは起動時だけだからです。
+ブラウザーと実際の code-server が必要なため、`pnpm check` には含めていません。リリース前に `pnpm dev` で確認します。`pnpm dev` では [dev.patch.yml](dev.patch.yml) により、code-server の設定と拡張は `.dsh/code-server/` に置かれ、普段の code-server とは分かれます。Host とページの変更は `pnpm dev` の実行中に反映されますが、`src/extension/` の変更は、プラグインが次に開くエディターの画面から反映されるので、Code タブで**再接続**を押してください。
 
 1. **Code** にはエディターだけが表示され、上に何も出ない。エディターのステータスバーの **DSH** が接続済みになる（Restricted Mode でも）。接続が終わった後もエディターは残り、上の行に**再接続**が出る。
 2. **Workspace files** で選んだテキストファイルが Code ページの該当行で開く。画像は DSH のビューアーのまま開く。

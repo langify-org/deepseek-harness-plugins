@@ -189,8 +189,13 @@ function connect(
 
   socket.once('connect', () => socket.write(frame({ type: 'hello', bindingId, cwd })))
   socket.on('error', (error) => close(`Connection failed: ${error.message}`))
-  // Never reconnect: the page opens a new window with a new binding instead.
-  socket.on('close', () => close('Disconnected from DSH. Reopen the Code tab in DSH to reconnect.'))
+  // No retry from here: a reloaded window attaches again by itself, and Reconnect
+  // in DSH's Code tab opens a new window.
+  socket.on('close', () =>
+    close(
+      'Disconnected from DSH. If files from DSH stop opening here, use Reconnect in its Code tab.',
+    ),
+  )
   readFrames(
     socket,
     (value) => {

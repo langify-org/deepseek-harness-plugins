@@ -54,6 +54,7 @@ export function rpcRoutes(
       const folder = await localPath(services, cwd, cwd, 'directory', signal)
       // Start first: the window must load before its binding's connect timeout runs out.
       await codeServer.ensure()
+      await codeServer.syncExtension()
       const base = await editors[ingress]()
       signal.throwIfAborted()
       const bindingId = bridge.create(sessionId, ownerId, folder)

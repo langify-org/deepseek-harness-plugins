@@ -52,7 +52,7 @@ code-server runs as you, and so do its terminal and extensions, outside DSH's sa
 
 ## Manual checks
 
-These need a browser and a real code-server, so they are not part of `pnpm check`. Run them with `pnpm dev` before a release. Under `pnpm dev`, [dev.patch.yml](dev.patch.yml) keeps code-server's settings and extensions in `.dsh/code-server/`, apart from your own code-server. Changes to the host and the page reload while `pnpm dev` runs; a change under `src/extension/` takes effect only after restarting `pnpm dev`, because code-server installs the extension when it starts.
+These need a browser and a real code-server, so they are not part of `pnpm check`. Run them with `pnpm dev` before a release. Under `pnpm dev`, [dev.patch.yml](dev.patch.yml) keeps code-server's settings and extensions in `.dsh/code-server/`, apart from your own code-server. Changes to the host and the page reload while `pnpm dev` runs; a change under `src/extension/` reaches the next editor window the plugin opens, so press **Reconnect** in the Code tab.
 
 1. **Code** shows the editor with nothing above it, and the editor's status bar shows **DSH** as connected, also in Restricted Mode. After the connection ends, the editor stays and a line above it offers **Reconnect**.
 2. A text file chosen in **Workspace files** opens in the Code page at its line; an image keeps DSH's viewer.

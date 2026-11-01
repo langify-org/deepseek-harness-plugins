@@ -10,7 +10,7 @@ import {
 import type { UseSidebarRightTabInfo } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { isMessageKey } from '../messages.ts'
-import type { ErrorCode, Responses } from '../rpc.ts'
+import type { ErrorCode, Ingress, Responses } from '../rpc.ts'
 import { RpcFailure, type Face } from './face.ts'
 import type { NAMESPACE } from './locales.ts'
 import { FINAL_PHASES, type Notice } from './session-bus.ts'
@@ -20,9 +20,15 @@ export interface CodePageProps extends Face {
   readonly useTabInfo: UseSidebarRightTabInfo
 }
 
-// Same-origin with DSH: this keeps code-server from navigating the DSH page.
+// When the editor shares DSH's origin, this keeps it from navigating the DSH page.
 const SANDBOX =
   'allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-downloads'
+/**
+ * code-server runs only on an http(s) page. DSH Desktop's page is not one, so
+ * the editor comes from the plugin's own address instead (host/ingress/).
+ */
+const INGRESS: Ingress =
+  location.protocol === 'http:' || location.protocol === 'https:' ? 'dsh' : 'desktop'
 /** After these, the binding is gone and the page must reconnect. */
 const FINAL_ERRORS: ReadonlySet<string> = new Set<ErrorCode>([
   'unknown_binding',
@@ -96,7 +102,7 @@ export function CodePage({ bus, call, reveal, t, useTabInfo }: CodePageProps): J
     }
     void (async () => {
       try {
-        binding = await call('create', { ownerId: crypto.randomUUID() })
+        binding = await call('create', { ownerId: crypto.randomUUID(), ingress: INGRESS })
         if (disposed) {
           void call('close', { bindingId: binding.bindingId }).catch(() => {})
           return

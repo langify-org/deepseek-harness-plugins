@@ -13,6 +13,14 @@ export interface FileLocation {
 }
 
 /**
+ * Where the page loads the editor from. `dsh` serves it under DSH's own origin;
+ * `desktop` is the plugin's own address on 127.0.0.1, for DSH Desktop, whose
+ * page is not on http(s) (see host/ingress/).
+ */
+export const INGRESSES = ['dsh', 'desktop'] as const
+export type Ingress = (typeof INGRESSES)[number]
+
+/**
  * Lifecycle of one editor window's connection. Only `pending` and `ready` are
  * live; the others are final and the page creates a new binding to continue.
  */
@@ -42,6 +50,7 @@ export const HOST_ERROR_CODES = [
   'different_host',
   'code_server_not_found',
   'code_server_failed',
+  'desktop_port_in_use',
   'unknown_binding',
   'not_ready',
   'binding_disconnected',
@@ -55,7 +64,7 @@ export type ErrorCode = OpenErrorCode | (typeof HOST_ERROR_CODES)[number]
 
 export interface Requests {
   /** Prepare a new editor window for the session's working folder. */
-  create: { readonly sessionId: string; readonly ownerId: string }
+  create: { readonly sessionId: string; readonly ownerId: string; readonly ingress: Ingress }
   /**
    * Keep the binding alive and wait, up to 20 seconds, for it to move past
    * `revision`: -1 answers at once.
@@ -72,7 +81,7 @@ export interface Requests {
 }
 
 export interface Responses {
-  /** `url` is relative to the DSH page and loads the window into an iframe. */
+  /** `url` loads the window into an iframe; for `dsh` it is relative to the DSH page. */
   create: { readonly bindingId: string; readonly cwd: string; readonly url: string }
   /** `reconnect`: the editor asked for a new window, after handling unsaved changes itself. */
   watch: { readonly state: BindingState; readonly revision: number; readonly reconnect: boolean }
@@ -91,7 +100,7 @@ const position = z.int().min(1).max(1_000_000)
 const binding = { sessionId: id, bindingId: z.uuid() }
 
 export const requestSchemas: { readonly [M in Method]: z.ZodType<Requests[M]> } = {
-  create: z.strictObject({ sessionId: id, ownerId: id }),
+  create: z.strictObject({ sessionId: id, ownerId: id, ingress: z.enum(INGRESSES) }),
   watch: z.strictObject({ ...binding, revision: z.int().min(-1) }),
   close: z.strictObject(binding),
   open: z.strictObject({

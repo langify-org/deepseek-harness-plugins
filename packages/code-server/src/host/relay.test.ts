@@ -29,6 +29,11 @@ beforeAll(async () => {
   const socketPath = join(dir, 'code-server.sock')
   codeServer = createServer((req, res) => {
     reached.push({ url: req.url, headers: req.headers })
+    if (req.url?.startsWith('/?') === true) {
+      res.writeHead(200, { 'content-type': 'text/html', 'content-length': 36 })
+      res.end('<html><head lang="en"></head></html>')
+      return
+    }
     res.end('code-server')
   })
   codeServer.on('upgrade', (req, socket: Socket) => {
@@ -116,4 +121,18 @@ it('relays authenticated WebSocket upgrades in both directions', async () => {
   expect(String(echo)).toBe('ping')
   expect(reached[0]?.headers).not.toHaveProperty('cookie')
   socket.destroy()
+})
+
+it("puts Desktop's WebSocket script ahead of code-server's page and serves it", async () => {
+  const page = await get(`${RELAY_PREFIX}/?folder=/tmp`, {
+    cookie: 'dsh=ok',
+    'accept-encoding': 'gzip',
+  })
+  expect(page.body).toBe(
+    '<html><head lang="en"><script src="./_dsh/desktop-websocket.js"></script></head></html>',
+  )
+  expect(reached[0]?.headers['accept-encoding']).toBe('identity')
+  const script = await get(`${RELAY_PREFIX}/_dsh/desktop-websocket.js`, { cookie: 'dsh=ok' })
+  expect(script.body).toContain('streamBaseUrl')
+  expect(reached).toHaveLength(1)
 })

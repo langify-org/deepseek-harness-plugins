@@ -41,6 +41,7 @@ With the defaults, the editor shares settings and extensions with your own code-
 
 - The plugin starts one code-server for DSH on demand, listening on a Unix socket that only you can open (mode `0600` in a `0700` directory), with code-server's own authentication off. It never opens a network port.
 - DSH serves code-server under `/code-server` on its own origin. Every request and WebSocket passes DSH's authentication and origin check first, so code-server is reachable wherever DSH is, for example over Tailscale, and nowhere else.
+- In DSH Desktop the page lives at `dsh-app://app`, and code-server would dial its WebSockets at that host. The relay adds a small script to code-server's page that sends them to the address Desktop gives its Host (`__DSH_TRANSPORT__.streamBaseUrl`), where Desktop adds DSH's credentials. In a browser the script changes nothing.
 - Before each start, the plugin installs its bundled VS Code extension, **DSH Code Bridge** (`langify-org.dsh-code-bridge`), into code-server, replacing any older copy.
 - Each Code page gets its own connection ("binding"). The page puts the binding in the editor's URL fragment, which never reaches a server; the extension in that editor window reads it back and connects to the plugin over another private socket. Files open in that window only, even when several pages show the same folder.
 

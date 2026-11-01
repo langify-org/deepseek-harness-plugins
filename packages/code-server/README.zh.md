@@ -41,6 +41,7 @@ dsh plugin --profile <profile> add @langify-org/dsh-code-server
 
 - 插件在需要时为 DSH 启动一个 code-server，监听只有你能打开的 Unix 套接字（位于 `0700` 目录中，权限为 `0600`），并关闭 code-server 自身的认证。它不会打开任何网络端口。
 - DSH 在自己的源下通过 `/code-server` 提供 code-server。每个请求和 WebSocket 都会先经过 DSH 的认证和来源检查，因此只有能访问 DSH 的地方（例如通过 Tailscale）才能访问 code-server。
+- 在 DSH Desktop 中，页面位于 `dsh-app://app`，code-server 会向该地址建立 WebSocket。中继会向 code-server 的页面注入一段小脚本，把 WebSocket 改为发往 Desktop 提供的 Host 地址（`__DSH_TRANSPORT__.streamBaseUrl`），Desktop 会为发往该地址的连接附加 DSH 的凭据。在浏览器中，该脚本不做任何改动。
 - 每次启动前，插件都会把内置的 VS Code 扩展 **DSH Code Bridge**（`langify-org.dsh-code-bridge`）安装到 code-server 中，替换旧版本。
 - 每个 Code 页面都有自己的连接（binding）。页面把 binding 放在编辑器 URL 的片段中（这一部分不会发送到服务器），该编辑器窗口中的扩展读取它，并通过另一个私有套接字连接到插件。即使多个页面打开了同一个文件夹，文件也只会在对应的窗口中打开。
 

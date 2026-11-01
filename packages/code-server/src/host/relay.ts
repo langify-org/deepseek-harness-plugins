@@ -9,17 +9,22 @@ import {
   type ServerResponse,
 } from 'node:http'
 import type { Duplex } from 'node:stream'
+import { buffer } from 'node:stream/consumers'
 import type {
   ConnectionRequestRejection,
   ConnectionTrustRequest,
 } from '@deepseek-ai/dsh-client-connection'
 import type { RunningCodeServer } from './code-server.ts'
+import { DESKTOP_WEBSOCKET_SCRIPT } from './desktop-websocket.ts'
 
 /** Path prefix code-server is served under, relative to the DSH page. */
 export const RELAY_PREFIX = '/code-server'
 
 /** DSH's Host/Origin and browser authentication check. */
 export type Admission = (request: ConnectionTrustRequest) => ConnectionRequestRejection
+
+/** Served by the relay itself, below the prefix; code-server has no such route. */
+const SCRIPT_PATH = '/_dsh/desktop-websocket.js'
 
 /** DSH's credentials are not code-server's business. */
 const PRIVATE_HEADERS = new Set(['cookie', 'authorization'])
@@ -52,14 +57,28 @@ export function relayRequests(
       res.end(error instanceof Error ? error.message : 'code-server is unavailable')
       return
     }
+    const path = upstreamPath(req.url)
+    const pathname = new URL(path, 'http://code-server').pathname
+    if (req.method === 'GET' && pathname === SCRIPT_PATH) {
+      res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8' })
+      res.end(DESKTOP_WEBSOCKET_SCRIPT)
+      return
+    }
+    // The editor's page gets the script; uncompressed, so it can be edited.
+    const page = req.method === 'GET' && pathname === '/'
+    const headers = upstreamHeaders(req.headers)
     const upstream = request(
       {
         socketPath: server.socketPath,
         method: req.method,
-        path: upstreamPath(req.url),
-        headers: upstreamHeaders(req.headers),
+        path,
+        headers: page ? { ...headers, 'accept-encoding': 'identity' } : headers,
       },
       (response) => {
+        if (page && response.headers['content-type']?.startsWith('text/html') === true) {
+          sendPage(response, res).catch(() => res.destroy())
+          return
+        }
         res.writeHead(response.statusCode ?? 502, response.statusMessage, response.headers)
         response.pipe(res)
       },
@@ -71,6 +90,15 @@ export function relayRequests(
     res.on('close', () => upstream.destroy())
     req.pipe(upstream)
   }
+}
+
+/** Send code-server's page with the script ahead of code-server's own. */
+async function sendPage(response: IncomingMessage, res: ServerResponse): Promise<void> {
+  const html = (await buffer(response))
+    .toString('utf8')
+    .replace(/<head[^>]*>/i, (head) => `${head}<script src=".${SCRIPT_PATH}"></script>`)
+  const { 'content-length': _length, ...headers } = response.headers
+  res.writeHead(response.statusCode ?? 502, response.statusMessage, headers).end(html)
 }
 
 /** Handler for code-server's WebSocket upgrades, which arrive on one exact path. */

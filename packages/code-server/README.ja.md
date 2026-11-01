@@ -41,6 +41,7 @@ DSH の Web 版や Desktop 版では **Plugins** ページから追加できま�
 
 - プラグインは必要になったときに DSH 用の code-server を1つ起動します。待ち受けは本人だけが開ける Unix socket（`0700` のディレクトリ内の `0600`）で、code-server 自身の認証は無効にしています。ネットワークのポートは開きません。
 - DSH は自分のオリジンの `/code-server` で code-server を配信します。すべてのリクエストと WebSocket は、先に DSH の認証とオリジンの検査を通ります。そのため code-server には、DSH に届く場所（Tailscale 経由など）からだけ届きます。
+- DSH Desktop のページは `dsh-app://app` にあり、code-server はその宛先に WebSocket をつなごうとします。中継は code-server のページに小さなスクリプトを差し込み、WebSocket を Desktop が示す Host の宛先（`__DSH_TRANSPORT__.streamBaseUrl`）に付け替えます。Desktop はそこへの接続に DSH の認証情報を付けます。ブラウザーではこのスクリプトは何もしません。
 - 起動のたびに、同梱の VS Code 拡張 **DSH Code Bridge**（`langify-org.dsh-code-bridge`）を code-server に入れ、古いものを置き換えます。
 - Code ページごとに専用の接続（binding）を作ります。ページは binding をエディターの URL の断片（サーバーには送られない部分）に入れ、そのエディター画面の拡張がそれを読み取って、別の非公開 socket でプラグインに接続します。同じフォルダーを複数のページで開いていても、ファイルはその画面にだけ開きます。
 

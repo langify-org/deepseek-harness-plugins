@@ -1,6 +1,7 @@
 // Connects each editor window's extension host to the page that created it.
-// A binding is created per iframe, handed to the window through its URL, and
-// claimed once by the extension over a private Unix socket.
+// A binding is created per iframe and handed to the window through its URL.
+// The binding belongs to the page; the extension in that window attaches to it
+// over a private Unix socket, and attaches again whenever the window reloads.
 import { randomUUID } from 'node:crypto'
 import { chmod } from 'node:fs/promises'
 import { createServer, type Server, type Socket } from 'node:net'
@@ -15,7 +16,7 @@ import {
 import type { BindingState, ErrorCode, FileLocation, Responses } from '../rpc.ts'
 import { CodeServerError } from './errors.ts'
 
-/** An unclaimed binding expires this long after creation. */
+/** A binding without a window expires this long after it was created or lost its window. */
 export const CONNECT_TIMEOUT_MS = 60_000
 /** A binding expires this long after the page last watched it. */
 export const LEASE_MS = 120_000
@@ -38,7 +39,8 @@ interface Binding {
   readonly sessionId: string
   readonly ownerId: string
   readonly cwd: string
-  readonly connectBy: number
+  /** While pending: when the binding expires unless a window attaches. */
+  connectBy: number
   state: BindingState
   /** Counts the changes a watching page has not seen: state and reconnect requests. */
   revision: number
@@ -47,13 +49,13 @@ interface Binding {
   announcedCwd: string
   leaseUntil: number
   timer?: NodeJS.Timeout
-  peer?: Socket
+  /** The attached window's connection. */
+  peer: Socket | undefined
   readonly opens: Map<string, PendingOpen>
   readonly watchers: Set<() => void>
 }
 
 const finalError: Record<FinalState, ErrorCode> = {
-  disconnected: 'binding_disconnected',
   expired: 'binding_expired',
   closed: 'binding_closed',
 }
@@ -106,6 +108,7 @@ export class Bridge {
       reconnect: false,
       announcedCwd: cwd,
       leaseUntil: now + LEASE_MS,
+      peer: undefined,
       opens: new Map(),
       watchers: new Set(),
     }
@@ -238,21 +241,31 @@ export class Bridge {
     binding.timer = setTimeout(() => this.#finish(binding, 'expired'), deadline - Date.now())
   }
 
+  /** Let go of the window: its unanswered requests have an unknown outcome. */
+  #detach(binding: Binding, reason: string): void {
+    binding.peer?.destroy()
+    binding.peer = undefined
+    for (const open of binding.opens.values()) {
+      clearTimeout(open.timer)
+      open.reject(new CodeServerError('outcome_unknown', `${reason} before the editor answered`))
+    }
+    binding.opens.clear()
+  }
+
+  /** Wait for the window again, as for a new binding. */
+  #lose(binding: Binding): void {
+    this.#detach(binding, 'The editor window went away')
+    binding.state = 'pending'
+    binding.connectBy = Date.now() + CONNECT_TIMEOUT_MS
+    this.#schedule(binding)
+    this.#changed(binding)
+  }
+
   /** Enter a final state once; the record stays for a lease so watches can read it. */
   #finish(binding: Binding, state: FinalState): void {
     if (binding.state !== 'pending' && binding.state !== 'ready') return
     binding.state = state
-    binding.peer?.destroy()
-    for (const open of binding.opens.values()) {
-      clearTimeout(open.timer)
-      open.reject(
-        new CodeServerError(
-          'outcome_unknown',
-          `The binding was ${state} before the editor answered`,
-        ),
-      )
-    }
-    binding.opens.clear()
+    this.#detach(binding, `The binding was ${state}`)
     clearTimeout(binding.timer)
     binding.timer = setTimeout(() => this.#bindings.delete(binding.id), LEASE_MS)
     this.#changed(binding)
@@ -272,7 +285,7 @@ export class Bridge {
     socket.on('close', () => {
       this.#sockets.delete(socket)
       clearTimeout(helloTimer)
-      if (binding?.peer === socket) this.#finish(binding, 'disconnected')
+      if (binding?.peer === socket) this.#lose(binding)
     })
     readFrames(
       socket,
@@ -283,10 +296,12 @@ export class Bridge {
           const hello = helloSchema.safeParse(value)
           if (!hello.success) return reject('invalid_hello', 'Expected a hello frame')
           const candidate = this.#bindings.get(hello.data.bindingId)
-          if (candidate?.state !== 'pending')
-            return reject('binding_unavailable', 'The binding cannot be claimed')
+          if (candidate?.state !== 'pending' && candidate?.state !== 'ready')
+            return reject('binding_unavailable', 'The binding has ended')
           if (candidate.cwd !== hello.data.cwd)
             return reject('cwd_mismatch', 'The window opened another folder')
+          // A reloaded window replaces its earlier self, which code-server may keep running.
+          this.#detach(candidate, 'Another window took over')
           binding = candidate
           binding.peer = socket
           binding.state = 'ready'

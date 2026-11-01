@@ -50,7 +50,7 @@ async function editorWindow(
   return { socket, reply: await next(), next }
 }
 
-it('expires a binding no window claims', async () => {
+it('expires a binding no window attaches to', async () => {
   const bindingId = bridge.create('session', 'page', CWD)
   vi.advanceTimersByTime(CONNECT_TIMEOUT_MS - 1)
   expect(await state(bindingId)).toBe('pending')
@@ -72,7 +72,7 @@ it('keeps a connected window while the page watches, and drops it when watches s
   await closed
 })
 
-it('lets one window of the same folder claim a binding, once', async () => {
+it('attaches a window of the same folder, and lets a reloaded window take over', async () => {
   const bindingId = bridge.create('session', 'page', CWD)
   const refused = await editorWindow(bindingId, '/elsewhere')
   expect(refused.reply).toMatchObject({ code: 'cwd_mismatch' })
@@ -80,11 +80,19 @@ it('lets one window of the same folder claim a binding, once', async () => {
   refused.socket.write(frame({ type: 'hello', bindingId, cwd: CWD }))
   await once(refused.socket, 'close')
   expect(await state(bindingId)).toBe('pending')
+
+  const first = await editorWindow(bindingId)
+  expect(first.reply).toEqual({ type: 'accepted', bindingId })
+  const replaced = once(first.socket, 'close')
   expect((await editorWindow(bindingId)).reply).toEqual({ type: 'accepted', bindingId })
+  await replaced
+  expect(await state(bindingId)).toBe('ready')
+
+  bridge.close('session', bindingId)
   expect((await editorWindow(bindingId)).reply).toMatchObject({ code: 'binding_unavailable' })
 })
 
-it('reports an unknown outcome when the window does not answer or disconnects', async () => {
+it('reports an unknown outcome when the window does not answer or goes away', async () => {
   const bindingId = bridge.create('session', 'page', CWD)
   const editor = await editorWindow(bindingId)
 
@@ -104,7 +112,10 @@ it('reports an unknown outcome when the window does not answer or disconnects', 
   await editor.next()
   editor.socket.destroy()
   await expect(cut).rejects.toMatchObject({ code: 'outcome_unknown' })
-  expect(await state(bindingId)).toBe('disconnected')
+  // Waits for the window as for a new binding: it may be reloading.
+  expect(await state(bindingId)).toBe('pending')
+  vi.advanceTimersByTime(CONNECT_TIMEOUT_MS)
+  expect(await state(bindingId)).toBe('expired')
 })
 
 it('answers a watch as soon as the binding changes, and otherwise after a while', async () => {

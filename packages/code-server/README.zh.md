@@ -44,7 +44,7 @@ dsh plugin --profile <profile> add @langify-org/dsh-code-server
 - 在浏览器中，DSH 在自己的源下通过 `/code-server` 提供编辑器。每个请求和 WebSocket 都会先经过 DSH 的认证和来源检查，因此只有能访问 DSH 的地方（例如通过 Tailscale）才能访问编辑器。
 - DSH Desktop 在 `dsh-app://app` 显示 DSH，code-server 无法在那里运行：它根据自身页面的地址构造服务器地址，而且该协议不支持 webview 所需的 Service Worker。Desktop 还会拒绝来自其他源、发往其 Host 的 WebSocket。因此在 Desktop 中，插件自己在 `127.0.0.1:<desktopPort>` 提供编辑器，这是一个独立于 DSH 的普通 http 源。Desktop 第一次打开 Code 页面时才开始监听。编辑器地址的路径中带有一个随机令牌，插件每次启动时重新生成；code-server 的所有地址都相对于其页面，因此每个请求都会带上它。只有经过 DSH 认证的页面才能拿到该令牌。该端口还会拒绝声明为其他主机名的请求，以防 DNS rebinding。
 - 每次启动前，插件都会把内置的 VS Code 扩展 **DSH Code Bridge**（`langify-org.dsh-code-bridge`）安装到 code-server 中，替换旧版本。
-- 每个 Code 页面都有自己的连接（binding）。页面把 binding 放在编辑器 URL 的片段中（这一部分不会发送到服务器），该编辑器窗口中的扩展读取它，并通过另一个私有套接字连接到插件。即使多个页面打开了同一个文件夹，文件也只会在对应的窗口中打开。
+- 每个 Code 页面都有自己的连接（binding）。页面把 binding 放在编辑器 URL 的片段中（这一部分不会发送到服务器），该编辑器窗口中的扩展读取它，并通过另一个私有套接字连接到插件。即使多个页面打开了同一个文件夹，文件也只会在对应的窗口中打开。编辑器窗口重新加载时（例如在你信任其文件夹之后），该窗口中的扩展会重新连接到同一个 binding；页面最多等待一分钟。
 
 ## 安全
 
@@ -59,7 +59,8 @@ code-server 及其终端和扩展以你的身份运行，不受 DSH 沙箱和审
 3. 未登录时，`/code-server/` 和 `POST /api/langify-code-server/create` 返回 401，来自其他源的 WebSocket upgrade 返回 403。
 4. 会话的工作文件夹变化后，编辑器会询问是否重新打开；如有未保存的文件，会先要求保存，然后页面在新文件夹中重新打开编辑器。
 5. 在 DSH Desktop 中，编辑器从 `http://127.0.0.1:41820/…` 加载，显示你的主题和文件图标，Markdown 预览可以打开；没有令牌时该端口返回 404。
-6. 关闭 Code 标签页会关闭其 binding；停止 DSH 会停止 code-server 并删除其套接字。
+6. 在编辑器中执行 **Developer: Reload Window** 之后，在 DSH 中选择的文件仍会在该窗口打开，无需**重新连接**。
+7. 关闭 Code 标签页会关闭其 binding；停止 DSH 会停止 code-server 并删除其套接字。
 
 ## 已知限制
 

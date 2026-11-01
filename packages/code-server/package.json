@@ -1,6 +1,6 @@
 {
   "name": "@langify-org/dsh-code-server",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Edit the session's working folder in code-server inside DeepSeek Harness, served through DSH's authenticated web server",
   "keywords": [
     "code-server",

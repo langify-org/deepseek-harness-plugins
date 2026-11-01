@@ -1,5 +1,11 @@
 # @langify-org/dsh-code-server
 
+## 0.2.2
+
+### Patch Changes
+
+- a5b55b9: Before opening an editor window, install the bundled extension again if its VSIX changed since code-server started. This only happens for a linked development copy, where a rebuilt extension now reaches the next window without restarting DSH. The log line of a window that lost its connection no longer tells you to reopen the Code tab; a reloaded window reattaches by itself.
+
 ## 0.2.1
 
 ### Patch Changes

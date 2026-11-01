@@ -32,7 +32,7 @@ pre-commit 钩子（lefthook）会格式化并 lint 已暂存的文件。
 
 ## 开发流程
 
-`pnpm dev` 将 DSH 的状态保存在 `.dsh/` 中，与你日常使用的 DSH 分开。它会构建各包，将其链接到该目录下的 `web` profile，然后启动 `tsdown --watch` 和 DSH Web。保存源文件后，包会被重新构建，DSH 的 HMR 无需重启即可替换正在运行的插件。`pnpm dev` 之后的参数会传给 `dsh web`，例如 `pnpm dev --port 3081`。
+`pnpm dev` 将 DSH 的状态保存在 `.dsh/` 中，与你日常使用的 DSH 分开。它会构建各包，将其链接到该目录下的 `web` profile，然后启动 `tsdown --watch` 和 DSH Web。保存源文件后，包会被重新构建，DSH 的 HMR 无需重启即可替换正在运行的插件。`pnpm dev` 之后的参数会传给 `dsh web`，例如 `pnpm dev --port 3081`。同一时间只能运行一个 `pnpm dev`，因为两个会争用 `.dsh/` 和构建产物；第二个会显示第一个的进程 ID 并退出。
 
 包可以把仅用于开发的设置放在 `package.json` 旁边的 `dev.patch.yml` 中；`pnpm dev` 会应用它，而且它不会被发布。插件在 DSH 之外写入的内容，应在这里用 `!!js dshHomePath(...)` 指向 `.dsh/` 内部，例如 [`packages/code-server/dev.patch.yml`](packages/code-server/dev.patch.yml) 就这样处理了 code-server 的设置和扩展。
 

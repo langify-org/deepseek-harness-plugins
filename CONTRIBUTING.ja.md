@@ -32,7 +32,7 @@ pre-commit フック（lefthook）が staged ファイルを整形・lint しま
 
 ## 開発の流れ
 
-`pnpm dev` は DSH の状態を `.dsh/` に置き、普段使いの DSH とは分けます。パッケージをビルドし、そこの `web` プロファイルにリンクし、`tsdown --watch` と DSH Web を起動します。ソースを保存するとパッケージが再ビルドされ、DSH の HMR が再起動なしで動作中のプラグインを差し替えます。`pnpm dev` の後ろの引数は `dsh web` に渡ります（例: `pnpm dev --port 3081`）。
+`pnpm dev` は DSH の状態を `.dsh/` に置き、普段使いの DSH とは分けます。パッケージをビルドし、そこの `web` プロファイルにリンクし、`tsdown --watch` と DSH Web を起動します。ソースを保存するとパッケージが再ビルドされ、DSH の HMR が再起動なしで動作中のプラグインを差し替えます。`pnpm dev` の後ろの引数は `dsh web` に渡ります（例: `pnpm dev --port 3081`）。`pnpm dev` は同時に1つだけ動きます。2つ動くと `.dsh/` とビルドを取り合うためで、2つ目は先に動いているプロセスの ID を示して止まります。
 
 開発時だけの設定は、パッケージの `package.json` の隣の `dev.patch.yml` に置けます。`pnpm dev` がこれを適用し、公開物には含まれません。プラグインが DSH の外に書き込むものは、ここで `!!js dshHomePath(...)` を使って `.dsh/` の中に向けます。例は、code-server の設定と拡張の置き場所を向けている [`packages/code-server/dev.patch.yml`](packages/code-server/dev.patch.yml) です。
 

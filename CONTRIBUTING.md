@@ -32,7 +32,7 @@ A pre-commit hook (lefthook) formats and lints staged files.
 
 ## Development loop
 
-`pnpm dev` keeps DSH state in `.dsh/`, separate from your own DSH installation. It builds the packages, links them into the `web` profile there, starts `tsdown --watch`, and starts DSH Web. Saving a source file rebuilds the package and DSH's HMR replaces the running plugin without a restart. Arguments after `pnpm dev` go to `dsh web`, for example `pnpm dev --port 3081`.
+`pnpm dev` keeps DSH state in `.dsh/`, separate from your own DSH installation. It builds the packages, links them into the `web` profile there, starts `tsdown --watch`, and starts DSH Web. Saving a source file rebuilds the package and DSH's HMR replaces the running plugin without a restart. Arguments after `pnpm dev` go to `dsh web`, for example `pnpm dev --port 3081`. Only one `pnpm dev` runs at a time, since two would share `.dsh/` and the builds; a second one stops with the first one's process ID.
 
 A package can keep development-only settings in a `dev.patch.yml` beside its `package.json`; `pnpm dev` applies it, and it is not published. Point anything the plugin writes outside DSH into `.dsh/` there with `!!js dshHomePath(...)`, as [`packages/code-server/dev.patch.yml`](packages/code-server/dev.patch.yml) does for code-server's settings and extensions.
 

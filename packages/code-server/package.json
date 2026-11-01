@@ -33,7 +33,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsdown && cd extension && vsce package --no-dependencies --skip-license --out dsh-code-bridge.vsix",
+    "build": "tsdown",
     "typecheck": "tsc -p src/client"
   },
   "dependencies": {

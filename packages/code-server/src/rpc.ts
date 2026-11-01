@@ -21,10 +21,11 @@ export const INGRESSES = ['dsh', 'desktop'] as const
 export type Ingress = (typeof INGRESSES)[number]
 
 /**
- * Lifecycle of one editor window's connection. Only `pending` and `ready` are
- * live; the others are final and the page creates a new binding to continue.
+ * Lifecycle of one Code page's binding: `pending` while no editor window is
+ * attached, `ready` while one is. A window attaches again after it reloads.
+ * `expired` and `closed` are final; the page creates a new binding to continue.
  */
-export type BindingState = 'pending' | 'ready' | 'disconnected' | 'expired' | 'closed'
+export type BindingState = 'pending' | 'ready' | 'expired' | 'closed'
 
 /**
  * Why the extension could not open a file. `outcome_unknown` means the editor
@@ -53,7 +54,6 @@ export const HOST_ERROR_CODES = [
   'desktop_port_in_use',
   'unknown_binding',
   'not_ready',
-  'binding_disconnected',
   'binding_expired',
   'binding_closed',
   'internal_error',
@@ -113,7 +113,7 @@ export const requestSchemas: { readonly [M in Method]: z.ZodType<Requests[M]> } 
 export const responseSchemas: { readonly [M in Method]: z.ZodType<Responses[M]> } = {
   create: z.strictObject({ bindingId: z.uuid(), cwd: z.string(), url: z.string() }),
   watch: z.strictObject({
-    state: z.enum(['pending', 'ready', 'disconnected', 'expired', 'closed']),
+    state: z.enum(['pending', 'ready', 'expired', 'closed']),
     revision: z.int().nonnegative(),
     reconnect: z.boolean(),
   }),

@@ -32,7 +32,6 @@ const INGRESS: Ingress =
 /** After these, the binding is gone and the page must reconnect. */
 const FINAL_ERRORS: ReadonlySet<string> = new Set<ErrorCode>([
   'unknown_binding',
-  'binding_disconnected',
   'binding_expired',
   'binding_closed',
 ])

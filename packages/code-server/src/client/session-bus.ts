@@ -6,12 +6,7 @@ import type { MessageKey } from '../messages.ts'
 export type Phase = 'idle' | 'error' | BindingState
 
 /** After these the page must reconnect; files are never sent to another window. */
-export const FINAL_PHASES: ReadonlySet<Phase> = new Set<Phase>([
-  'disconnected',
-  'expired',
-  'closed',
-  'error',
-])
+export const FINAL_PHASES: ReadonlySet<Phase> = new Set<Phase>(['expired', 'closed', 'error'])
 
 export interface Notice {
   readonly key: MessageKey

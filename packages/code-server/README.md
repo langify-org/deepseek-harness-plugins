@@ -44,7 +44,7 @@ With the defaults, the editor shares settings and extensions with your own code-
 - In a browser, DSH serves the editor under `/code-server` on its own origin. Every request and WebSocket passes DSH's authentication and origin check first, so the editor is reachable wherever DSH is, for example over Tailscale, and nowhere else.
 - DSH Desktop shows DSH at `dsh-app://app`, where code-server cannot run: it builds its server's addresses from its own page's, and that scheme allows no service workers, which webviews need. Desktop also refuses WebSockets to its Host from any other origin. So in Desktop the plugin serves the editor itself, on `127.0.0.1:<desktopPort>`, a plain http origin apart from DSH's. It starts listening when Desktop first opens the Code page. The editor's address carries in its path a random token, made anew whenever the plugin starts; code-server addresses everything relative to its page, so every request carries it. Only pages DSH has authenticated receive the token. The port also refuses requests that name another host, which stops DNS rebinding.
 - Before each start, the plugin installs its bundled VS Code extension, **DSH Code Bridge** (`langify-org.dsh-code-bridge`), into code-server, replacing any older copy.
-- Each Code page gets its own connection ("binding"). The page puts the binding in the editor's URL fragment, which never reaches a server; the extension in that editor window reads it back and connects to the plugin over another private socket. Files open in that window only, even when several pages show the same folder.
+- Each Code page gets its own connection ("binding"). The page puts the binding in the editor's URL fragment, which never reaches a server; the extension in that editor window reads it back and connects to the plugin over another private socket. Files open in that window only, even when several pages show the same folder. When the window reloads, for example after you trust its folder, its extension attaches to the binding again; the page waits up to a minute for that.
 
 ## Security
 
@@ -59,7 +59,8 @@ These need a browser and a real code-server, so they are not part of `pnpm check
 3. Without signing in, `/code-server/` and `POST /api/langify-code-server/create` answer 401, and a WebSocket upgrade from another origin answers 403.
 4. After the session's working folder changes, the editor offers to reopen; with an unsaved file it asks to save first, then the page reloads the editor on the new folder.
 5. In DSH Desktop, the editor loads from `http://127.0.0.1:41820/…` with your theme and file icons, and a Markdown preview opens. The port answers 404 without the token.
-6. Closing the Code tab closes its binding; stopping DSH stops code-server and removes its sockets.
+6. After **Developer: Reload Window** in the editor, a file chosen in DSH still opens there, without **Reconnect**.
+7. Closing the Code tab closes its binding; stopping DSH stops code-server and removes its sockets.
 
 ## Known limitations
 

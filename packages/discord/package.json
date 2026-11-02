@@ -1,0 +1,66 @@
+{
+  "name": "@langify-org/dsh-discord",
+  "version": "0.1.0",
+  "description": "Talk to DeepSeek Harness from Discord: one thread per session, with tool approvals and questions as buttons",
+  "keywords": [
+    "deepseek-harness",
+    "discord",
+    "dsh",
+    "dsh-plugin"
+  ],
+  "homepage": "https://github.com/langify-org/deepseek-harness-plugins/tree/main/packages/discord#readme",
+  "bugs": "https://github.com/langify-org/deepseek-harness-plugins/issues",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/langify-org/deepseek-harness-plugins.git",
+    "directory": "packages/discord"
+  },
+  "files": [
+    "dist",
+    "cordis.patch.yml",
+    "README*.md"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown"
+  },
+  "dependencies": {
+    "@discordjs/core": "^2.7.0",
+    "@discordjs/rest": "^2.6.3",
+    "@discordjs/ws": "^2.0.4"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "catalog:",
+    "@deepseek-ai/dsh-agent": "catalog:",
+    "@deepseek-ai/dsh-api-session-controller": "catalog:",
+    "@deepseek-ai/dsh-brand": "catalog:",
+    "@deepseek-ai/dsh-credentials": "catalog:",
+    "@deepseek-ai/dsh-session": "catalog:",
+    "@deepseek-ai/dsh-user-approval": "catalog:",
+    "@deepseek-ai/dsh-user-questions": "catalog:",
+    "@deepseek-ai/dsh-workspace": "catalog:",
+    "@deepseek-ai/schemastery": "catalog:"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.5",
+    "@deepseek-ai/dsh-brand": ">=0.2.1-rc.3 <0.3.0-0",
+    "@deepseek-ai/dsh-credentials": ">=0.2.1-rc.3 <0.3.0-0",
+    "@deepseek-ai/schemastery": "^3.18.5"
+  },
+  "engines": {
+    "dsh": ">=0.2.1-rc.3 <0.3.0-0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

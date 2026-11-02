@@ -1,0 +1,4 @@
+# Bundle layer: inserts the Discord plugin when a profile enables this package.
+- insert:
+    - id: langify-discord
+      name: '@langify-org/dsh-discord'

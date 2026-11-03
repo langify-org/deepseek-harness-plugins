@@ -25,7 +25,8 @@ const PLATFORM_MODULES = [
  * to share. Any other DSH value import would duplicate a running plugin, so it
  * fails the build; collaborate through Cordis services instead.
  */
-const INLINE_SAFE = /^@deepseek-ai\/dsh-util-workspace-path(\/|$)/
+const INLINE_SAFE =
+  /^@deepseek-ai\/(dsh-util-workspace-path(\/|$)|dsh-session\/types$|dsh-brand(\/|$))/
 
 interface Manifest {
   readonly name: string

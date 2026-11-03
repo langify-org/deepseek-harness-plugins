@@ -1,0 +1,4 @@
+# Bundle layer: inserts the side-chat plugin when a profile enables this package.
+- insert:
+    - id: langify-side-chat
+      name: '@langify-org/dsh-side-chat'

@@ -1,0 +1,54 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "timezone": "Asia/Tokyo",
+  "schedule": ["before 9am on monday"],
+  "minimumReleaseAge": "3 days",
+  "nix": {
+    "enabled": true
+  },
+  "nodenv": {
+    "enabled": false
+  },
+  "lockFileMaintenance": {
+    "enabled": true,
+    "automerge": true
+  },
+  "packageRules": [
+    {
+      "description": "Follow DSH: bump with engines.dsh, peer ranges and .node-version",
+      "matchPackageNames": ["@deepseek-ai/**", "zod", "@types/react"],
+      "groupName": "DSH",
+      "dependencyDashboardApproval": true,
+      "prBodyNotes": [
+        "If `resources/runtime/versions.json` in DSH Desktop has a new `node`, update `.node-version` and the sha256 hashes in `flake.nix`. Move each package's `engines.dsh` and DSH peer ranges along with the catalog."
+      ]
+    },
+    {
+      "description": "Follows the extension's engines.vscode",
+      "matchPackageNames": ["@types/vscode"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Stay on the Node major in .node-version",
+      "matchPackageNames": ["@types/node"],
+      "allowedVersions": "<25"
+    },
+    {
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "dev dependencies (non-major)",
+      "automerge": true
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions"
+    },
+    {
+      "description": "pnpm 12 changes the lockfile format; the dev shell pins pnpm_11",
+      "matchDepTypes": ["packageManager"],
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    }
+  ]
+}

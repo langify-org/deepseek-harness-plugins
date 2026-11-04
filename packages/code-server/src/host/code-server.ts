@@ -136,6 +136,10 @@ export class CodeServer {
         '--disable-update-check',
         // Its /proxy/<port> routes would serve any local web server from DSH's origin.
         '--disable-proxy',
+        // A window that vanished without closing (a phone put to sleep, a dropped
+        // network) keeps its extension host for this long; the default is 3 hours.
+        '--reconnection-grace-time',
+        '600',
       ],
       cwd: homedir(),
       env: this.#options.env,

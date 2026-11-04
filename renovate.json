@@ -14,15 +14,49 @@
     "enabled": true,
     "automerge": true
   },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "The DSH floor in engines.dsh, the DSH peer ranges and the READMEs, moved with the catalog",
+      "managerFilePatterns": [
+        "/^packages/[^/]+/package\\.json$/",
+        "/^packages/[^/]+/README(\\.[a-z]+)?\\.md$/"
+      ],
+      "matchStrings": [">=(?<currentValue>0\\.\\d+\\.\\d+\\S*) <0\\.3\\.0-0"],
+      "depNameTemplate": "@deepseek-ai/dsh",
+      "datasourceTemplate": "npm"
+    }
+  ],
   "packageRules": [
     {
-      "description": "Follow DSH: bump with engines.dsh, peer ranges and .node-version",
-      "matchPackageNames": ["@deepseek-ai/**", "zod", "@types/react"],
+      "description": "Follow DSH: the catalog, engines.dsh, the peer ranges and the READMEs move together",
+      "matchPackageNames": ["@deepseek-ai/**"],
       "groupName": "DSH",
-      "dependencyDashboardApproval": true,
       "prBodyNotes": [
-        "If `resources/runtime/versions.json` in DSH Desktop has a new `node`, update `.node-version` and the sha256 hashes in `flake.nix`. Move each package's `engines.dsh` and DSH peer ranges along with the catalog."
+        "If `resources/runtime/versions.json` in DSH Desktop has a new `node`, update `.node-version` and the sha256 hashes in `flake.nix`. If DSH pins a new `zod`, set the catalog's `zod` to it."
       ]
+    },
+    {
+      "description": "The DSH ranges end below 0.3.0, so they stay on 0.2 (a range would drop prereleases); a new DSH minor is moved by hand",
+      "matchManagers": ["custom.regex"],
+      "allowedVersions": "/^0\\.2\\./"
+    },
+    {
+      "description": "The custom manager above moves the DSH peer ranges",
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["peerDependencies"],
+      "matchPackageNames": ["@deepseek-ai/**"],
+      "enabled": false
+    },
+    {
+      "description": "zod is the version DSH pins and shares with plugins; it moves with DSH by hand",
+      "matchPackageNames": ["zod"],
+      "enabled": false
+    },
+    {
+      "description": "The DSH Web shell shares React 18",
+      "matchPackageNames": ["@types/react"],
+      "allowedVersions": "<19"
     },
     {
       "description": "Follows the extension's engines.vscode",

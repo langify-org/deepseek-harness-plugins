@@ -68,5 +68,5 @@ export DEEPSEEK_API_KEY=...
 - **集成**：`pnpm smoke` 检查 DSH 能否合成每个 bundle。需要浏览器或其他程序的检查步骤写在各包的 README 中。
 - **Lint**：不在代码中内联抑制 lint 错误。当某条规则不适用于一整类文件时，修改 `.oxlintrc.json`，在那里用注释写明原因，并在拉取请求中说明。
 - **包**：仅限 ESM。发布的包只包含构建产物，不运行安装脚本。
-- **DSH 版本**：`pnpm-workspace.yaml` 中的 catalog 固定了开发和 CI 使用的 DSH 版本，即 `engines.dsh` 的下限。升级 DSH 时先修改 catalog，再修改各 `engines.dsh` 和 peer 范围。
+- **DSH 版本**：`pnpm-workspace.yaml` 中的 catalog 固定了开发和 CI 使用的 DSH 版本，即 `engines.dsh` 的下限。Renovate 每周一早上创建一个 **Update DSH** 拉取请求，一并升级 catalog、lockfile，以及 `packages/*/package.json` 和 README 中所有 `>=<版本> <0.3.0-0`（`engines.dsh` 和 DSH 的 peer 范围）。DSH 范围须按此格式书写，Renovate 才能找到。CI 通过后即可合并，无需 changeset：新的下限会随下一次发布发出。有两项仍需手动处理，拉取请求中也会注明：`zod` 必须与 DSH 固定的版本一致（不一致时类型检查会失败）；以及 DSH Desktop 自带的 Node 版本（`.node-version` 和 `flake.nix`）。DSH 的新次版本（0.3）需连同范围一起手动升级。如不想等到周一，可在 Dependency Dashboard issue 的 **Awaiting Schedule** 中勾选。
 - **文档**：以英文版为准。修改英文文档时，请在同一个拉取请求中更新 `.ja.md` 和 `.zh.md` 译文。

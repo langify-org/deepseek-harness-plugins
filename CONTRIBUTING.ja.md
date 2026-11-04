@@ -68,5 +68,5 @@ export DEEPSEEK_API_KEY=...
 - **結合**: `pnpm smoke` は DSH が各バンドルを合成できるかを検査します。ブラウザーや他のプログラムが必要な確認は、各パッケージの README に手順を書きます。
 - **Lint**: lint エラーをコード内で抑制しません。ある種類のファイル全体でルールが合わない場合は `.oxlintrc.json` を変更し、そこにコメントで理由を書き、プルリクエストでも説明します。
 - **パッケージ**: ESM のみ。公開パッケージにはビルド済みファイルだけを含め、インストール時スクリプトを実行しません。
-- **DSH の版**: `pnpm-workspace.yaml` の catalog が開発と CI で使う DSH の版を固定します。これは `engines.dsh` の下限です。DSH を更新するときは catalog を変え、続けて各 `engines.dsh` と peer の範囲を変えます。
+- **DSH の版**: `pnpm-workspace.yaml` の catalog が開発と CI で使う DSH の版を固定します。これは `engines.dsh` の下限です。Renovate が月曜の朝に **Update DSH** のプルリクエストを 1 つ作り、catalog、lockfile、`packages/*/package.json` と README にある `>=<版> <0.3.0-0`（`engines.dsh` と DSH の peer の範囲）をまとめて上げます。Renovate が見つけられるよう、DSH の範囲はこの形で書きます。CI が通ればマージします。新しい下限は次のリリースで出るので、changeset はいりません。手で直すものは 2 つで、プルリクエストにも書かれます。DSH が固定する版と同じでなければならない `zod`（ずれると型チェックが落ちます）と、DSH Desktop が同梱する Node の版（`.node-version` と `flake.nix`）です。DSH の新しいマイナー（0.3）は範囲も含めて手で上げます。月曜を待たずにプルリクエストがほしいときは、Dependency Dashboard の issue の **Awaiting Schedule** でチェックを入れます。
 - **文書**: 英語版が正本です。英語の文書を変更したら、同じプルリクエストで `.ja.md` と `.zh.md` の訳も更新します。

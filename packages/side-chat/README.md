@@ -6,7 +6,7 @@ Ask a side question about a DeepSeek Harness conversation without interrupting i
 
 ## Requirements
 
-- DSH `>=0.2.1-rc.3 <0.3.0-0` with the Web UI.
+- DSH `>=0.2.1-rc.5 <0.3.0-0` with the Web UI.
 
 ## Install
 

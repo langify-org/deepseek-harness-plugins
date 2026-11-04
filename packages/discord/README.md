@@ -6,7 +6,7 @@ Talk to DeepSeek Harness from Discord. A message in a channel you choose opens a
 
 ## Requirements
 
-- DSH `>=0.2.1-rc.3 <0.3.0-0`, with the Web composition (the plugin uses its session controller).
+- DSH `>=0.2.1-rc.5 <0.3.0-0`, with the Web composition (the plugin uses its session controller).
 - A Discord application with a bot, used only for this plugin. The plugin replaces the application's global slash commands with its own.
 
 ## Set up Discord

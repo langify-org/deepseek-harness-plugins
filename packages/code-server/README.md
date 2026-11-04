@@ -6,7 +6,7 @@ Edit a DeepSeek Harness session's working folder in [code-server](https://github
 
 ## Requirements
 
-- DSH `>=0.2.1-rc.3 <0.3.0-0`, on Linux or macOS.
+- DSH `>=0.2.1-rc.5 <0.3.0-0`, on Linux or macOS.
 - code-server, installed separately. Tested with 4.143. The plugin starts and stops it; you do not run it yourself.
 - The session's files must be on the machine DSH runs on. Sessions on another file system, such as a sandbox, are refused.
 

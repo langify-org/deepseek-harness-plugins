@@ -12,6 +12,7 @@
 | [`@langify-org/dsh-discord`](packages/discord)         | Discord から DSH と会話する。スレッドごとに 1 セッションで、承認と質問はボタンで答える。 |
 | [`@langify-org/dsh-greet`](packages/greet)             | `greet` ツールを登録する例兼雛形。公開しません。                                         |
 | [`@langify-org/dsh-side-chat`](packages/side-chat)     | 会話を止めずに、右サイドバーに開いた fork で横から質問する。                             |
+| [`@langify-org/dsh-tasks`](packages/tasks)             | 右サイドバーのタスクのタブから、justfile の recipe を terminal のタブで実行する。        |
 
 ## 導入
 

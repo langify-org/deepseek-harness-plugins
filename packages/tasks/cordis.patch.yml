@@ -1,0 +1,4 @@
+# Bundle layer: inserts the tasks plugin when a profile enables this package.
+- insert:
+    - id: langify-tasks
+      name: '@langify-org/dsh-tasks'

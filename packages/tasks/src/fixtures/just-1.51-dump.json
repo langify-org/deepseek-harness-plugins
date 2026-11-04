@@ -1,0 +1,141 @@
+{
+  "aliases": {},
+  "assignments": {},
+  "first": "build",
+  "doc": null,
+  "groups": [],
+  "module_path": "",
+  "modules": {},
+  "recipes": {
+    "_hidden": {
+      "attributes": [],
+      "body": [["true"]],
+      "dependencies": [],
+      "doc": null,
+      "name": "_hidden",
+      "parameters": [],
+      "priors": 0,
+      "private": true,
+      "quiet": false,
+      "namepath": "_hidden",
+      "shebang": false
+    },
+    "build": {
+      "attributes": [
+        {
+          "arg": {
+            "help": null,
+            "long": null,
+            "name": "verbose",
+            "pattern": null,
+            "short": "v",
+            "value": "true"
+          }
+        },
+        {
+          "arg": {
+            "help": "Build mode",
+            "long": "mode",
+            "name": "mode",
+            "pattern": null,
+            "short": null,
+            "value": null
+          }
+        }
+      ],
+      "body": [["true"]],
+      "dependencies": [],
+      "doc": "Build it",
+      "name": "build",
+      "parameters": [
+        {
+          "default": null,
+          "export": false,
+          "help": null,
+          "kind": "singular",
+          "long": null,
+          "name": "target",
+          "pattern": null,
+          "short": null,
+          "value": null
+        },
+        {
+          "default": "debug",
+          "export": false,
+          "help": "Build mode",
+          "kind": "singular",
+          "long": "mode",
+          "name": "mode",
+          "pattern": null,
+          "short": null,
+          "value": null
+        },
+        {
+          "default": "false",
+          "export": false,
+          "help": null,
+          "kind": "singular",
+          "long": null,
+          "name": "verbose",
+          "pattern": null,
+          "short": "v",
+          "value": "true"
+        },
+        {
+          "default": ["call", "env", "HOME"],
+          "export": false,
+          "help": null,
+          "kind": "singular",
+          "long": null,
+          "name": "home",
+          "pattern": null,
+          "short": null,
+          "value": null
+        },
+        {
+          "default": null,
+          "export": false,
+          "help": null,
+          "kind": "star",
+          "long": null,
+          "name": "rest",
+          "pattern": null,
+          "short": null,
+          "value": null
+        }
+      ],
+      "priors": 0,
+      "private": false,
+      "quiet": false,
+      "namepath": "build",
+      "shebang": false
+    }
+  },
+  "settings": {
+    "allow_duplicate_recipes": false,
+    "allow_duplicate_variables": false,
+    "dotenv_filename": null,
+    "dotenv_load": false,
+    "dotenv_override": false,
+    "dotenv_path": null,
+    "dotenv_required": false,
+    "export": false,
+    "fallback": false,
+    "guards": false,
+    "ignore_comments": false,
+    "lazy": false,
+    "no_cd": false,
+    "no_exit_message": false,
+    "positional_arguments": false,
+    "quiet": false,
+    "shell": null,
+    "tempdir": null,
+    "unstable": false,
+    "windows_powershell": false,
+    "windows_shell": null,
+    "working_directory": null
+  },
+  "source": "/repo/justfile",
+  "unexports": [],
+  "warnings": []
+}

@@ -5,6 +5,8 @@ import { execFile } from 'node:child_process'
 import { parseWindows, WINDOW_FORMAT, type TmuxWindow } from '../windows.ts'
 
 const TIMEOUT_MS = 5_000
+/** Where the plugin's own terminal-features entry goes, past the defaults and most users' own. */
+const LINK_FEATURE_INDEX = 99
 const MAX_OUTPUT = 4 * 1024 * 1024
 
 /** A tmux command failed; `missing` when it named a server, session or window that does not exist. */
@@ -69,7 +71,8 @@ export class Tmux {
   }
 
   /**
-   * Start the server unless it runs, keeping it up while it has no sessions.
+   * Start the server unless it runs, keeping it up while it has no sessions,
+   * with links passed on to the tab.
    * Where user systemd is available the server gets its own scope, so it
    * outlives the terminal tabs and DSH itself: DSH stops a terminal by killing
    * everything in its scope. tmux loads the user's configuration itself.
@@ -84,6 +87,13 @@ export class Tmux {
       '-g',
       'exit-empty',
       'off',
+      // The tab's terminal (wterm) opens OSC 8 links, which tmux passes on only
+      // to terminals with this feature. A fixed index keeps restarts from adding it again.
+      ';',
+      'set-option',
+      '-s',
+      `terminal-features[${LINK_FEATURE_INDEX}]`,
+      'xterm-256color:hyperlinks',
     ]
     try {
       await exec(

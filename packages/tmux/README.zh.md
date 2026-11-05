@@ -32,6 +32,9 @@ dsh plugin --profile <profile> add @langify-org/dsh-tmux
 - **原样使用你自己的 tmux 配置**，无论你的 tmux 在哪里查找它（默认为 `/etc/tmux.conf`、`~/.tmux.conf` 或 `~/.config/tmux/tmux.conf`）。插件只让 tmux 服务器在没有会话时也保持运行。
 - **没有 tmux 配置时**，使用插件的默认设置：状态栏位于顶部，窗口以标签形式排列，并启用鼠标（点击窗口即可切换，滚轮可以滚动）。使用自己的配置时，加上 `set -g mouse on` 即可获得同样的效果。
 - **右键**会交给 tmux，而不弹出浏览器菜单：按住右键移动到 tmux 菜单中的某一项再松开即可选择。按住 Shift 右键或长按，会弹出浏览器菜单。
+- **复制**：用鼠标选择或在 tmux 的复制模式中复制，内容会进入你设备的剪贴板（tmux 通过 OSC 52 发送）。浏览器拒绝写入时，标签页会显示 **复制** 按钮。按住 Shift 拖动则使用浏览器自己的选择，按 Ctrl+C（Cmd+C）复制。
+- **链接**：程序标记的链接（OSC 8，例如 `ls --hyperlink`）按住 Ctrl 或 Cmd 点击即可打开。
+- **外观**跟随 DSH：浅色或深色的背景和文字颜色，以及终端字体和字号设置。
 - **在手机上**，点击窗口即可切换，滑动可以回看 tmux 的历史（tmux 的复制模式，按 `q` 退出）。
 - **多个标签页**，无论在一台设备还是多台设备上，都可以各自显示同一会话中的不同窗口。关闭标签页或连接中断后，会话及其中的程序继续运行；重新连接时，标签页会重新 attach。
 - **归档对话**会结束其 tmux 会话。如果仍有程序在运行，归档对话框会把它们列为需要停止的工作。
@@ -67,11 +70,11 @@ dsh plugin --profile <profile> add @langify-org/dsh-tmux
 
 ## 工作原理
 
-- **浏览器端**：加入 **tmux** 标签页。终端用固定版本并随插件打包的 [wterm](https://github.com/vercel-labs/wterm) 绘制，并通过专用的 WebSocket（`/langify-tmux`）与主机通信。
+- **浏览器端**：加入 **tmux** 标签页，并把 tmux 以 OSC 52 发送的复制内容写入剪贴板。终端用固定版本并随插件打包的 [wterm](https://github.com/vercel-labs/wterm) 绘制，并通过专用的 WebSocket（`/langify-tmux`）与主机通信。
 - **主机端的终端**：每个连接先像 DSH 的 API 请求一样经过检查，然后在需要时创建对话的 tmux 会话（`dsh-<session id>`），并在 DSH 的终端 subprocess provider 中运行 `tmux new-session -t '=dsh-<session id>'`。这是随连接结束的专用视图，因此各标签页可以显示不同的窗口。
 - **主机端的其他部分**：
   - 在系统提示词中加入说明，并注册这两个工具。
-  - 如果服务器不存在，以 `exit-empty off` 启动它（可能时放在独立的 systemd scope 中）。
+  - 如果服务器不存在，以 `exit-empty off` 启动它（可能时放在独立的 systemd scope 中），并为标签页的终端类型加上 `hyperlinks` 功能，让 tmux 传递链接。
   - 询问服务器会查找哪些配置文件（`#{config_files}`），仅当它们都不存在时，才在服务器上设置默认值。
   - 通过 `agent/pre-step` 在一轮的第一步加入窗口列表。会话投影记录模型上次看到的内容，压缩后会重置，以便重新发送。
   - 向归档对话框报告正在运行的程序，归档时结束会话。
@@ -80,7 +83,7 @@ dsh plugin --profile <profile> add @langify-org/dsh-tmux
 ## 已知限制
 
 - **服务器会继续运行**：移除插件后服务器不会停止，可用 `tmux -S <DSH home>/tmux/socket kill-server` 停止。
-- **tmux 无法写入剪贴板**：标签页不支持 OSC 52，因此 tmux 的复制模式无法到达浏览器剪贴板。
+- **浅色主题下部分颜色较淡**：终端的 16 色与 DSH 自带终端相同，使用 xterm 的配色，在浅色背景上黄色和白色显得较淡。
 - **手机上没有 Ctrl、Esc、Tab 和方向键**：手机键盘上没有这些键，标签页也没有添加。
 
 ## 在浏览器中验证
@@ -91,5 +94,6 @@ dsh plugin --profile <profile> add @langify-org/dsh-tmux
 2. 在终端中按住右键，移动到 tmux 菜单中的 **Horizontal Split** 再松开：窗口被分割，浏览器菜单不会弹出。
 3. 让模型打开一个窗口，在其中运行 `echo hello` 并读回结果。它用 `tmux_session` 打开窗口（除非对话拥有完全访问权限，否则会先询问），用 `tmux_window` 输入命令，无需询问即可读回，并报告 `hello`。
 4. 询问模型有哪些窗口。它会列出两个窗口及其目录，并知道标签页正在显示哪个窗口。
-5. 重新加载页面：标签页重新 attach，显示同样的窗口。
-6. 在某个窗口中运行 `sleep 600` 的同时归档对话：对话框列出一项 tmux 工作，停止后 tmux 会话结束。
+5. 在终端中拖动选择一些文字：松开按键后，内容就在你的剪贴板里。
+6. 重新加载页面：标签页重新 attach，显示同样的窗口。
+7. 在某个窗口中运行 `sleep 600` 的同时归档对话：对话框列出一项 tmux 工作，停止后 tmux 会话结束。

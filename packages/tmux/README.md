@@ -32,6 +32,9 @@ Open **tmux** from the right sidebar. It shows the conversation's tmux session.
 - **Your tmux configuration is used as is**, wherever your tmux looks for it (by default `/etc/tmux.conf`, `~/.tmux.conf` or `~/.config/tmux/tmux.conf`). The plugin only keeps its tmux server running while no session is open.
 - **Without a tmux configuration**, the plugin's defaults apply: the status line is at the top with the windows as tabs, and the mouse works, so a click on a window switches to it and the wheel scrolls. With your own configuration, add `set -g mouse on` for the same.
 - **Right click** goes to tmux, without the browser's menu over it: hold the button, move to an item of tmux's menu and release. Shift and a right click, or a long press, opens the browser's menu.
+- **Copying**: a mouse selection or tmux's copy mode copies to your device's clipboard (tmux sends it as OSC 52). If the browser refuses the write, the tab offers a **Copy** button. Shift and a drag selects with the browser instead, and Ctrl+C (Cmd+C) copies that.
+- **Links** that programs mark (OSC 8, such as `ls --hyperlink`) open with Ctrl or Cmd and a click.
+- **The look** follows DSH: its light or dark background and text colors, and its terminal font and size.
 - **On a phone**, a tap on a window switches to it, and a swipe scrolls back through tmux's history (tmux's copy mode; `q` leaves it).
 - **Several tabs**, on one device or several, each show their own window of the same session. Closing a tab or losing the connection leaves the session and its programs running; the tab attaches again when it reconnects.
 - **Archiving the conversation** ends its tmux session. If programs are still running, the archive dialog lists them as work to stop.
@@ -63,14 +66,14 @@ Windows are aimed at by id because ids never change or get reused while the tmux
 
 ## How it works
 
-The browser half adds the **tmux** tab. It renders the terminal with [wterm](https://github.com/vercel-labs/wterm), bundled at a fixed version, and talks to the host over a WebSocket of its own (`/langify-tmux`). For each connection, the host checks it as DSH's API requests are, creates the conversation's tmux session (`dsh-<session id>`) if needed and runs `tmux new-session -t '=dsh-<session id>'` in DSH's terminal subprocess provider: a view of its own that ends with the connection, so tabs can show different windows.
+The browser half adds the **tmux** tab and copies what tmux sends as OSC 52 to the clipboard. It renders the terminal with [wterm](https://github.com/vercel-labs/wterm), bundled at a fixed version, and talks to the host over a WebSocket of its own (`/langify-tmux`). For each connection, the host checks it as DSH's API requests are, creates the conversation's tmux session (`dsh-<session id>`) if needed and runs `tmux new-session -t '=dsh-<session id>'` in DSH's terminal subprocess provider: a view of its own that ends with the connection, so tabs can show different windows.
 
-The host plugin also adds the guide to the system prompt, registers the two tools and starts the server if needed (in its own systemd scope when it can) with `exit-empty off`. It asks the server which configuration files it looks for (`#{config_files}`), and, when none of them exists, sets its defaults on the server. It adds the window list to a turn's first step through `agent/pre-step`; a session projection remembers what the model last saw, and compaction resets it. It also reports running programs to the archive dialog, ends the session on archive, and on start ends sessions of conversations archived or deleted meanwhile.
+The host plugin also adds the guide to the system prompt, registers the two tools and starts the server if needed (in its own systemd scope when it can) with `exit-empty off`, and adds the `hyperlinks` terminal feature for the tab's terminal type, so tmux passes links on. It asks the server which configuration files it looks for (`#{config_files}`), and, when none of them exists, sets its defaults on the server. It adds the window list to a turn's first step through `agent/pre-step`; a session projection remembers what the model last saw, and compaction resets it. It also reports running programs to the archive dialog, ends the session on archive, and on start ends sessions of conversations archived or deleted meanwhile.
 
 ## Known limitations
 
 - **The server keeps running** after you remove the plugin; stop it with `tmux -S <DSH home>/tmux/socket kill-server`.
-- **No clipboard from tmux**: the tab does not support OSC 52, so tmux's copy mode does not reach the browser clipboard.
+- **Faint colors in the light theme**: the 16 terminal colors are xterm's, as in DSH's own terminal, and yellow and white show weakly on a light background.
 - **No Ctrl, Esc, Tab or arrow keys on a phone**: a phone's keyboard has none, and the tab adds none.
 
 ## Verifying in a browser
@@ -81,5 +84,6 @@ The host plugin also adds the guide to the system prompt, registers the two tool
 2. Hold the right button in the terminal, move to **Horizontal Split** in tmux's menu and release: the window splits, and the browser's menu does not open.
 3. Ask the model to open a window, run `echo hello` in it and read it back. It opens a window with `tmux_session`, asking first unless the conversation has full access, types the command with `tmux_window`, reads it back without asking and reports `hello`.
 4. Ask the model what windows there are. It lists both windows with their folders, and the one shown in the tab.
-5. Reload the page: the tab attaches again, with the same windows.
-6. Archive the conversation while `sleep 600` runs in a window: the dialog lists one item of tmux work, and stopping it ends the tmux session.
+5. Drag over some text in the terminal: once you release the button, it is in your clipboard.
+6. Reload the page: the tab attaches again, with the same windows.
+7. Archive the conversation while `sleep 600` runs in a window: the dialog lists one item of tmux work, and stopping it ends the tmux session.

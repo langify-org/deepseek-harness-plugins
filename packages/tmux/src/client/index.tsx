@@ -41,7 +41,6 @@ export function apply(ctx: Context): void {
         id: TAB_ID,
         kind: KIND,
         title: () => t('title'),
-        keepMounted: true,
         guide: [
           {
             id: KIND,

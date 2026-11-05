@@ -3,6 +3,7 @@ import { IconCodeOutlineRegular, type IconProps } from '@deepseek-ai/dsh-client-
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { WTerm } from '@wterm/dom'
 import { MouseModes, wheel } from '../mouse.ts'
+import { ClipboardWrites } from '../osc52.ts'
 import { EXITED, NO_TMUX, type ClientMessage } from '../protocol.ts'
 import type { NAMESPACE } from './messages.ts'
 import { cls } from './styles.ts'
@@ -33,6 +34,8 @@ export function TerminalPane({ sessionId, connect, t }: TerminalPaneProps): JSX.
   const screen = useRef<HTMLDivElement>(null)
   const [status, setStatus] = useState<Status>('connecting')
   const [run, setRun] = useState(0)
+  // A copy from tmux the browser refused to write, offered as a button instead.
+  const [blocked, setBlocked] = useState<string>()
 
   useEffect(() => {
     const element = screen.current
@@ -43,13 +46,22 @@ export function TerminalPane({ sessionId, connect, t }: TerminalPaneProps): JSX.
     const send = (message: ClientMessage): void => {
       if (socket?.readyState === 1) socket.send(JSON.stringify(message))
     }
+    // No cursorBlink: a running CSS animation makes Chromium deliver the echo of
+    // each key a frame later.
     const term = new WTerm(element, {
       autoResize: true,
-      cursorBlink: true,
       onData: (data) => send({ type: 'input', data }),
       onResize: (cols, rows) => send({ type: 'resize', cols, rows }),
     })
     const modes = new MouseModes()
+    // tmux sends its copies as OSC 52; the browser may refuse a write without a recent gesture.
+    const clipboard = new ClipboardWrites()
+    const copy = (text: string): void => {
+      navigator.clipboard.writeText(text).then(
+        () => setBlocked(undefined),
+        () => setBlocked(text),
+      )
+    }
     // A swipe scrolls the program when it takes mouse reports (tmux with the mouse
     // on): one wheel step per row the finger moves. wterm only scrolls its own view.
     let lastY: number | undefined
@@ -90,6 +102,7 @@ export function TerminalPane({ sessionId, connect, t }: TerminalPaneProps): JSX.
       current.addEventListener('message', (event) => {
         const text = String(event.data)
         modes.read(text)
+        for (const copied of clipboard.read(text)) copy(copied)
         term.write(text)
       })
       current.addEventListener('close', (event) => {
@@ -125,23 +138,44 @@ export function TerminalPane({ sessionId, connect, t }: TerminalPaneProps): JSX.
         if (!event.shiftKey && !touch) event.preventDefault()
       }}
     >
-      <div ref={screen} className={cls.screen} />
-      {status !== 'open' && (
-        <div className={cls.status} role="status">
-          {t(status)}
-          {(status === 'exited' || status === 'noTmux') && (
+      <div ref={screen} className={cls.screen} aria-label={t('title')} />
+      <div className={cls.notices}>
+        {status !== 'open' && (
+          <div className={cls.status} role="status">
+            {t(status)}
+            {(status === 'exited' || status === 'noTmux') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setStatus('connecting')
+                  setRun((n) => n + 1)
+                }}
+              >
+                {t('restart')}
+              </button>
+            )}
+          </div>
+        )}
+        {blocked !== undefined && (
+          <div className={cls.status} role="status">
+            {t('copyBlocked')}
             <button
               type="button"
               onClick={() => {
-                setStatus('connecting')
-                setRun((n) => n + 1)
+                navigator.clipboard.writeText(blocked).then(
+                  () => setBlocked(undefined),
+                  () => {},
+                )
               }}
             >
-              {t('restart')}
+              {t('copy')}
             </button>
-          )}
-        </div>
-      )}
+            <button type="button" aria-label={t('dismiss')} onClick={() => setBlocked(undefined)}>
+              ×
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

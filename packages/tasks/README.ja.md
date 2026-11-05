@@ -17,15 +17,22 @@ dsh plugin --profile <profile> add @langify-org/dsh-tasks
 
 DSH の Web 版や Desktop 版では **Plugins** ページから追加できます。
 
+## 設定
+
+| 設定    | 既定値     | 何か                                                                                                                                              |
+| ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runIn` | `terminal` | recipe を動かす場所。`terminal` は terminal の新しいタブ、`tmux` は会話の tmux session の新しい window（[@langify-org/dsh-tmux](../tmux) が必要） |
+
 ## 使い方
 
 右サイドバーのガイドから **タスク** を開きます。セッションの作業フォルダから `just` が見つけた justfile（上のフォルダにあるものも含む）の公開 recipe を、doc コメントと、`just` の書き方での引数（`target mode=debug [--verbose] *rest`）と一緒に一覧にします。
 
 - recipe を押すと実行します。terminal の新しいタブが開き、`just <recipe>` が打ち込まれます。止めるときはその terminal で Ctrl-C を押します。
+- **tmux で動かす**：設定が `runIn: tmux` で、tmux プラグインが動いているときは、代わりに会話の tmux session の新しい window で動かし、**tmux** タブがその window を表示して開きます。tmux プラグインがないときは、terminal のタブで動かします。
 - 引数のある recipe は、押すと先に行の下に引数の欄が開きます。文字列の初期値は最初から入っていて、フラグはチェックボックス、可変長の引数（`*rest`、`+rest`）はスペース区切りで入れます。引数の説明はマウスを乗せると出ます。Enter で実行、Esc で閉じます。値のチェック（`pattern` を含む）は `just` がします。
 - 一覧は、ウィンドウに戻ってくるたびに justfile を読み直します。justfile がセッションのフォルダより上にあるときは、一覧の下にその場所を出します。
 
-`_` で始まる recipe、`[private]` の recipe、`mod` で読み込んだ recipe は一覧に出ません。実行したことはモデルに伝えず、terminal の出力も、ほかの terminal のタブと同じく、モデルの履歴に入りません。
+`_` で始まる recipe、`[private]` の recipe、`mod` で読み込んだ recipe は一覧に出ません。terminal のタブで実行したことはモデルに伝えず、その出力もモデルの履歴に入りません。tmux で動かしたものは、ほかの tmux の window と同じで、モデルは次のターンの最初にそれを知り、読むこともできます。
 
 ## 安全性
 
@@ -33,7 +40,7 @@ DSH の Web 版や Desktop 版では **Plugins** ページから追加できま�
 
 ## 仕組み
 
-ホスト側のプラグインが、セッションの作業フォルダで `just --dump --dump-format json` を実行して recipe を返します。ブラウザー側は、右サイドバーの `openTab('terminal')` で terminal のタブを開き、そのタブの terminal を `ctx.webTerminals` から取り出します。つながって書き込めるようになるのを待ってから、コマンドと Enter を書き込みます。
+ホスト側のプラグインが、セッションの作業フォルダで `just --dump --dump-format json` を実行して recipe を返します。`runIn: tmux` のときは、ホスト側が実行時に `ctx.get` で tmux プラグインの `langifyTmux` サービスを探してコマンドを渡し（どちらのパッケージも相手を import しません）、ブラウザー側はサービスが返した種類のタブを開きます。そうでないときは、ブラウザー側が右サイドバーの `openTab('terminal')` で terminal のタブを開き、そのタブの terminal を `ctx.webTerminals` から取り出します。つながって書き込めるようになるのを待ってから、コマンドと Enter を書き込みます。
 
 ## 既知の制約
 

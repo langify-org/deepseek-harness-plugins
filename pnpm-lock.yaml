@@ -396,6 +396,9 @@ importers:
       '@deepseek-ai/dsh-working-directory':
         specifier: 'catalog:'
         version: 0.2.1-rc.5(d6cf6ca566f417a2889ce86670cc4292)
+      '@deepseek-ai/schemastery':
+        specifier: 'catalog:'
+        version: 3.18.5
       '@types/react':
         specifier: 'catalog:'
         version: 18.3.31

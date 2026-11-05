@@ -3,6 +3,9 @@
 // changes go browser to host as JSON. Shared by both halves: no Node or DOM APIs.
 import { z } from 'zod'
 
+/** The kind of the plugin's sidebar tab. */
+export const TAB_KIND = 'langify-tmux'
+
 /** The WebSocket's path; the query names the session and the starting size. */
 export const PATH = '/langify-tmux'
 

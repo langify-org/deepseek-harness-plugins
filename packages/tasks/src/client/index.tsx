@@ -15,7 +15,9 @@ import {
   ERROR_CODES,
   RPC_CHANNEL,
   RPC_METHOD,
+  RUN_METHOD,
   listResponseSchema,
+  runResponseSchema,
   type ListResponse,
 } from '../rpc.ts'
 import { NAMESPACE, en, ja, zh } from './messages.ts'
@@ -59,19 +61,29 @@ export function apply(ctx: Context): void {
     return () => style.remove()
   }, 'tasks: styles')
 
-  const list = async (sessionId: string): Promise<ListResponse> => {
+  const call = async (method: string, payload: object): Promise<unknown> => {
     const result = await ctx.connection.rpc.call(
       RPC_CHANNEL,
-      RPC_METHOD,
-      { sessionId },
+      method,
+      payload,
       AbortSignal.timeout(RPC_TIMEOUT_MS),
     )
     if (!result.ok) throw new RpcFailure(result.error.code, result.error.message)
-    return listResponseSchema.parse(result.value)
+    return result.value
+  }
+
+  const list = async (sessionId: string): Promise<ListResponse> =>
+    listResponseSchema.parse(await call(RPC_METHOD, { sessionId }))
+
+  /** Run `line` where the host's setting says: a tab the host names, or DSH's own terminal. */
+  const run = async (sessionId: string, line: string): Promise<void> => {
+    const { tab } = runResponseSchema.parse(await call(RUN_METHOD, { sessionId, line }))
+    if (tab === null) return type(sessionId, line)
+    ctx.sidebarRight.openTab(tab)
   }
 
   /** Open a new terminal tab for `sessionId` and type `line` into it, with Enter. */
-  const run = async (sessionId: string, line: string): Promise<void> => {
+  const type = async (sessionId: string, line: string): Promise<void> => {
     const id = SessionId(sessionId)
     const isTerminal = (tab: { sessionId: string; kind: string }): boolean =>
       tab.sessionId === id && tab.kind === TERMINAL_KIND

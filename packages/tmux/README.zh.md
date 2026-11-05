@@ -77,6 +77,7 @@ dsh plugin --profile <profile> add @langify-org/dsh-tmux
   - 如果服务器不存在，以 `exit-empty off` 启动它（可能时放在独立的 systemd scope 中），并为标签页的终端类型加上 `hyperlinks` 功能，让 tmux 传递链接。
   - 询问服务器会查找哪些配置文件（`#{config_files}`），仅当它们都不存在时，才在服务器上设置默认值。
   - 通过 `agent/pre-step` 在一轮的第一步加入窗口列表。会话投影记录模型上次看到的内容，压缩后会重置，以便重新发送。
+  - 为其他插件（例如 tasks）提供 `langifyTmux` 服务：在对话会话的新窗口中运行命令行，10 秒内 attach 的 tmux 标签页会显示该窗口。
   - 向归档对话框报告正在运行的程序，归档时结束会话。
   - 启动时结束期间已被归档或删除的对话的会话。
 

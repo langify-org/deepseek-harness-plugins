@@ -5,7 +5,7 @@
 /// <reference types="@deepseek-ai/dsh-client-ui-sidebar-right/client" />
 import type { Context } from '@deepseek-ai/cordis'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
-import { PATH } from '../protocol.ts'
+import { PATH, TAB_KIND } from '../protocol.ts'
 import { NAMESPACE, en, ja, zh } from './messages.ts'
 import { CSS } from './styles.ts'
 import { GuideIcon, TerminalPane, TerminalTitle, type Socket } from './terminal-pane.tsx'
@@ -19,7 +19,7 @@ declare module '@deepseek-ai/cordis' {
 
 export const inject: readonly string[] = ['connection', 'locale', 'slots', 'sidebarRightTabs']
 
-const KIND = 'langify-tmux'
+const KIND = TAB_KIND
 const TAB_ID = 'langify-tmux/terminal'
 
 export function apply(ctx: Context): void {

@@ -2,6 +2,8 @@
 // per DSH session, named after it. Every call goes through `tmux -S <socket>`,
 // so the user's own tmux sessions are never listed or touched.
 import { execFile } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { parseWindows, WINDOW_FORMAT, type TmuxWindow } from '../windows.ts'
 
 const TIMEOUT_MS = 5_000
@@ -109,20 +111,21 @@ export class Tmux {
   /**
    * The command a terminal tab runs: a view of `session` of its own (a grouped
    * session), so each tab shows its own window, ending when the tab detaches.
+   * A view starts at the session's first window, or at `window` when given.
    */
-  attachCommand(session: string): string[] {
-    return [
-      this.#program,
-      '-S',
-      this.#socket,
-      'new-session',
-      '-t',
-      `=${session}`,
-      ';',
-      'set-option',
-      'destroy-unattached',
-      'on',
-    ]
+  attachCommand(session: string, window?: string): string[] {
+    const attach = [this.#program, '-S', this.#socket, 'new-session', '-t', `=${session}`]
+    const keep = [';', 'set-option', 'destroy-unattached', 'on']
+    if (window === undefined) return [...attach, ...keep]
+    const view = `${session}-${randomUUID().slice(0, 8)}`
+    return [...attach, '-s', view, ...keep, ';', 'select-window', '-t', `=${view}:${window}`]
+  }
+
+  /** Wait until `target` shows any output, such as its shell's prompt, or `ms` passes. */
+  async waitForOutput(target: string, ms: number): Promise<void> {
+    for (const until = Date.now() + ms; Date.now() < until; await sleep(100)) {
+      if ((await this.run(['capture-pane', '-p', '-t', target])).trim() !== '') return
+    }
   }
 
   /**

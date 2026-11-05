@@ -43,7 +43,7 @@ DSH の Web 版や Desktop 版では **Plugins** ページから追加できま�
 モデルが terminal について知るのは次のとおりです。
 
 - **system prompt**：どの会話でも、共有の terminal・ツール・下の通知の形を説明しています。
-- **ターンの最初**：前回から window が変わっていれば、`<tmux>` の通知を受け取ります。window ごとに `<window id="@3" name="bash" path="~/repo" command="bash" shown="true"/>` が 1 つ入り、`shown` はタブが表示している window です。中身が空の `<tmux>` は session が閉じたことを表します。session のない会話には通知を送りません。
+- **ターンの最初**：前回から window が変わっていれば、`<tmux>` の通知を受け取ります。window ごとに `<window id="@3" name="bash" path="~/repo" command="bash"/>` が 1 つ入ります。中身が空の `<tmux>` は session が閉じたことを表します。session のない会話には通知を送りません。
 - **画面の中身**：モデルが自分で window を読んだときだけです。
 
 モデルには、tmux のどんなコマンドも実行できるツールが 2 つあります。socket と向ける先はプラグインが埋めます。
@@ -93,7 +93,7 @@ tmux を `PATH` に入れて、リポジトリの直下で `pnpm dev` を実行�
 1. 会話で右サイドバーから **tmux** を開く。ステータス行に window `0` が出る。
 2. ターミナルの上で右ボタンを押したまま、tmux のメニューの **Horizontal Split** まで動かして離す。window が分かれ、ブラウザのメニューは出ない。
 3. モデルに、window を開いて `echo hello` を実行し、読み返すよう頼む。`tmux_session` で window を開き（フルアクセスでなければ先に確認が出る）、`tmux_window` でコマンドを打ち、確認なしで読み返して `hello` と報告する。
-4. モデルに window の一覧を聞く。2 つの window をフォルダと一緒に答え、タブが表示している window も分かっている。
+4. モデルに window の一覧を聞く。2 つの window をフォルダと一緒に答える。
 5. ターミナルの文字をドラッグして選ぶ。ボタンを離すと、手元のクリップボードに入っている。
 6. ページを再読み込みする。タブが attach し直し、同じ window が出る。
 7. window で `sleep 600` を動かしたまま会話を archive する。ダイアログに tmux の作業が 1 件出て、止めると tmux session が終わる。

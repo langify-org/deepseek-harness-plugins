@@ -76,14 +76,9 @@ export const CLOSED: string =
 
 /**
  * What the model sees at the start of a turn: one element per window, with
- * its id, name, folder and running command, never screen contents. `shown`
- * marks the windows a terminal tab is showing. `undefined` without windows.
+ * its id, name, folder and running command, never screen contents. `undefined` without windows.
  */
-export function digest(
-  windows: readonly TmuxWindow[],
-  home: string,
-  shown: ReadonlySet<string>,
-): string | undefined {
+export function digest(windows: readonly TmuxWindow[], home: string): string | undefined {
   if (windows.length === 0) return undefined
   const lines = windows.map((w) => {
     const attributes = [
@@ -91,7 +86,6 @@ export function digest(
       `name="${xmlAttribute(w.name)}"`,
       `path="${xmlAttribute(shortPath(w.path, home))}"`,
       `command="${xmlAttribute(w.command)}"`,
-      ...(shown.has(w.id) ? ['shown="true"'] : []),
     ]
     return `<window ${attributes.join(' ')}/>`
   })
@@ -104,9 +98,9 @@ export function digest(
  */
 export const GUIDE: string = `# Shared terminal (tmux)
 
-Each conversation has its own tmux session, shown in the terminal of DSH's right sidebar, where the user also works. When its windows change, you get a <tmux> note at the start of a turn: one <window> per window, with its id, name, folder (path) and running command; shown="true" marks a window a terminal tab is showing. An empty <tmux> means the session is closed. Without any note, no session exists yet.
+Each conversation has its own tmux session, shown in the terminal of DSH's right sidebar, where the user also works. When its windows change, you get a <tmux> note at the start of a turn: one <window> per window, with its id, name, folder (path) and running command. An empty <tmux> means the session is closed. Without any note, no session exists yet.
 
-Use the tmux_window and tmux_session tools, aiming at windows by id (such as @3); ids do not change while the tmux server runs, unlike window numbers and names. Do not change the window shown in the terminal or tmux settings unless asked.`
+Use the tmux_window and tmux_session tools, aiming at windows by id (such as @3); ids do not change while the tmux server runs, unlike window numbers and names. Do not change tmux settings unless asked.`
 
 /** Commands that start a shell, which should start in the conversation's folder. */
 const OPENS_SHELL = new Set(['new-window', 'split-window', 'neww', 'splitw'])

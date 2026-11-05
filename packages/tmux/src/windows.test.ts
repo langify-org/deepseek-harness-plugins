@@ -38,16 +38,12 @@ const w = (extra: Partial<TmuxWindow>): TmuxWindow => ({
 })
 
 describe('digest', () => {
-  it('lists windows as XML, without contents, marking the shown ones', () => {
-    const text = digest(
-      [w({ id: '@0' }), w({ id: '@1', name: 'dev', command: 'pnpm' })],
-      '/home/u',
-      new Set(['@0']),
-    )
+  it('lists windows as XML, without contents', () => {
+    const text = digest([w({ id: '@0' }), w({ id: '@1', name: 'dev', command: 'pnpm' })], '/home/u')
     expect(text).toBe(
       [
         '<tmux>',
-        '<window id="@0" name="bash" path="~/repo" command="bash" shown="true"/>',
+        '<window id="@0" name="bash" path="~/repo" command="bash"/>',
         '<window id="@1" name="dev" path="~/repo" command="pnpm"/>',
         '</tmux>',
       ].join('\n'),
@@ -55,12 +51,12 @@ describe('digest', () => {
   })
 
   it('escapes names and folders', () => {
-    const text = digest([w({ name: 'a "b" <c> & d', path: '/x"y' })], '/home/u', new Set())
+    const text = digest([w({ name: 'a "b" <c> & d', path: '/x"y' })], '/home/u')
     expect(text).toContain('name="a &quot;b&quot; &lt;c&gt; &amp; d" path="/x&quot;y"')
   })
 
   it('is absent without windows', () => {
-    expect(digest([], '/home/u', new Set())).toBeUndefined()
+    expect(digest([], '/home/u')).toBeUndefined()
   })
 
   it('treats shells, including login shells, as at a prompt', () => {

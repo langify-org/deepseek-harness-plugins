@@ -208,8 +208,7 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
       let text: string | undefined
       try {
         const session = sessionName(agent.id)
-        const [windows, shown] = await Promise.all([tmux.windows(session), tmux.shown(session)])
-        text = digest(windows, home, shown)
+        text = digest(await tmux.windows(session), home)
       } catch (error) {
         tmuxMissing = /ENOENT/.test(messageOf(error))
         warn('reading windows')(error)

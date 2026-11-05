@@ -153,24 +153,6 @@ export class Tmux {
     }
   }
 
-  /** The windows a terminal tab shows: the current window of each attached view of the session. */
-  async shown(session: string): Promise<Set<string>> {
-    const output = await this.run([
-      'list-sessions',
-      '-F',
-      '#{session_group}\u001f#{session_attached}\u001f#{window_id}',
-    ]).catch((error: unknown) => {
-      if (error instanceof TmuxError && error.missing) return ''
-      throw error
-    })
-    const shown = new Set<string>()
-    for (const line of output.split('\n')) {
-      const [group = '', attached = '0', window = ''] = line.split('\u001f')
-      if (group === session && attached !== '0' && window !== '') shown.add(window)
-    }
-    return shown
-  }
-
   /** Create the session in `cwd`, for a terminal tab or the model's first window, unless it exists. */
   async ensureSession(session: string, sessionId: string, cwd: string): Promise<void> {
     const windows = await this.windows(session)

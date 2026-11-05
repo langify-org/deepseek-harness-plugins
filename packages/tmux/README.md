@@ -43,7 +43,7 @@ Open **tmux** from the right sidebar. It shows the conversation's tmux session.
 What the model learns about the terminal:
 
 - **Its system prompt** describes the shared terminal, the tools and the notes below, in every conversation.
-- **At the start of a turn**, when the windows changed since it last saw them, it gets a `<tmux>` note with one `<window id="@3" name="bash" path="~/repo" command="bash" shown="true"/>` per window; `shown` marks a window a tab is showing. An empty `<tmux>` says the session is closed. A conversation without a session gets no note.
+- **At the start of a turn**, when the windows changed since it last saw them, it gets a `<tmux>` note with one `<window id="@3" name="bash" path="~/repo" command="bash"/>` per window. An empty `<tmux>` says the session is closed. A conversation without a session gets no note.
 - **Screen contents** only when it reads a window itself.
 
 The model has two tools that run any tmux command, with the socket and the target filled in by the plugin:
@@ -83,7 +83,7 @@ The host plugin also adds the guide to the system prompt, registers the two tool
 1. Open **tmux** from the right sidebar in a conversation. It shows the status line with window `0`.
 2. Hold the right button in the terminal, move to **Horizontal Split** in tmux's menu and release: the window splits, and the browser's menu does not open.
 3. Ask the model to open a window, run `echo hello` in it and read it back. It opens a window with `tmux_session`, asking first unless the conversation has full access, types the command with `tmux_window`, reads it back without asking and reports `hello`.
-4. Ask the model what windows there are. It lists both windows with their folders, and the one shown in the tab.
+4. Ask the model what windows there are. It lists both windows with their folders.
 5. Drag over some text in the terminal: once you release the button, it is in your clipboard.
 6. Reload the page: the tab attaches again, with the same windows.
 7. Archive the conversation while `sleep 600` runs in a window: the dialog lists one item of tmux work, and stopping it ends the tmux session.

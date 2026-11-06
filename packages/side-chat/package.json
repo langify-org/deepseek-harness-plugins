@@ -1,6 +1,6 @@
 {
   "name": "@langify-org/dsh-side-chat",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Ask a side question beside a DeepSeek Harness conversation, in a fork shown in the right sidebar",
   "keywords": [
     "deepseek-harness",

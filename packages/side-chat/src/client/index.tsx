@@ -6,11 +6,11 @@
 /// <reference types="@deepseek-ai/dsh-client-ui-chat/client" />
 /// <reference types="@deepseek-ai/dsh-client-ui-conversation/client" />
 /// <reference types="@deepseek-ai/dsh-client-ui-renderer/client" />
-/// <reference types="@deepseek-ai/dsh-client-ui-sidebar-right/client" />
 import { useState, type JSX } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import { IconNewChatOutlineRegular, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { TabId } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { SessionId } from '@deepseek-ai/dsh-session/types'
 import {
@@ -30,6 +30,7 @@ import {
   type ChatTabFace,
 } from './chat-tab.tsx'
 import { NAMESPACE, en, ja, zh } from './messages.ts'
+import { StartPage } from './start-page.tsx'
 
 // DSH 0.2 provides the browser connection without declaring it on Context.
 declare module '@deepseek-ai/cordis' {
@@ -71,6 +72,8 @@ export const inject: readonly string[] = [
 
 const KIND = 'langify-side-chat'
 const TAB_ID = 'langify-side-chat/chat'
+const START_KIND = 'langify-side-chat-new'
+const START_ID = 'langify-side-chat/new'
 const RPC_TIMEOUT_MS = 60_000
 const ACTION_CLASS = 'langify-side-chat-action'
 // After the feedback buttons' styles, which the action row's buttons share.
@@ -130,10 +133,14 @@ export function apply(ctx: Context): void {
     'side-chat: conversation',
   )
 
-  const showChat = (fork: string): void =>
-    ctx.sidebarRight.openResource(chatAddress(fork), { kind: KIND })
+  const showChat = (fork: string, replaceTab?: TabId): void =>
+    ctx.sidebarRight.openResource(chatAddress(fork), {
+      kind: KIND,
+      ...(replaceTab === undefined ? {} : { replaceTab }),
+    })
 
-  const open = async (sessionId: string): Promise<void> => {
+  /** Fork `sessionId` into a side chat and show it, in place of `replaceTab` when given. */
+  const open = async (sessionId: string, replaceTab?: TabId): Promise<void> => {
     const source = ctx.sessions.list.getSnapshot().byId[SessionId(sessionId)]
     const title = `${t('title')}: ${source?.title ?? source?.displayTitle ?? sessionId}`
     const result = await ctx.connection.rpc.call(
@@ -144,8 +151,46 @@ export function apply(ctx: Context): void {
     )
     if (!result.ok) throw new RpcFailure(result.error.code, result.error.message)
     const fork = createResponseSchema.parse(result.value).sessionId
-    showChat(fork)
+    showChat(fork, replaceTab)
   }
+
+  // The guide card opens a start page, which forks the on-screen session and
+  // turns into the side chat; a side chat needs a session to exist first.
+  ctx.effect(
+    () =>
+      ctx.sidebarRightTabs.register({
+        id: START_ID,
+        kind: START_KIND,
+        title: () => t('title'),
+        guide: [
+          {
+            id: 'new-side-chat',
+            order: 30,
+            title: () => t('title'),
+            description: () => t('guide'),
+          },
+        ],
+      }),
+    'side-chat: start page type',
+  )
+  ctx.effect(
+    () =>
+      ctx.slots.inject('sidebar.right.pane.tab', () =>
+        ctx.slots.register(
+          {
+            name: 'sidebar.right.pane.tab',
+            key: START_ID,
+            locale: NAMESPACE,
+            inject: (sessionId: string) => ({
+              start: (tab: TabId) => open(sessionId, tab),
+              describe: (error: unknown) => errorText(error, t),
+            }),
+          },
+          StartPage,
+        ),
+      ),
+    'side-chat: start page',
+  )
 
   // Opening a side chat from the session list shows its source conversation
   // instead, with the side chat beside it.

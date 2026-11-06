@@ -18,7 +18,7 @@ In DSH Web and Desktop you can also add it from the **Plugins** page.
 
 ## Usage
 
-Click the side-chat button in an assistant message's action row. The conversation is forked, titled `Side chat: <conversation title>`, and opens in the right sidebar, where you talk to it as in any conversation. Selecting a side chat in the session list opens its source conversation with the side chat beside it.
+Click the side-chat button in an assistant message's action row, or **Side chat** in the right sidebar's guide. The conversation is forked, titled `Side chat: <conversation title>`, and opens in the right sidebar, where you talk to it as in any conversation. Selecting a side chat in the session list opens its source conversation with the side chat beside it.
 
 - The side chat starts from the conversation's latest completed turn, whichever message you clicked. Later turns of the main conversation do not reach it, and nothing in the side chat reaches the main conversation.
 - The model is told it is in a side chat: to answer questions rather than resume the main task, and not to make changes unless you ask in the side chat. You do not see this instruction in the chat.

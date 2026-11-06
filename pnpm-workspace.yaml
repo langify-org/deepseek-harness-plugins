@@ -27,10 +27,13 @@ catalog:
   '@deepseek-ai/dsh-fs': 0.2.1-rc.5
   '@deepseek-ai/dsh-host-webserver': 0.2.1-rc.5
   '@deepseek-ai/dsh-llm': 0.2.1-rc.5
+  '@deepseek-ai/dsh-sandbox': 0.2.1-rc.5
+  '@deepseek-ai/dsh-sandbox-policy': 0.2.1-rc.5
   '@deepseek-ai/dsh-session': 0.2.1-rc.5
   '@deepseek-ai/dsh-session-persistence': 0.2.1-rc.5
   '@deepseek-ai/dsh-session-projection': 0.2.1-rc.5
   '@deepseek-ai/dsh-subprocess': 0.2.1-rc.5
+  '@deepseek-ai/dsh-system-prompt': 0.2.1-rc.5
   '@deepseek-ai/dsh-tools': 0.2.1-rc.5
   '@deepseek-ai/dsh-user-approval': 0.2.1-rc.5
   '@deepseek-ai/dsh-user-questions': 0.2.1-rc.5
@@ -40,7 +43,10 @@ catalog:
   '@deepseek-ai/schemastery': 3.18.5
   '@types/react': 18.3.31
   '@types/vscode': 1.140.0
+  '@types/ws': 8.18.2
   '@vscode/vsce': 4.1.0
+  '@wterm/dom': 0.5.9
+  ws: 8.22.1
   zod: 4.4.3
 
 # Dependency install scripts. Only lefthook (installs the git hooks) runs;
@@ -54,3 +60,7 @@ allowBuilds:
   koffi: false
   node-pty: false
   protobufjs: false
+
+minimumReleaseAgeExclude:
+  - '@wterm/core@0.5.9'
+  - '@wterm/dom@0.5.9'

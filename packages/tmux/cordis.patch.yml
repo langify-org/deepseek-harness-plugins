@@ -1,0 +1,7 @@
+# Bundle layer: inserts the tmux plugin. The socket is under the DSH home, so
+# every DSH home has its own tmux server.
+- insert:
+    - id: langify-tmux
+      name: '@langify-org/dsh-tmux'
+      config:
+        socket: !!js dshHomePath('tmux', 'socket')

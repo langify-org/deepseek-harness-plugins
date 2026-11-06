@@ -70,6 +70,8 @@ export function clientBundle(packageDir: string): UserConfig {
     ],
     outputOptions: {
       entryFileNames: 'client.cjs',
+      // DSH loads one file per client bundle: lazy imports are inlined, not split off.
+      codeSplitting: false,
       banner: `window.__ModuleLoader__.load({ id: ${JSON.stringify(manifest.name)}, factory: (require) => {`,
       intro: 'var module = { exports: {} }; var exports = module.exports;',
       footer: 'return module.exports; } });',

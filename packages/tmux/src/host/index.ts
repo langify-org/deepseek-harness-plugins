@@ -26,6 +26,8 @@ import { z } from 'zod'
 import { scrubEnv } from '../env.ts'
 import { atPrompt, CLOSED, digest, GUIDE } from '../windows.ts'
 import { tmuxTools } from './tool.ts'
+import { TAB_KIND } from '../protocol.ts'
+import { Focus, SERVICE, tmuxRunner } from './runner.ts'
 import { serveTerminals, type TerminalServices } from './terminal.ts'
 import { sessionIdOf, sessionName, Tmux } from './tmux.ts'
 
@@ -115,7 +117,10 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
   await mkdir(dirname(config.socket), { recursive: true, mode: 0o700 })
   const home = homedir()
   const tmux = new Tmux(config.tmux, config.socket, scrubEnv(process.env))
-  serveTerminals(ctx, tmux)
+  const focus = new Focus()
+  serveTerminals(ctx, tmux, focus)
+  // For other plugins, such as tasks, without either importing the other.
+  ctx.provide(SERVICE, tmuxRunner(tmux, focus, TAB_KIND))
   const warn = (what: string) => (error: unknown) =>
     ctx.logger.warn(`tmux: ${what}: ${messageOf(error)}`)
 

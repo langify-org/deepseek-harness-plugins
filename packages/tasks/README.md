@@ -17,15 +17,22 @@ dsh plugin --profile <profile> add @langify-org/dsh-tasks
 
 In DSH Web and Desktop you can also add it from the **Plugins** page.
 
+## Settings
+
+| Setting | Default    | What it is                                                                                                                                             |
+| ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `runIn` | `terminal` | Where a recipe runs: `terminal`, a new terminal tab; or `tmux`, a new window of the conversation's tmux session, with [@langify-org/dsh-tmux](../tmux) |
+
 ## Usage
 
 Open **Tasks** from the right sidebar's guide. It lists the public recipes of the justfile that `just` finds from the session's working folder, or a folder above it, with each recipe's doc comment and its parameters in `just`'s notation (`target mode=debug [--verbose] *rest`).
 
 - Click a recipe to run it: a new terminal tab opens and `just <recipe>` is typed into it. Stop a recipe with Ctrl-C in that terminal.
+- **In tmux**: with `runIn: tmux` and the tmux plugin running, the recipe runs in a new window of the conversation's tmux session instead, and the **tmux** tab opens on that window. Without the tmux plugin, recipes run in a terminal tab.
 - Clicking a recipe with parameters opens its arguments under the row instead. Literal defaults are filled in, a flag is a checkbox, and a variadic parameter (`*rest`, `+rest`) takes space-separated values; a parameter's help shows on hover. Enter runs it and Esc closes the arguments. `just` checks the values, including `pattern`s.
 - The list reads the justfile again whenever you come back to the window. A justfile in a folder above the session's is named under the list.
 
-Recipes starting with `_` or marked `[private]`, and recipes of `mod` submodules, are not listed. The model is not told about runs, and terminal output stays outside its history, as with any terminal tab.
+Recipes starting with `_` or marked `[private]`, and recipes of `mod` submodules, are not listed. The model is not told about runs in a terminal tab, and their output stays outside its history. A run in tmux is a tmux window like any other: the model sees it at the start of its next turn and can read it.
 
 ## Safety
 
@@ -33,7 +40,7 @@ A Run click is the same as typing `just <recipe>` yourself: it runs with your us
 
 ## How it works
 
-The host plugin runs `just --dump --dump-format json` in the session's working folder and returns the recipes. The browser half opens a terminal tab with the right sidebar's `openTab('terminal')`, takes that tab's terminal model from `ctx.webTerminals`, waits until it is connected and writable, and writes the command line followed by Enter.
+The host plugin runs `just --dump --dump-format json` in the session's working folder and returns the recipes. With `runIn: tmux`, the host instead passes the command line to the `langifyTmux` service of the tmux plugin, found with `ctx.get` at run time (neither package imports the other), and the browser opens the tab kind it returns. Otherwise the browser half opens a terminal tab with the right sidebar's `openTab('terminal')`, takes that tab's terminal model from `ctx.webTerminals`, waits until it is connected and writable, and writes the command line followed by Enter.
 
 ## Known limitations
 

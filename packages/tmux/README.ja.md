@@ -77,6 +77,7 @@ DSH の Web 版や Desktop 版では **Plugins** ページから追加できま�
   - server がなければ、`exit-empty off` で起動します（できれば専用の systemd の scope で）。タブのターミナルの種類に `hyperlinks` の機能を足し、tmux がリンクを通すようにします。
   - server に、探す設定ファイルの一覧（`#{config_files}`）を聞き、どれも存在しないときだけ、既定を server に設定します。
   - `agent/pre-step` で、ターンの最初の step に window の一覧を足します。モデルが最後に見た一覧は session projection が覚えていて、compaction のあとは覚えた内容を消して渡し直します。
+  - ほかのプラグイン（tasks など）向けに `langifyTmux` サービスを提供します。会話の session の新しい window でコマンドを動かし、10 秒以内に attach した tmux タブがその window を表示します。
   - 動いているプログラムを archive のダイアログに伝え、archive されたら session を終わらせます。
   - 起動時には、その間に archive・削除された会話の session を終わらせます。
 

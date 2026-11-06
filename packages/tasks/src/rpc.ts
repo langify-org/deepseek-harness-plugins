@@ -2,9 +2,10 @@
 // by both halves, so it stays free of Node and DOM APIs.
 import { z } from 'zod'
 
-/** DSH's shared RPC channel, and the endpoint this plugin owns on it. */
+/** DSH's shared RPC channel, and the endpoints this plugin owns on it. */
 export const RPC_CHANNEL = '/api'
 export const RPC_METHOD = 'langify-tasks/list'
+export const RUN_METHOD = 'langify-tasks/run'
 
 /** Failures the host reports; each one has a translated message. */
 export const ERROR_CODES = [
@@ -19,6 +20,20 @@ export type ErrorCode = (typeof ERROR_CODES)[number]
 /** List the recipes of the justfile that `just` finds from the session's working folder. */
 export interface ListRequest {
   readonly sessionId: string
+}
+
+/** Run a command line for the session, where the host's `runIn` setting says. */
+export interface RunRequest {
+  readonly sessionId: string
+  readonly line: string
+}
+
+/**
+ * Where the command went: `tab` is the kind of the sidebar tab that shows it,
+ * or `null` when the browser is to type it into DSH's own terminal.
+ */
+export interface RunResponse {
+  readonly tab: string | null
 }
 
 /** One recipe parameter, from `just --dump --dump-format json`. */
@@ -59,6 +74,15 @@ const id = z
   .refine((value) => !value.includes('\0'))
 
 export const listRequestSchema: z.ZodType<ListRequest> = z.strictObject({ sessionId: id })
+
+export const runRequestSchema: z.ZodType<RunRequest> = z.strictObject({
+  sessionId: id,
+  line: z.string().min(1).max(4096),
+})
+
+export const runResponseSchema: z.ZodType<RunResponse> = z.strictObject({
+  tab: z.string().nullable(),
+})
 
 const parameterSchema: z.ZodType<Parameter> = z.strictObject({
   name: z.string(),

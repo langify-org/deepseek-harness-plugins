@@ -14,6 +14,7 @@ import type {
 import type { WorkingDirectoryService } from '@deepseek-ai/dsh-working-directory'
 import { WebSocketServer, type RawData, type WebSocket } from 'ws'
 import { clientMessage, EXITED, NO_TMUX, openQuery, PATH, type OpenQuery } from '../protocol.ts'
+import type { Focus } from './runner.ts'
 import { sessionName, type Tmux } from './tmux.ts'
 
 /** Output chunks sent and not yet written to the socket before the terminal's output pauses. */
@@ -41,7 +42,7 @@ export interface TerminalServices {
 }
 
 /** Serve the terminal tabs' WebSockets until `ctx` is disposed. */
-export function serveTerminals(ctx: Context & TerminalServices, tmux: Tmux): void {
+export function serveTerminals(ctx: Context & TerminalServices, tmux: Tmux, focus: Focus): void {
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 1 << 20 })
   ctx.effect(
     () => () => {
@@ -70,11 +71,17 @@ export function serveTerminals(ctx: Context & TerminalServices, tmux: Tmux): voi
       socket.close(NO_TMUX, 'tmux is not installed')
       return
     }
+    // A window a runner just opened for this conversation, if it still exists.
+    const wanted = focus.take(id)
+    const window =
+      wanted !== undefined && (await tmux.windows(session)).some((w) => w.id === wanted)
+        ? wanted
+        : undefined
     // As DSH's own terminal: the session's subprocess provider, else the host's.
     const spawner = (agent?.ctx.get('subprocess') ?? ctx.get('subprocess')) as Spawner | undefined
     if (spawner === undefined) throw new Error('no subprocess provider')
     const terminal = await spawner.spawnTerminal({
-      argv: tmux.attachCommand(session),
+      argv: tmux.attachCommand(session, window),
       cwd: homedir(),
       cols,
       rows,

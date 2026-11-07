@@ -6,7 +6,7 @@
 
 ## 必要なもの
 
-- Web UI のある DSH `>=0.2.1-rc.5 <0.3.0-0`。
+- Web UI のある DSH `>=0.2.2-rc.1 <0.3.0-0`。
 - DSH の host にある [`tmux`](https://github.com/tmux/tmux)。`PATH` にあるか、設定の `tmux` で場所を指定します。ないときは、タブにそう表示します。Windows の host では tmux が動きません。
 - なくてもよいもの：ユーザーの systemd（`systemd-run --user`）。あると tmux の server が専用の scope で動き、DSH を再起動しても window が残ります。ないと、server は DSH と一緒に止まります。
 

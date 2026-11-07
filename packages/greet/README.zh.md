@@ -4,7 +4,7 @@
 
 一个注册 `greet` 工具的最小 DeepSeek Harness 插件。它是本仓库中新插件的模板，不发布到 npm；请使用 `pnpm dev` 运行（参见 [CONTRIBUTING.zh.md](../../CONTRIBUTING.zh.md)）。
 
-支持的 DSH 版本：`>=0.2.1-rc.5 <0.3.0-0`。
+支持的 DSH 版本：`>=0.2.2-rc.1 <0.3.0-0`。
 
 ## 工具
 

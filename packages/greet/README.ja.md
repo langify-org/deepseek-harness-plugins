@@ -4,7 +4,7 @@
 
 `greet` ツールを登録する最小の DeepSeek Harness プラグインです。このリポジトリで新しいプラグインを作るときの雛形で、npm には公開しません。`pnpm dev` で動かしてください（[CONTRIBUTING.ja.md](../../CONTRIBUTING.ja.md) を参照）。
 
-対応する DSH の版: `>=0.2.1-rc.5 <0.3.0-0`。
+対応する DSH の版: `>=0.2.2-rc.1 <0.3.0-0`。
 
 ## ツール
 

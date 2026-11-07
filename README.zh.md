@@ -9,7 +9,6 @@
 | 包                                                     | 说明                                                                     |
 | ------------------------------------------------------ | ------------------------------------------------------------------------ |
 | [`@langify-org/dsh-code-server`](packages/code-server) | 在 DSH 中用 code-server 编辑会话的工作文件夹。                           |
-| [`@langify-org/dsh-discord`](packages/discord)         | 在 Discord 中与 DSH 对话：每个子区一个会话，审批和提问用按钮作答。       |
 | [`@langify-org/dsh-greet`](packages/greet)             | 注册 `greet` 工具的示例兼模板，不发布。                                  |
 | [`@langify-org/dsh-side-chat`](packages/side-chat)     | 不打断对话，在右侧边栏打开的 fork 中旁路提问。                           |
 | [`@langify-org/dsh-tasks`](packages/tasks)             | 在右侧边栏的任务标签页中，于终端标签页运行 justfile 的 recipe。          |

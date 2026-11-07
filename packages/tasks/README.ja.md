@@ -6,7 +6,7 @@ DeepSeek Harness の右サイドバーの **タスク** タブから、[justfile
 
 ## 必要なもの
 
-- Web UI のある DSH `>=0.2.1-rc.5 <0.3.0-0`。
+- Web UI のある DSH `>=0.2.2-rc.1 <0.3.0-0`。
 - ホストの `PATH` にある [`just`](https://just.systems)。引数の説明・オプション・フラグは `[arg(...)]` 属性から読みます。この属性は最近の `just` にあり、古い版ではこれらなしで recipe を一覧にします。
 
 ## 導入

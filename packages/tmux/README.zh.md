@@ -6,7 +6,7 @@
 
 ## 要求
 
-- 带 Web UI 的 DSH `>=0.2.1-rc.5 <0.3.0-0`。
+- 带 Web UI 的 DSH `>=0.2.2-rc.1 <0.3.0-0`。
 - DSH 主机上的 [`tmux`](https://github.com/tmux/tmux)，位于 `PATH` 中或由 `tmux` 设置指定。没有时，标签页会给出提示。tmux 无法在 Windows 主机上运行。
 - 可选：用户 systemd（`systemd-run --user`）。有它时，tmux 服务器运行在自己的 scope 中，DSH 重启后窗口仍然保留。没有它时，服务器随 DSH 一起停止。
 

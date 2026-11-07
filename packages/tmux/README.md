@@ -6,7 +6,7 @@ A terminal per conversation that you and the model share, on tmux. Each conversa
 
 ## Requirements
 
-- DSH `>=0.2.1-rc.5 <0.3.0-0` with the Web UI.
+- DSH `>=0.2.2-rc.1 <0.3.0-0` with the Web UI.
 - [`tmux`](https://github.com/tmux/tmux) on the DSH host, on `PATH` or named by the `tmux` setting. Without it, the tab says so. tmux does not run on Windows hosts.
 - Optional: user systemd (`systemd-run --user`). With it, the tmux server runs in its own scope and keeps your windows through DSH restarts. Without it, the server stops with DSH.
 

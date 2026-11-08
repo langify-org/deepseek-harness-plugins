@@ -35,15 +35,22 @@ export function bridgeInput(
   keyboard.onkeyevent = (keysym, code, down) => rfb.sendKey(keysym, code, down)
   keyboard.grab()
 
-  const start = (): void => box.classList.add(composingClass)
-  const end = (event: CompositionEvent): void => {
-    box.classList.remove(composingClass)
-    if (event.data !== '') typeText(event.data)
+  // What an input method commits is what the box holds once it is not composing. Some (fcitx,
+  // ibus on Linux) clear the composition first, which ends it empty, and insert the text
+  // after; others commit the composition itself. Either way the box's value is the text.
+  // Keys noVNC takes never reach the box: it prevents their default.
+  const flush = (): void => {
+    const text = box.value
     box.value = ''
+    if (text !== '') typeText(text)
   }
-  // Keys typed straight through also land in the box; keep it empty but for a composition.
+  const start = (): void => box.classList.add(composingClass)
+  const end = (): void => {
+    box.classList.remove(composingClass)
+    flush()
+  }
   const input = (event: Event): void => {
-    if (!(event instanceof InputEvent && event.isComposing)) box.value = ''
+    if (!(event instanceof InputEvent && event.isComposing)) flush()
   }
   const paste = (event: ClipboardEvent): void => {
     event.preventDefault()

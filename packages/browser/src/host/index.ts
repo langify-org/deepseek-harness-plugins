@@ -64,7 +64,7 @@ export const Config: Schema<Config> = Schema.object({
   language: Schema.string()
     .default('')
     .description(
-      'The language of Chromium’s own interface (LANGUAGE), such as ja. Empty keeps the host’s.',
+      'The language of Chromium’s own interface and of the pages it asks for (LANGUAGE, --accept-lang), such as ja. Empty keeps the host’s.',
     ),
   stateDir: Schema.string()
     .required()

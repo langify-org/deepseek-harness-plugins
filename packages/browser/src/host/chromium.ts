@@ -14,7 +14,7 @@ export interface ChromiumOptions {
   readonly command: string
   /** Added after the plugin's own flags. */
   readonly flags: readonly string[]
-  /** LANGUAGE for Chromium's own interface; empty keeps the inherited one. */
+  /** The language of Chromium's interface and of the pages it asks for; empty keeps the host's. */
   readonly language: string
   readonly profileDir: string
 }
@@ -67,6 +67,9 @@ export async function startChromium(
       // desktop keyring, which this headless session does not have.
       '--password-store=basic',
       '--hide-crash-restore-bubble',
+      // LANGUAGE sets the interface, and a new profile's page languages from it;
+      // an existing profile keeps the page languages it was created with.
+      ...(options.language === '' ? [] : [`--accept-lang=${options.language}`]),
       ...options.flags,
     ],
     cwd: homedir(),

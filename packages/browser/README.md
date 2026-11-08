@@ -24,14 +24,14 @@ In DSH Web you can also add it from the **Plugins** page.
 
 ## Settings
 
-| Setting       | Default                        | What it is                                                                                            |
-| ------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| `xvnc`        | `Xvnc`                         | The Xvnc executable: a name on `PATH`, or a path                                                      |
-| `chromium`    | `chromium`                     | The Chromium executable: a name on `PATH`, or a path                                                  |
-| `flags`       | `--disable-gpu`                | Command-line flags added after the plugin's own                                                       |
-| `language`    | empty                          | The language of Chromium's own menus and pages (`LANGUAGE`), such as `ja`; empty keeps the host's     |
-| `stateDir`    | `<DSH home>/browser` (bundled) | Where the profile, downloads and uploads are kept                                                     |
-| `idleMinutes` | `30`                           | Stop the browser after this many minutes with no Browser tab on view and no use; `0` keeps it running |
+| Setting       | Default                        | What it is                                                                                                                        |
+| ------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `xvnc`        | `Xvnc`                         | The Xvnc executable: a name on `PATH`, or a path                                                                                  |
+| `chromium`    | `chromium`                     | The Chromium executable: a name on `PATH`, or a path                                                                              |
+| `flags`       | `--disable-gpu`                | Command-line flags added after the plugin's own                                                                                   |
+| `language`    | empty                          | The language of Chromium's menus and of the pages it asks for (`LANGUAGE`, `--accept-lang`), such as `ja`; empty keeps the host's |
+| `stateDir`    | `<DSH home>/browser` (bundled) | Where the profile, downloads and uploads are kept                                                                                 |
+| `idleMinutes` | `30`                           | Stop the browser after this many minutes with no Browser tab on view and no use; `0` keeps it running                             |
 
 ## Usage
 

@@ -6,14 +6,14 @@
 
 ## 插件
 
-| 包                                                     | 说明                                                                          |
-| ------------------------------------------------------ | ----------------------------------------------------------------------------- |
-| [`@langify-org/dsh-browser`](packages/browser)         | 在右侧边栏的标签页中显示主机上的 Chromium，与模型共享，关闭页面后仍继续运行。 |
-| [`@langify-org/dsh-code-server`](packages/code-server) | 在 DSH 中用 code-server 编辑会话的工作文件夹。                                |
-| [`@langify-org/dsh-greet`](packages/greet)             | 注册 `greet` 工具的示例兼模板，不发布。                                       |
-| [`@langify-org/dsh-side-chat`](packages/side-chat)     | 不打断对话，在右侧边栏打开的 fork 中旁路提问。                                |
-| [`@langify-org/dsh-tasks`](packages/tasks)             | 在右侧边栏的任务标签页中，于终端标签页运行 justfile 的 recipe。               |
-| [`@langify-org/dsh-tmux`](packages/tmux)               | 用 tmux 为每个对话提供标签页终端，与模型共享，重新加载和重启后依然保留。      |
+| 包                                                     | 说明                                                                                    |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| [`@langify-org/dsh-browser`](packages/browser)         | 在右侧边栏的标签页中显示主机上的 Chromium，与模型共享，关闭页面后仍继续运行。尚未发布。 |
+| [`@langify-org/dsh-code-server`](packages/code-server) | 在 DSH 中用 code-server 编辑会话的工作文件夹。                                          |
+| [`@langify-org/dsh-greet`](packages/greet)             | 注册 `greet` 工具的示例兼模板，不发布。                                                 |
+| [`@langify-org/dsh-side-chat`](packages/side-chat)     | 不打断对话，在右侧边栏打开的 fork 中旁路提问。                                          |
+| [`@langify-org/dsh-tasks`](packages/tasks)             | 在右侧边栏的任务标签页中，于终端标签页运行 justfile 的 recipe。                         |
+| [`@langify-org/dsh-tmux`](packages/tmux)               | 用 tmux 为每个对话提供标签页终端，与模型共享，重新加载和重启后依然保留。                |
 
 ## 安装
 

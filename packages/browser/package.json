@@ -1,6 +1,7 @@
 {
   "name": "@langify-org/dsh-browser",
   "version": "0.1.0",
+  "private": true,
   "description": "A real Chromium on the DeepSeek Harness host, shown in right-sidebar tabs and shared with the model",
   "keywords": [
     "browser",

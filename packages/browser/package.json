@@ -1,0 +1,92 @@
+{
+  "name": "@langify-org/dsh-browser",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A real Chromium on the DeepSeek Harness host, shown in right-sidebar tabs and shared with the model",
+  "keywords": [
+    "browser",
+    "chromium",
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "vnc"
+  ],
+  "homepage": "https://github.com/langify-org/deepseek-harness-plugins/tree/main/packages/browser#readme",
+  "bugs": "https://github.com/langify-org/deepseek-harness-plugins/issues",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/langify-org/deepseek-harness-plugins.git",
+    "directory": "packages/browser"
+  },
+  "files": [
+    "dist",
+    "cordis.patch.yml",
+    "README*.md"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./client": "./dist/client.cjs",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -p src/client"
+  },
+  "dependencies": {
+    "ws": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "catalog:",
+    "@deepseek-ai/dsh-agent": "catalog:",
+    "@deepseek-ai/dsh-attachment": "catalog:",
+    "@deepseek-ai/dsh-client-connection": "catalog:",
+    "@deepseek-ai/dsh-client-locale": "catalog:",
+    "@deepseek-ai/dsh-client-ui-primitives": "catalog:",
+    "@deepseek-ai/dsh-client-ui-renderer": "catalog:",
+    "@deepseek-ai/dsh-client-ui-sidebar-right": "catalog:",
+    "@deepseek-ai/dsh-client-ui-slots": "catalog:",
+    "@deepseek-ai/dsh-host-webserver": "catalog:",
+    "@deepseek-ai/dsh-llm": "catalog:",
+    "@deepseek-ai/dsh-sandbox": "catalog:",
+    "@deepseek-ai/dsh-sandbox-policy": "catalog:",
+    "@deepseek-ai/dsh-session": "catalog:",
+    "@deepseek-ai/dsh-subprocess": "catalog:",
+    "@deepseek-ai/dsh-system-prompt": "catalog:",
+    "@deepseek-ai/dsh-tools": "catalog:",
+    "@deepseek-ai/dsh-user-approval": "catalog:",
+    "@deepseek-ai/dsh-workspace": "catalog:",
+    "@deepseek-ai/schemastery": "catalog:",
+    "@novnc/novnc": "catalog:",
+    "@types/react": "catalog:",
+    "@types/ws": "catalog:"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.5",
+    "@deepseek-ai/dsh-attachment": ">=0.2.2-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-sandbox": ">=0.2.2-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-tools": ">=0.2.2-rc.1 <0.3.0-0",
+    "@deepseek-ai/schemastery": "^3.18.5"
+  },
+  "engines": {
+    "dsh": ">=0.2.2-rc.1 <0.3.0-0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-sidebar-right"
+      ]
+    }
+  }
+}

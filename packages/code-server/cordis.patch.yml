@@ -1,4 +1,0 @@
-# Bundle layer: inserts the code-server plugin when a profile enables this package.
-- insert:
-    - id: langify-code-server
-      name: '@langify-org/dsh-code-server'

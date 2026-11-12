@@ -34,7 +34,7 @@ A pre-commit hook (lefthook) formats and lints staged files.
 
 `pnpm dev` keeps DSH state in `.dsh/`, separate from your own DSH installation. It builds the packages, links them into the `web` profile there, starts `tsdown --watch`, and starts DSH Web. Saving a source file rebuilds the package and DSH's HMR replaces the running plugin without a restart. Arguments after `pnpm dev` go to `dsh web`, for example `pnpm dev --port 3081`. Only one `pnpm dev` runs at a time, since two would share `.dsh/` and the builds; a second one stops with the first one's process ID.
 
-A package can keep development-only settings in a `dev.patch.yml` beside its `package.json`; `pnpm dev` applies it, and it is not published. Point anything the plugin writes outside DSH into `.dsh/` there with `!!js dshHomePath(...)`, as [`packages/code-server/dev.patch.yml`](packages/code-server/dev.patch.yml) does for code-server's settings and extensions.
+A package can keep development-only settings in a `dev.patch.yml` beside its `package.json`; `pnpm dev` applies it, and it is not published. Point anything the plugin writes outside DSH into `.dsh/` there with `!!js dshHomePath(...)`.
 
 The model needs an API key. Put it in `.envrc.local`, which git ignores and direnv loads:
 
@@ -46,12 +46,12 @@ Another provider can be configured from the Settings page; its configuration als
 
 ## Adding a plugin
 
-1. Copy `packages/greet` to `packages/<name>`, rename the package to `@langify-org/dsh-<name>`, remove `"private": true`, and add `"publishConfig": { "access": "public" }`. Update `repository.directory`, `homepage`, and `description`.
+1. Copy `packages/tasks` to `packages/<name>`, rename the package to `@langify-org/dsh-<name>`, and replace its source with your plugin's. Update `repository.directory`, `homepage`, `description`, and `keywords`.
 2. Give the plugin row in `cordis.patch.yml` an id prefixed with `langify-`, so it cannot collide with rows from other bundles.
 3. List DSH packages the plugin shares with the host under both `peerDependencies` (a range) and `devDependencies` (`catalog:`). Add new DSH packages to the catalog in `pnpm-workspace.yaml`.
 4. Keep `engines.dsh` equal to the range the plugin is tested against.
 5. Write the README in English, Japanese, and Chinese, and add the plugin to the table in the root README.
-6. For a browser half, build `src/client/index.tsx` with `clientBundle()` from [`tsdown.client.ts`](tsdown.client.ts), declare `dsh.client`, export `./client` as `./dist/client.cjs`, and type-check it with `src/client/tsconfig.json` through a `typecheck` script. [`packages/code-server`](packages/code-server) is the example.
+6. For a browser half, build `src/client/index.tsx` with `clientBundle()` from [`tsdown.client.ts`](tsdown.client.ts), declare `dsh.client`, export `./client` as `./dist/client.cjs`, and type-check it with `src/client/tsconfig.json` through a `typecheck` script. [`packages/tasks`](packages/tasks) is the example.
 
 `pnpm dev` and `pnpm smoke` pick up every package that declares `dsh.bundle`.
 
@@ -64,7 +64,7 @@ Another provider can be configured from the Settings page; its configuration als
 ## Conventions
 
 - **Types**: the shared `tsconfig.base.json` is strict, including `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, and `isolatedDeclarations`. Exported values need explicit types; this lets tsdown emit declarations with oxc instead of the TypeScript API, which TypeScript 7 does not provide. Host and browser code are separate programs (the root `tsconfig.json` and each package's `src/client/tsconfig.json`), because DSH declares different services on the same Cordis `Context` for each side.
-- **Types before tests**: express in types whatever the compiler can check: contracts as interfaces, closed sets as unions, maps that must cover every member as `Record<Union, …>` (the code-server translations cover every error code this way), and, at each trust boundary, a runtime validator annotated with the interface it checks. Write tests only for what types cannot express: timing, I/O, parsing untrusted input, security checks, and protocol edge cases. Do not test what the compiler already guarantees or one-line wiring. A test must fail when the behavior it names breaks.
+- **Types before tests**: express in types whatever the compiler can check: contracts as interfaces, closed sets as unions, maps that must cover every member as `Record<Union, …>` (the tasks translations cover every error code this way), and, at each trust boundary, a runtime validator annotated with the interface it checks. Write tests only for what types cannot express: timing, I/O, parsing untrusted input, security checks, and protocol edge cases. Do not test what the compiler already guarantees or one-line wiring. A test must fail when the behavior it names breaks.
 - **Integration**: `pnpm smoke` checks that DSH composes each bundle. Checks that need a browser or another program are listed in the package's README.
 - **Lint**: lint errors are not suppressed inline. When a rule is wrong for a whole kind of file, change `.oxlintrc.json`, say why in a comment there, and explain it in the pull request.
 - **Packages**: ESM only. Published packages contain built files only and run no install scripts.

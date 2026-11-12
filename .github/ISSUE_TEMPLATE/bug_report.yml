@@ -6,7 +6,7 @@ body:
     id: package
     attributes:
       label: Package and version
-      placeholder: '@langify-org/dsh-greet@0.1.0'
+      placeholder: '@langify-org/dsh-tmux@0.1.0'
     validations:
       required: true
   - type: input

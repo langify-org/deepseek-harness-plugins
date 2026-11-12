@@ -34,7 +34,7 @@ pre-commit 钩子（lefthook）会格式化并 lint 已暂存的文件。
 
 `pnpm dev` 将 DSH 的状态保存在 `.dsh/` 中，与你日常使用的 DSH 分开。它会构建各包，将其链接到该目录下的 `web` profile，然后启动 `tsdown --watch` 和 DSH Web。保存源文件后，包会被重新构建，DSH 的 HMR 无需重启即可替换正在运行的插件。`pnpm dev` 之后的参数会传给 `dsh web`，例如 `pnpm dev --port 3081`。同一时间只能运行一个 `pnpm dev`，因为两个会争用 `.dsh/` 和构建产物；第二个会显示第一个的进程 ID 并退出。
 
-包可以把仅用于开发的设置放在 `package.json` 旁边的 `dev.patch.yml` 中；`pnpm dev` 会应用它，而且它不会被发布。插件在 DSH 之外写入的内容，应在这里用 `!!js dshHomePath(...)` 指向 `.dsh/` 内部，例如 [`packages/code-server/dev.patch.yml`](packages/code-server/dev.patch.yml) 就这样处理了 code-server 的设置和扩展。
+包可以把仅用于开发的设置放在 `package.json` 旁边的 `dev.patch.yml` 中；`pnpm dev` 会应用它，而且它不会被发布。插件在 DSH 之外写入的内容，应在这里用 `!!js dshHomePath(...)` 指向 `.dsh/` 内部。
 
 模型需要 API 密钥。请写入 `.envrc.local`，该文件被 git 忽略并由 direnv 加载：
 
@@ -46,12 +46,12 @@ export DEEPSEEK_API_KEY=...
 
 ## 添加插件
 
-1. 将 `packages/greet` 复制为 `packages/<name>`，把包名改为 `@langify-org/dsh-<name>`，删除 `"private": true`，并添加 `"publishConfig": { "access": "public" }`。同时更新 `repository.directory`、`homepage` 和 `description`。
+1. 将 `packages/tasks` 复制为 `packages/<name>`，把包名改为 `@langify-org/dsh-<name>`，并把源码换成你的插件。同时更新 `repository.directory`、`homepage`、`description` 和 `keywords`。
 2. 为 `cordis.patch.yml` 中的插件行的 id 加上 `langify-` 前缀，避免与其他 bundle 的行冲突。
 3. 与 Host 共享的 DSH 包同时写入 `peerDependencies`（版本范围）和 `devDependencies`（`catalog:`）。新的 DSH 包需添加到 `pnpm-workspace.yaml` 的 catalog 中。
 4. 使 `engines.dsh` 与该插件经过验证的版本范围保持一致。
 5. 用英文、日文和中文编写 README，并将插件添加到根目录 README 的表格中。
-6. 如果插件有浏览器部分，请用 [`tsdown.client.ts`](tsdown.client.ts) 中的 `clientBundle()` 构建 `src/client/index.tsx`，声明 `dsh.client`，并将 `./client` 导出为 `./dist/client.cjs`；类型检查通过 `typecheck` 脚本运行 `src/client/tsconfig.json`。示例见 [`packages/code-server`](packages/code-server)。
+6. 如果插件有浏览器部分，请用 [`tsdown.client.ts`](tsdown.client.ts) 中的 `clientBundle()` 构建 `src/client/index.tsx`，声明 `dsh.client`，并将 `./client` 导出为 `./dist/client.cjs`；类型检查通过 `typecheck` 脚本运行 `src/client/tsconfig.json`。示例见 [`packages/tasks`](packages/tasks)。
 
 `pnpm dev` 和 `pnpm smoke` 会处理所有声明了 `dsh.bundle` 的包。
 
@@ -64,7 +64,7 @@ export DEEPSEEK_API_KEY=...
 ## 约定
 
 - **类型**：共享的 `tsconfig.base.json` 采用严格设置，包括 `exactOptionalPropertyTypes`、`noUncheckedIndexedAccess` 和 `isolatedDeclarations`。导出的值需要显式类型，这样 tsdown 就能用 oxc 而不是 TypeScript API 生成类型声明（TypeScript 7 不提供该 API）。Host 代码和浏览器代码是两个独立的程序（根目录的 `tsconfig.json` 与各包的 `src/client/tsconfig.json`），因为 DSH 在同一个 Cordis `Context` 上为两侧声明了不同的服务。
-- **先类型，后测试**：凡是编译器能检查的，都用类型表达：契约用 interface，取值集合用 union，必须覆盖所有成员的映射用 `Record<Union, …>`（code-server 的翻译就以这种方式覆盖了所有错误码），在每个信任边界上使用以该 interface 标注的运行时校验。只为类型无法表达的部分编写测试：时间、I/O、解析不可信输入、安全检查和协议的边界情况。不测试编译器已经保证的内容，也不测试一行的连线代码。测试名所描述的行为一旦被破坏，测试就必须失败。
+- **先类型，后测试**：凡是编译器能检查的，都用类型表达：契约用 interface，取值集合用 union，必须覆盖所有成员的映射用 `Record<Union, …>`（tasks 的翻译就以这种方式覆盖了所有错误码），在每个信任边界上使用以该 interface 标注的运行时校验。只为类型无法表达的部分编写测试：时间、I/O、解析不可信输入、安全检查和协议的边界情况。不测试编译器已经保证的内容，也不测试一行的连线代码。测试名所描述的行为一旦被破坏，测试就必须失败。
 - **集成**：`pnpm smoke` 检查 DSH 能否合成每个 bundle。需要浏览器或其他程序的检查步骤写在各包的 README 中。
 - **Lint**：不在代码中内联抑制 lint 错误。当某条规则不适用于一整类文件时，修改 `.oxlintrc.json`，在那里用注释写明原因，并在拉取请求中说明。
 - **包**：仅限 ESM。发布的包只包含构建产物，不运行安装脚本。

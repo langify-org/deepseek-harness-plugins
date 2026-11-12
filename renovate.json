@@ -59,11 +59,6 @@
       "allowedVersions": "<19"
     },
     {
-      "description": "Follows the extension's engines.vscode",
-      "matchPackageNames": ["@types/vscode"],
-      "dependencyDashboardApproval": true
-    },
-    {
       "description": "Stay on the Node major in .node-version",
       "matchPackageNames": ["@types/node"],
       "allowedVersions": "<25"

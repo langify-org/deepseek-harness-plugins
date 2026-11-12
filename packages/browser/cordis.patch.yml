@@ -1,7 +1,0 @@
-# Bundle layer: inserts the browser plugin. The profile, downloads and uploads
-# live under the DSH home, so every DSH home has its own browser and logins.
-- insert:
-    - id: langify-browser
-      name: '@langify-org/dsh-browser'
-      config:
-        stateDir: !!js dshHomePath('browser')

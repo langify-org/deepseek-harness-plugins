@@ -43,6 +43,9 @@
               applyPatch: true
           - id: tool-fs-search
             name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              # Required. An over-cap glob keeps the most recently changed files.
+              sampleOverCapGlobResults: false
           - id: compaction
             name: cordis:group
             group: true

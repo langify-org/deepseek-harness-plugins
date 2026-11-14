@@ -1,6 +1,7 @@
 {
   "name": "@langify-org/dsh-memory",
   "version": "0.1.0",
+  "private": true,
   "description": "Give DeepSeek Harness a memory directory that a scribe agent keeps up to date from every conversation",
   "keywords": [
     "deepseek-harness",

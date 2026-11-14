@@ -19,20 +19,22 @@ In DSH's Web and Desktop apps, add it from the **Plugins** page.
 
 ## Settings
 
-| Setting            | Default            | What it is                                                                                         |
-| ------------------ | ------------------ | -------------------------------------------------------------------------------------------------- |
-| `directory`        | `$DSH_HOME/memory` | The memory directory                                                                               |
-| `git`              | `git`              | The git executable: a name looked up on `PATH`, or a path                                          |
-| `timeZone`         | the host's         | The IANA time zone of the memory conversations' days                                               |
-| `dayStartsAt`      | `3`                | The hour a new memory conversation starts the day                                                  |
-| `subagentProvider` | `spawn`            | The subagent provider that starts the scribes                                                      |
-| `agentPreset`      | `langify-memory`   | The agent preset the memory conversations and their scribes run on                                 |
-| `toolArguments`    | `300`              | Characters of a tool call's arguments a scribe reads                                               |
-| `toolResult`       | `500`              | Characters of a tool result a scribe reads                                                         |
-| `contextChars`     | `8000`             | Characters of what a conversation said before the part to record that a scribe is given as context |
-| `indexLines`       | `200`              | Lines of `MEMORY.md` a conversation is given when it starts                                        |
-| `indexBytes`       | `25600`            | Bytes of `MEMORY.md` a conversation is given when it starts                                        |
-| `rebaselineAfter`  | `20`               | Commits after which a conversation is given `MEMORY.md` again                                      |
+| Setting                         | Default                   | What it is                                                                                         |
+| ------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------- |
+| `directory`                     | `$DSH_HOME/memory`        | The memory directory                                                                               |
+| `git`                           | `git`                     | The git executable: a name looked up on `PATH`, or a path                                          |
+| `timeZone`                      | the host's                | The IANA time zone of the memory conversations' days                                               |
+| `dayStartsAt`                   | `3`                       | The hour a new memory conversation starts the day                                                  |
+| `subagentProvider`              | `spawn`                   | The subagent provider that starts the scribes                                                      |
+| `agentPreset`                   | `langify-memory`          | The agent preset the memory conversations and their scribes run on                                 |
+| `scribeProvider`, `scribeModel` | the memory conversation's | The scribes' LLM provider and model, set together                                                  |
+| `scribeReasoningEffort`         | the model's default       | The scribes' reasoning effort, one the model offers                                                |
+| `toolArguments`                 | `300`                     | Characters of a tool call's arguments a scribe reads                                               |
+| `toolResult`                    | `500`                     | Characters of a tool result a scribe reads                                                         |
+| `contextChars`                  | `8000`                    | Characters of what a conversation said before the part to record that a scribe is given as context |
+| `indexLines`                    | `200`                     | Lines of `MEMORY.md` a conversation is given when it starts                                        |
+| `indexBytes`                    | `25600`                   | Bytes of `MEMORY.md` a conversation is given when it starts                                        |
+| `rebaselineAfter`               | `20`                      | Commits after which a conversation is given `MEMORY.md` again                                      |
 
 ## How it works
 

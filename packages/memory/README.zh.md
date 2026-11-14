@@ -19,20 +19,22 @@ dsh plugin --profile <profile> add @langify-org/dsh-memory
 
 ## 设置
 
-| 设置               | 默认值             | 说明                                                     |
-| ------------------ | ------------------ | -------------------------------------------------------- |
-| `directory`        | `$DSH_HOME/memory` | 记忆目录                                                 |
-| `git`              | `git`              | git 可执行文件：在 `PATH` 中查找的名称或路径             |
-| `timeZone`         | 主机的时区         | 决定记忆对话日期的 IANA 时区                             |
-| `dayStartsAt`      | `3`                | 新的记忆对话开始一天的时刻（小时）                       |
-| `subagentProvider` | `spawn`            | 启动记录员的子代理 provider                              |
-| `agentPreset`      | `langify-memory`   | 记忆对话及其记录员使用的代理预设                         |
-| `toolArguments`    | `300`              | 记录员读取的工具调用参数的字符数                         |
-| `toolResult`       | `500`              | 记录员读取的工具结果的字符数                             |
-| `contextChars`     | `8000`             | 待记录部分之前的对话内容中，作为上下文交给记录员的字符数 |
-| `indexLines`       | `200`              | 对话开始时提供的 `MEMORY.md` 行数                        |
-| `indexBytes`       | `25600`            | 对话开始时提供的 `MEMORY.md` 字节数                      |
-| `rebaselineAfter`  | `20`               | 超过这么多提交后，重新提供 `MEMORY.md`                   |
+| 设置                            | 默认值             | 说明                                                     |
+| ------------------------------- | ------------------ | -------------------------------------------------------- |
+| `directory`                     | `$DSH_HOME/memory` | 记忆目录                                                 |
+| `git`                           | `git`              | git 可执行文件：在 `PATH` 中查找的名称或路径             |
+| `timeZone`                      | 主机的时区         | 决定记忆对话日期的 IANA 时区                             |
+| `dayStartsAt`                   | `3`                | 新的记忆对话开始一天的时刻（小时）                       |
+| `subagentProvider`              | `spawn`            | 启动记录员的子代理 provider                              |
+| `agentPreset`                   | `langify-memory`   | 记忆对话及其记录员使用的代理预设                         |
+| `scribeProvider`、`scribeModel` | 记忆对话的         | 记录员的 LLM provider 和模型，两者一起设置               |
+| `scribeReasoningEffort`         | 模型的默认值       | 记录员的 reasoning effort，取模型提供的选项之一          |
+| `toolArguments`                 | `300`              | 记录员读取的工具调用参数的字符数                         |
+| `toolResult`                    | `500`              | 记录员读取的工具结果的字符数                             |
+| `contextChars`                  | `8000`             | 待记录部分之前的对话内容中，作为上下文交给记录员的字符数 |
+| `indexLines`                    | `200`              | 对话开始时提供的 `MEMORY.md` 行数                        |
+| `indexBytes`                    | `25600`            | 对话开始时提供的 `MEMORY.md` 字节数                      |
+| `rebaselineAfter`               | `20`               | 超过这么多提交后，重新提供 `MEMORY.md`                   |
 
 ## 工作方式
 

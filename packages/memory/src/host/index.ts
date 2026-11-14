@@ -24,8 +24,13 @@
 import { readFile, realpath } from 'node:fs/promises'
 import { join, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import { createUserMessage, type ContextFormed, type UserMessage } from '@deepseek-ai/dsh-llm'
+import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
+import {
+  createUserMessage,
+  ReasoningEffortId,
+  type ContextFormed,
+  type UserMessage,
+} from '@deepseek-ai/dsh-llm'
 import {
   isReplacementSurfaceEvent,
   SessionId,
@@ -82,6 +87,9 @@ export interface Config {
   dayStartsAt: number
   subagentProvider: string
   agentPreset: string
+  scribeProvider?: string
+  scribeModel?: string
+  scribeReasoningEffort?: string
   toolArguments: number
   toolResult: number
   contextChars: number
@@ -108,6 +116,13 @@ export const Config: Schema<Config> = Schema.object({
   agentPreset: Schema.string()
     .default('langify-memory')
     .description('The agent preset the memory conversations and their scribes run on.'),
+  scribeProvider: Schema.string().description(
+    "The LLM provider of the scribes' model, set together with scribeModel. Without them, the memory conversation's model.",
+  ),
+  scribeModel: Schema.string().description("The scribes' model, set together with scribeProvider."),
+  scribeReasoningEffort: Schema.string().description(
+    "The scribes' reasoning effort, one the model offers. Without it, the model's default.",
+  ),
   toolArguments: Schema.natural()
     .default(300)
     .description("Characters of a tool call's arguments a scribe reads."),
@@ -183,6 +198,17 @@ export interface Services {
 }
 
 export async function apply(ctx: Context & Services, config: Config): Promise<void> {
+  if ((config.scribeProvider === undefined) !== (config.scribeModel === undefined)) {
+    throw new Error('memory: scribeProvider and scribeModel are set together')
+  }
+  /** What a scribe runs on where it differs from the memory conversation. */
+  const scribeOptions: AgentOptions = {
+    ...(config.scribeProvider === undefined ? {} : { provider: config.scribeProvider }),
+    ...(config.scribeModel === undefined ? {} : { model: config.scribeModel }),
+    ...(config.scribeReasoningEffort === undefined
+      ? {}
+      : { reasoningEffort: ReasoningEffortId(config.scribeReasoningEffort) }),
+  }
   const repository = new Repository(config.git, config.directory)
   await repository.init({ [GUIDANCE_FILE]: AGENTS_MD, [INDEX_FILE]: MEMORY_MD })
   const directories = [config.directory, await realpath(config.directory)]
@@ -351,6 +377,7 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     const activation = await ctx.subagents.startActivation({
       provider: config.subagentProvider,
       agentPreset: config.agentPreset,
+      agentOptions: scribeOptions,
       label: title ?? session.id,
       prompt: [{ type: 'text', text }],
       parent: await memoryConversation(),

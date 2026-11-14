@@ -19,20 +19,22 @@ DSH の Web 版や Desktop 版では **Plugins** ページから追加できま�
 
 ## 設定
 
-| 設定               | 既定値             | 何か                                                                       |
-| ------------------ | ------------------ | -------------------------------------------------------------------------- |
-| `directory`        | `$DSH_HOME/memory` | 記憶のディレクトリ                                                         |
-| `git`              | `git`              | git の実行ファイル。`PATH` から探す名前か、パス                            |
-| `timeZone`         | ホストのもの       | 記憶の会話の日を決める IANA のタイムゾーン                                 |
-| `dayStartsAt`      | `3`                | 新しい記憶の会話で日が始まる時刻（時）                                     |
-| `subagentProvider` | `spawn`            | 記録係を起動するサブエージェントの provider                                |
-| `agentPreset`      | `langify-memory`   | 記憶の会話と記録係が使うエージェントプリセット                             |
-| `toolArguments`    | `300`              | 記録係が読む、ツール呼び出しの引数の文字数                                 |
-| `toolResult`       | `500`              | 記録係が読む、ツールの結果の文字数                                         |
-| `contextChars`     | `8000`             | 記録する部分より前に会話で言われたことのうち、記録係に文脈として渡す文字数 |
-| `indexLines`       | `200`              | 会話の開始時に渡す `MEMORY.md` の行数                                      |
-| `indexBytes`       | `25600`            | 会話の開始時に渡す `MEMORY.md` のバイト数                                  |
-| `rebaselineAfter`  | `20`               | この数を超える commit があったら、`MEMORY.md` を渡し直す                   |
+| 設定                            | 既定値             | 何か                                                                       |
+| ------------------------------- | ------------------ | -------------------------------------------------------------------------- |
+| `directory`                     | `$DSH_HOME/memory` | 記憶のディレクトリ                                                         |
+| `git`                           | `git`              | git の実行ファイル。`PATH` から探す名前か、パス                            |
+| `timeZone`                      | ホストのもの       | 記憶の会話の日を決める IANA のタイムゾーン                                 |
+| `dayStartsAt`                   | `3`                | 新しい記憶の会話で日が始まる時刻（時）                                     |
+| `subagentProvider`              | `spawn`            | 記録係を起動するサブエージェントの provider                                |
+| `agentPreset`                   | `langify-memory`   | 記憶の会話と記録係が使うエージェントプリセット                             |
+| `scribeProvider`・`scribeModel` | 記憶の会話のもの   | 記録係の LLM の provider とモデル。2 つ一緒に指定する                      |
+| `scribeReasoningEffort`         | モデルの既定       | 記録係の reasoning effort。モデルが選べるもののうちの 1 つ                 |
+| `toolArguments`                 | `300`              | 記録係が読む、ツール呼び出しの引数の文字数                                 |
+| `toolResult`                    | `500`              | 記録係が読む、ツールの結果の文字数                                         |
+| `contextChars`                  | `8000`             | 記録する部分より前に会話で言われたことのうち、記録係に文脈として渡す文字数 |
+| `indexLines`                    | `200`              | 会話の開始時に渡す `MEMORY.md` の行数                                      |
+| `indexBytes`                    | `25600`            | 会話の開始時に渡す `MEMORY.md` のバイト数                                  |
+| `rebaselineAfter`               | `20`               | この数を超える commit があったら、`MEMORY.md` を渡し直す                   |
 
 ## 仕組み
 

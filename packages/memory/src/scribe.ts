@@ -35,7 +35,7 @@ const SCRIBE = `You record one conversation, part by part. This message gives yo
 
 Write to the directory when the user asks for something to be remembered, or when a part holds something clearly worth remembering: something you expect a later conversation to need. Most parts hold nothing of the kind, and then you change nothing.
 
-The part to record comes last in a message: it starts after a line that names its events, like "=== events 12 to 34 ===", and runs to the end of the message. A new agent takes your place when the conversation pauses or your context grows long. It starts from the directory and the last of what the conversation said, not from what you have in mind.`
+The part to record comes last in a message: it starts after a line that names its events, like "=== events 12 to 34 ===", and runs to the end of the message. You stay with this conversation for the day. The agent that takes your place afterwards starts from the directory and the last of what the conversation said, not from what you have in mind.`
 
 /** How much of the index every conversation is given. */
 export interface IndexShare {

@@ -7,12 +7,13 @@
 // commit whose message is its reply. A turn that ends in any other conversation
 // in that workspace (someone working on memory there) is committed the same way.
 //
-// A scribe goes on with its conversation turn after turn, so it knows what it
-// already recorded and its history is read from the prompt cache. A new scribe
-// takes over when the conversation paused for longer than the cache lasts or the
-// scribe's context grew long: every step reads the whole context again, so a long
-// one costs more than starting over. The new scribe starts from the user's
-// guidance, the index, and the end of what the conversation said.
+// A conversation keeps one scribe for the day, so the scribe knows what it
+// already recorded and its history is read from the prompt cache. A scribe that
+// is new to a conversation nearly always writes something on its first turn, so
+// every handover adds to memory what no one needed; a scribe is therefore
+// replaced only when the day's memory conversation is, or when its context grew
+// past `continueTokens`, a guard against a runaway one. The new scribe starts
+// from the user's guidance, the index, and the end of what the conversation said.
 //
 // Tidying: a day's memory conversation starts when the day does, and its first
 // turn, its only one, goes through the whole directory: what the scribes wrote a
@@ -109,7 +110,6 @@ export interface Config {
   toolArguments: number
   toolResult: number
   contextChars: number
-  continueSeconds: number
   continueTokens: number
   indexLines: number
   indexBytes: number
@@ -160,15 +160,10 @@ export const Config: Schema<Config> = Schema.object({
     .description(
       'Characters of what a conversation said before the part to record that a new scribe is given as context.',
     ),
-  continueSeconds: Schema.natural()
-    .default(300)
-    .description(
-      "Seconds after a scribe's turn within which it goes on with its conversation's next turn: how long the prompt cache keeps its history. 0 starts a new scribe every turn.",
-    ),
   continueTokens: Schema.natural()
-    .default(30000)
+    .default(200000)
     .description(
-      "Tokens of context up to which a scribe goes on with its conversation's next turn.",
+      "Tokens of context past which a conversation's scribe is replaced by a new one: a guard against a runaway scribe, not a setting to tune.",
     ),
   indexLines: Schema.natural()
     .default(200)
@@ -178,7 +173,21 @@ export const Config: Schema<Config> = Schema.object({
     .description('Bytes of MEMORY.md a conversation is given when it starts.'),
 })
 
-/** What the plugin keeps: how far each conversation has been read, and each day's memory conversation. */
+/** The scribe of a conversation, as its last turn left it. */
+interface Scribe {
+  readonly id: string
+  /** The memory conversation it is a subagent of. */
+  readonly parent: string
+  /** The commit memory was at when its last turn ended. */
+  readonly seen: string
+  /** Its context after its last turn, in tokens. */
+  readonly tokens: number
+}
+
+/**
+ * What the plugin keeps: how far each conversation has been read, each day's
+ * memory conversation, and each conversation's scribe.
+ */
 const domain = defineDomain({
   name: 'langify_memory',
   version: 1,
@@ -187,6 +196,10 @@ const domain = defineDomain({
     read: domainTable<string, { seq: number }>(z.object({ seq: z.number() })),
     /** Day (YYYY-MM-DD) → that day's memory conversation. */
     scribes: domainTable<string, { sessionId: string }>(z.object({ sessionId: z.string() })),
+    /** Conversation id → its scribe. Kept across restarts: a restart is no reason for a new scribe. */
+    conversations: domainTable<string, Scribe>(
+      z.object({ id: z.string(), parent: z.string(), seen: z.string(), tokens: z.number() }),
+    ),
   },
 })
 
@@ -231,17 +244,6 @@ interface ScribeTurn {
   readonly ended: string
 }
 
-/** The scribe of a conversation, as its last turn left it. */
-interface Scribe {
-  readonly id: string
-  /** The memory conversation it is a subagent of. */
-  readonly parent: string
-  /** When its last turn ended, in milliseconds. */
-  readonly at: number
-  /** The commit memory was at when its last turn ended. */
-  readonly seen: string
-}
-
 /** How long a scribe that goes on has for one turn before it is stopped. */
 const SCRIBE_TURN_MS = 600_000
 
@@ -272,6 +274,7 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
   ctx.effect(() => () => store.close(), 'memory: storage')
   const read = store.table('read')
   const days = store.table('scribes')
+  const scribes = store.table('conversations')
   const projections = ctx.sessionProjections
   const warn = (what: string) => (error: unknown) =>
     ctx.logger.warn(`memory: ${what}: ${messageOf(error)}`)
@@ -338,6 +341,9 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     // The title is its first event: it makes the conversation durable and named.
     ctx.get('sessionTitle')?.rename(resolved.agent.session, `Memory · ${today}`)
     await days.put(today, { sessionId })
+    // The scribes of earlier memory conversations are not gone on with.
+    const earlier = [...scribes.entries()].filter(([, scribe]) => scribe.parent !== sessionId)
+    for (const [conversation] of earlier) await scribes.delete(conversation)
     return open(resolved.agent)
   }
 
@@ -516,7 +522,6 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
   }
 
   // One scribe at a time, in the order the turns ended: one writer of memory.
-  const scribes = new Map<string, Scribe>()
   let recording: Promise<void> = Promise.resolve()
 
   // The day's memory conversation starts when the day does, not at its first
@@ -553,14 +558,14 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     const source = { sessionId: session.id, title, cwd: session.header.cwd, from, to }
     const parent = await memoryConversation()
 
+    // Until its turn completes, the conversation has no scribe to go on with.
     const known = scribes.get(session.id)
-    scribes.delete(session.id)
+    if (known !== undefined) await scribes.delete(session.id)
     let scribe: { id: string; turn: ScribeTurn } | undefined
     if (
       known !== undefined &&
       known.parent === parent.id &&
-      Date.now() - known.at <= config.continueSeconds * 1000 &&
-      (sizes.get(known.id) ?? 0) <= config.continueTokens
+      known.tokens <= config.continueTokens
     ) {
       try {
         const changed = await repository.changed(known.seen, current.head)
@@ -601,7 +606,12 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
       return
     }
     await read.put(session.id, { seq: to })
-    scribes.set(session.id, { id, parent: parent.id, at: Date.now(), seen: current.head })
+    await scribes.put(session.id, {
+      id,
+      parent: parent.id,
+      seen: current.head,
+      tokens: sizes.get(id) ?? 0,
+    })
   }
 
   ctx.on('session/event', (session: Session, event: SessionEvent) => {

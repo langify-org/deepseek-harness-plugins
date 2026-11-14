@@ -202,11 +202,16 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     ctx.workspaceRegistry.create(config.directory, 'memory')
   await workspace()
 
-  /** Today's memory conversation, started when there is none or it can no longer be opened. */
+  /**
+   * Today's memory conversation, started when there is none, it was archived, or
+   * it can no longer be opened. DSH runs no subagent of an archived conversation.
+   */
   const memoryConversation = async (): Promise<Agent> => {
     const today = day()
     const known = days.get(today)
-    if (known !== undefined) {
+    const archived = (id: string): boolean =>
+      ctx.workspaceRegistry.archivedSessionIds.some((archivedId) => archivedId === id)
+    if (known !== undefined && !archived(known.sessionId)) {
       const resolved = await ctx.sessionController.resolveAgent(SessionId(known.sessionId))
       if ('agent' in resolved) return resolved.agent
       warn(`opening the memory conversation ${known.sessionId}`)(resolved.error)

@@ -1,6 +1,7 @@
 // What the plugin says to the memory agents and what it writes for them: the
-// first files of the memory directory, the request that hands a scribe part of a
-// conversation, and the commit message made from the reply that ends a turn.
+// first files of the memory directory, the messages that hand a scribe its
+// conversation part by part, and the commit message made from the reply that
+// ends a turn.
 //
 // What the plugin's mechanisms need an agent to know is the memory preset's
 // system prompt (cordis.patch.yml), which changes with the plugin. What to
@@ -56,11 +57,20 @@ export interface ScribeMemory {
 }
 
 /**
- * A scribe's request to update memory from one transcript. `context` is what the
- * conversation said before it, which earlier scribes were given: with it a scribe
- * can follow the transcript without memory having kept the conversation's place.
+ * The line a part to record starts after. It names the part's events, so nothing
+ * said earlier in the conversation can pass for it, and the part needs no closing
+ * line: it runs to the end of the message.
  */
-export function scribeRequest(
+function partLine(source: ScribeSource): string {
+  return `=== events ${source.from} to ${source.to} ===`
+}
+
+/**
+ * A new scribe's first message: what it starts from, then the first part to
+ * record. `context` is what the conversation said before that part, which
+ * earlier scribes were offered.
+ */
+export function firstRequest(
   source: ScribeSource,
   memory: ScribeMemory,
   context: string,
@@ -72,41 +82,44 @@ export function scribeRequest(
   return [
     ...(memory.guidance === undefined
       ? []
-      : [
-          `The user's guidance, ${GUIDANCE_FILE}:`,
-          '',
-          '<guidance>',
-          memory.guidance.trim(),
-          '</guidance>',
-          '',
-        ]),
+      : [`The user's guidance, ${GUIDANCE_FILE}:`, '', memory.guidance.trim(), '']),
     ...(memory.index === undefined
       ? [`There is no ${INDEX_FILE}. Conversations are given its beginning (${given}).`, '']
       : [
           `The beginning of ${INDEX_FILE}, as conversations are given it (${given}):`,
           '',
-          '<index>',
           memory.index,
-          '</index>',
           '',
         ]),
-    `A conversation went on: session ${source.sessionId}${title}${cwd}, events ${source.from} to ${source.to}.`,
+    `The conversation you record: session ${source.sessionId}${title}${cwd}.`,
     ...(context === ''
-      ? []
+      ? [`The part to record follows the line "${partLine(source)}".`]
       : [
+          `What it said before event ${source.from} follows, without the tool calls: it was already offered for recording. After it, the part to record follows the line "${partLine(source)}".`,
           '',
-          'What it said before, already offered for recording, without the tool calls:',
-          '',
-          '<context>',
           context,
-          '</context>',
         ]),
     '',
-    'Update memory from the transcript if anything in it is worth remembering.',
-    '',
-    '<transcript>',
+    partLine(source),
     transcript,
-    '</transcript>',
+  ].join('\n')
+}
+
+/**
+ * A scribe's message for a later turn of its conversation: the next part to
+ * record, after the files of memory that others changed since its last turn.
+ */
+export function nextRequest(
+  source: ScribeSource,
+  changed: readonly string[],
+  transcript: string,
+): string {
+  return [
+    ...(changed.length === 0
+      ? []
+      : [`Changed by others since your last turn: ${changed.join(', ')}.`, '']),
+    partLine(source),
+    transcript,
   ].join('\n')
 }
 

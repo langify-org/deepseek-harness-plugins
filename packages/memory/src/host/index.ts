@@ -1,17 +1,23 @@
 // Host: keeps a memory directory up to date from every conversation, and gives
 // conversations what it holds.
 //
-// Writing: when a conversation's turn ends, the part of it not read yet goes to a
-// new scribe, a subagent of the day's memory conversation in the memory
-// directory's workspace. The memory conversation only holds the day's scribes:
-// its one turn, a short reply when it starts, is there for the sidebar to list it. One scribe works at a time; its changes become one
+// Writing: when a conversation's turn ends, the part of it not read yet goes to
+// the conversation's scribe, a subagent of the day's memory conversation in the
+// memory directory's workspace. The memory conversation only holds the day's
+// scribes: its one turn, a short reply when it starts, is there for the sidebar
+// to list it. One scribe works at a time; the changes of its turn become one
 // commit whose message is its reply. A turn that ends in any other conversation
 // in that workspace (someone working on memory there) is committed the same way.
 //
+// A scribe goes on with its conversation turn after turn, so it knows what it
+// already recorded and its history is read from the prompt cache. A new scribe
+// takes over when the conversation paused for longer than the cache lasts or the
+// scribe's context grew long: every step reads the whole context again, so a long
+// one costs more than starting over. The new scribe starts from the user's
+// guidance, the index, and the end of what the conversation said.
+//
 // The memory conversation and its scribes run on the memory preset (declared in
-// cordis.patch.yml): file tools and nothing else. A scribe starts from the
-// user's guidance, the index, what the conversation said before and the
-// transcript, which the request carries.
+// cordis.patch.yml): file tools and nothing else.
 //
 // Reading: at the start of a conversation's turn, it is given the beginning of
 // the index the first time, and afterwards what changed in other conversations.
@@ -49,7 +55,8 @@ import {
   INDEX_FILE,
   MEMORY_CONVERSATION,
   MEMORY_MD,
-  scribeRequest,
+  firstRequest,
+  nextRequest,
 } from '../scribe.ts'
 import { renderContext, renderTranscript, unreadFrom } from '../transcript.ts'
 import { Repository } from './repository.ts'
@@ -70,6 +77,7 @@ declare module '@deepseek-ai/dsh-llm' {
 }
 
 export const inject: readonly string[] = [
+  'agents',
   'agentPresets',
   'tools',
   'sessionQuery',
@@ -93,6 +101,8 @@ export interface Config {
   toolArguments: number
   toolResult: number
   contextChars: number
+  continueSeconds: number
+  continueTokens: number
   indexLines: number
   indexBytes: number
   rebaselineAfter: number
@@ -132,7 +142,17 @@ export const Config: Schema<Config> = Schema.object({
   contextChars: Schema.natural()
     .default(8000)
     .description(
-      'Characters of what a conversation said before the part to record that a scribe is given as context.',
+      'Characters of what a conversation said before the part to record that a new scribe is given as context.',
+    ),
+  continueSeconds: Schema.natural()
+    .default(300)
+    .description(
+      "Seconds after a scribe's turn within which it goes on with its conversation's next turn: how long the prompt cache keeps its history. 0 starts a new scribe every turn.",
+    ),
+  continueTokens: Schema.natural()
+    .default(30000)
+    .description(
+      "Tokens of context up to which a scribe goes on with its conversation's next turn.",
     ),
   indexLines: Schema.natural()
     .default(200)
@@ -190,7 +210,29 @@ interface Projections {
 /** A turn of a conversation in the memory workspace, followed until it ends. */
 interface MemoryTurn {
   reply: string
+  /** The context the turn's last step ran with, and what it added. */
+  tokens: number
 }
+
+/** How a scribe's turn ended: `ended` is `completed`, or why it stopped short. */
+interface ScribeTurn {
+  readonly reply: string
+  readonly ended: string
+}
+
+/** The scribe of a conversation, as its last turn left it. */
+interface Scribe {
+  readonly id: string
+  /** The memory conversation it is a subagent of. */
+  readonly parent: string
+  /** When its last turn ended, in milliseconds. */
+  readonly at: number
+  /** The commit memory was at when its last turn ended. */
+  readonly seen: string
+}
+
+/** How long a scribe that goes on has for one turn before it is stopped. */
+const SCRIBE_TURN_MS = 600_000
 
 /** Services this plugin uses whose published declarations it cannot import. */
 export interface Services {
@@ -337,7 +379,111 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     hidden.delete(agent.id)
   })
 
+  // Turns of the conversations in the memory workspace, followed as they go.
+  const turns = new Map<string, MemoryTurn>()
+  /** The context size of each scribe after its last turn. */
+  const sizes = new Map<string, number>()
+  /** Who waits for a scribe's turn to end. */
+  const waiting = new Map<string, (turn: ScribeTurn) => void>()
+  const follow = (session: Session, event: SessionEvent): void => {
+    switch (event.type) {
+      case 'turn/start':
+        turns.set(session.id, { reply: '', tokens: 0 })
+        break
+      case 'assistant/message': {
+        const turn = turns.get(session.id)
+        if (turn === undefined) break
+        const text = event.data.message.content
+          .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+          .join('\n')
+          .trim()
+        if (text !== '') turn.reply = text
+        const { usage } = event.data
+        if (usage !== undefined) {
+          turn.tokens =
+            usage.totalTokens ??
+            usage.inputTokens +
+              usage.outputTokens +
+              (usage.cacheReadTokens ?? 0) +
+              (usage.cacheWriteTokens ?? 0)
+        }
+        break
+      }
+      case 'turn/end': {
+        const turn = turns.get(session.id) ?? { reply: '', tokens: 0 }
+        turns.delete(session.id)
+        if (session.header.origin === 'subagent') {
+          // A scribe: `record` commits its turn, with the conversation it came from.
+          sizes.set(session.id, turn.tokens)
+          waiting.get(session.id)?.({ reply: turn.reply, ended: event.data.reason.kind })
+        } else {
+          // Someone working on memory in its workspace.
+          commit(commitMessage(turn.reply, [])).catch(() => {})
+        }
+        break
+      }
+      default:
+        break
+    }
+  }
+
+  /** Start a new scribe under `parent` with its first message, and wait for its turn. */
+  const start = async (
+    parent: Agent,
+    label: string,
+    text: string,
+  ): Promise<{ id: string; turn: ScribeTurn }> => {
+    const activation = await ctx.subagents.startActivation({
+      provider: config.subagentProvider,
+      agentPreset: config.agentPreset,
+      agentOptions: scribeOptions,
+      label,
+      prompt: [{ type: 'text', text }],
+      parent,
+      signal: AbortSignal.timeout(60_000),
+      delivery: 'caller',
+    })
+    try {
+      const result = await activation.result
+      if (result.diagnostic !== undefined)
+        warn(`the scribe ${activation.childId}`)(result.diagnostic)
+      const reply = result.output
+        .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+        .join('\n')
+      return { id: activation.childId, turn: { reply, ended: result.stopReason } }
+    } finally {
+      // The scribe's session stays; a later message resumes it.
+      await activation.dispose()
+    }
+  }
+
+  /** Give a scribe that finished a turn its next message, and wait for the turn it starts. */
+  const resume = async (parent: Agent, id: string, text: string): Promise<ScribeTurn> => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      const ended = new Promise<ScribeTurn>((resolve, reject) => {
+        waiting.set(id, resolve)
+        timer = setTimeout(
+          () => reject(new Error('the scribe did not finish its turn')),
+          SCRIBE_TURN_MS,
+        )
+      })
+      await ctx.subagents.sendMessage(parent, SessionId(id), [{ type: 'text', text }], {
+        signal: AbortSignal.timeout(60_000),
+      })
+      return await ended
+    } catch (error) {
+      // A scribe that may still be writing: the next one must be the only writer.
+      ctx.agents.get(SessionId(id))?.cancel({ kind: 'parent' })
+      throw error
+    } finally {
+      clearTimeout(timer)
+      waiting.delete(id)
+    }
+  }
+
   // One scribe at a time, in the order the turns ended: one writer of memory.
+  const scribes = new Map<string, Scribe>()
   let recording: Promise<void> = Promise.resolve()
   const record = async (session: Session, to: number): Promise<void> => {
     const log = await ctx.sessionQuery.readSession(session.id)
@@ -356,10 +502,29 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
       return
     }
     const title = ctx.get('sessionTitle')?.get(session)?.title
-    const index = await memoryFile(INDEX_FILE)
-    const text = scribeRequest(
-      { sessionId: session.id, title, cwd: session.header.cwd, from, to },
-      {
+    const source = { sessionId: session.id, title, cwd: session.header.cwd, from, to }
+    const parent = await memoryConversation()
+
+    const known = scribes.get(session.id)
+    scribes.delete(session.id)
+    let scribe: { id: string; turn: ScribeTurn } | undefined
+    if (
+      known !== undefined &&
+      known.parent === parent.id &&
+      Date.now() - known.at <= config.continueSeconds * 1000 &&
+      (sizes.get(known.id) ?? 0) <= config.continueTokens
+    ) {
+      try {
+        const changed = await repository.changed(known.seen, current.head)
+        const turn = await resume(parent, known.id, nextRequest(source, changed, transcript))
+        scribe = { id: known.id, turn }
+      } catch (error) {
+        warn(`going on with the scribe ${known.id}`)(error)
+      }
+    }
+    if (scribe === undefined) {
+      const index = await memoryFile(INDEX_FILE)
+      const memory = {
         guidance: await memoryFile(GUIDANCE_FILE),
         index:
           index === undefined
@@ -367,64 +532,28 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
             : indexHead(index, { lines: config.indexLines, bytes: config.indexBytes }),
         indexLines: config.indexLines,
         indexBytes: config.indexBytes,
-      },
-      renderContext(
+      }
+      const context = renderContext(
         log.events.filter((event) => event.seq < from),
         config.contextChars,
-      ),
-      transcript,
-    )
-    const activation = await ctx.subagents.startActivation({
-      provider: config.subagentProvider,
-      agentPreset: config.agentPreset,
-      agentOptions: scribeOptions,
-      label: title ?? session.id,
-      prompt: [{ type: 'text', text }],
-      parent: await memoryConversation(),
-      signal: AbortSignal.timeout(60_000),
-      delivery: 'caller',
-    })
-    try {
-      const result = await activation.result
-      const reply = result.output
-        .flatMap((block) => (block.type === 'text' ? [block.text] : []))
-        .join('\n')
-      const stopped =
-        result.stopReason === 'completed' ? '' : `\n\n(The scribe stopped: ${result.stopReason}.)`
-      await commit(commitMessage(reply + stopped, [session.id]))
-      // What a scribe did not finish is read again with the next turn.
-      if (result.stopReason === 'completed') await read.put(session.id, { seq: to })
-      else warn(`recording ${session.id}`)(result.diagnostic ?? result.stopReason)
-    } finally {
-      await activation.dispose()
+      )
+      scribe = await start(
+        parent,
+        title ?? session.id,
+        firstRequest(source, memory, context, transcript),
+      )
     }
-  }
 
-  // Someone working on memory in its workspace: their turns are committed as they end.
-  const turns = new Map<string, MemoryTurn>()
-  const follow = (session: Session, event: SessionEvent): void => {
-    switch (event.type) {
-      case 'turn/start':
-        turns.set(session.id, { reply: '' })
-        break
-      case 'assistant/message': {
-        const turn = turns.get(session.id)
-        const text = event.data.message.content
-          .flatMap((block) => (block.type === 'text' ? [block.text] : []))
-          .join('\n')
-          .trim()
-        if (turn !== undefined && text !== '') turn.reply = text
-        break
-      }
-      case 'turn/end': {
-        const reply = turns.get(session.id)?.reply ?? ''
-        turns.delete(session.id)
-        commit(commitMessage(reply, [])).catch(() => {})
-        break
-      }
-      default:
-        break
+    const { id, turn } = scribe
+    const stopped = turn.ended === 'completed' ? '' : `\n\n(The scribe stopped: ${turn.ended}.)`
+    await commit(commitMessage(turn.reply + stopped, [session.id]))
+    if (turn.ended !== 'completed') {
+      // What a scribe did not finish is read again with the next turn, by a new scribe.
+      warn(`recording ${session.id}`)(turn.ended)
+      return
     }
+    await read.put(session.id, { seq: to })
+    scribes.set(session.id, { id, parent: parent.id, at: Date.now(), seen: current.head })
   }
 
   ctx.on('session/event', (session: Session, event: SessionEvent) => {
@@ -433,8 +562,7 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
       recording = recording
         .then(() => record(session, event.seq))
         .catch(warn(`recording ${session.id}`))
-    } else if (inMemory(session) && session.header.origin !== 'subagent') {
-      // Scribes are subagents, committed by `record` with their sources.
+    } else if (inMemory(session)) {
       follow(session, event)
     }
   })

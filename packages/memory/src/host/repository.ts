@@ -63,6 +63,12 @@ export class Repository {
     )
   }
 
+  /** The files that differ between two commits, as paths in the directory. */
+  async changed(from: string, to: string): Promise<string[]> {
+    const names = await this.run(['diff', '--name-only', '-z', from, to])
+    return names.split('\0').filter((name) => name !== '')
+  }
+
   /** Run git for its output, failing unless it succeeds. */
   private async run(args: readonly string[], input?: string): Promise<string> {
     const { code, stdout, stderr } = await this.spawn(args, input)

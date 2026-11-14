@@ -57,6 +57,8 @@ describe('Repository', () => {
       { hash: head, message: 'Change the index', sources: ['s1'] },
     ])
     expect(await repo.commits(head, head)).toEqual([])
+    expect(await repo.changed(start, head)).toEqual(['MEMORY.md'])
+    expect(await repo.changed(head, head)).toEqual([])
     // A version that is not in the history, as after it was rewritten.
     expect(await repo.commits('0'.repeat(40), head)).toBeUndefined()
   })

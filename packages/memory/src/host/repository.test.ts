@@ -43,4 +43,21 @@ describe('Repository', () => {
       'DSH memory\nAdd a note\n\nMemory-Source: s1\nMemory-Source: s2\n--\n',
     )
   })
+
+  it('reads files at a version, and the commits between two versions', async () => {
+    const repo = await repository()
+    await repo.init({ 'MEMORY.md': 'first\n' })
+    const start = await repo.head()
+    await writeFile(join(repo.directory, 'MEMORY.md'), 'second\n')
+    await repo.commit(commitMessage('Change the index', ['s1']))
+    const head = await repo.head()
+    expect(await repo.show(start, 'MEMORY.md')).toBe('first\n')
+    expect(await repo.show(head, 'missing.md')).toBeUndefined()
+    expect(await repo.commits(start, head)).toEqual([
+      { hash: head, message: 'Change the index', sources: ['s1'] },
+    ])
+    expect(await repo.commits(head, head)).toEqual([])
+    // A version that is not in the history, as after it was rewritten.
+    expect(await repo.commits('0'.repeat(40), head)).toBeUndefined()
+  })
 })

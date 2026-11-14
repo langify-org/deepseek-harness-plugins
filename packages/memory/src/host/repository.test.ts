@@ -6,16 +6,16 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { commitMessage } from '../scribe.ts'
 import { Repository } from './repository.ts'
 
-let directory: string | undefined
+let root: string | undefined
 
 afterEach(async () => {
-  if (directory !== undefined) await rm(directory, { recursive: true, force: true })
-  directory = undefined
+  if (root !== undefined) await rm(root, { recursive: true, force: true })
+  root = undefined
 })
 
 async function repository(): Promise<Repository> {
-  directory = join(await mkdtemp(join(tmpdir(), 'dsh-memory-')), 'memory')
-  return new Repository('git', directory)
+  root = await mkdtemp(join(tmpdir(), 'dsh-memory-'))
+  return new Repository('git', join(root, 'memory'))
 }
 
 function log(dir: string): string {
@@ -57,6 +57,8 @@ describe('Repository', () => {
       { hash: head, message: 'Change the index', sources: ['s1'] },
     ])
     expect(await repo.commits(head, head)).toEqual([])
+    expect(await repo.changed(start, head)).toEqual(['MEMORY.md'])
+    expect(await repo.changed(head, head)).toEqual([])
     // A version that is not in the history, as after it was rewritten.
     expect(await repo.commits('0'.repeat(40), head)).toBeUndefined()
   })

@@ -1,6 +1,7 @@
 // What the scribe reads of a conversation: the people's words and the work in
-// between, with tool traffic cut short. Context the harness injected (instruction
-// files, skills, notices) is left out: it is not something that happened.
+// between, with tool traffic cut short, and before it what was said earlier, as
+// context. Context the harness injected (instruction files, skills, notices) is
+// left out of both: it is not something that happened.
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
@@ -42,42 +43,70 @@ export function renderTranscript(
   events: readonly SessionEvent[],
   limits: TranscriptLimits,
 ): string {
-  const parts: string[] = []
+  return parts(events, limits).join('\n\n')
+}
+
+/**
+ * What was said in the events, without the tool traffic: the newest of it that
+ * fits in `limit` characters, saying so when older parts were left out. Empty
+ * when nothing was said.
+ */
+export function renderContext(events: readonly SessionEvent[], limit: number): string {
+  const all = parts(events, undefined)
+  const kept: string[] = []
+  let length = 0
+  for (const part of all.toReversed()) {
+    // The newest part alone may be longer than the limit: keep its end.
+    const text = kept.length === 0 && part.length > limit ? `…${part.slice(-limit)}` : part
+    if (length + text.length > limit && kept.length > 0) break
+    kept.unshift(text)
+    length += text.length + 2
+  }
+  if (kept.length === 0) return ''
+  return [...(kept.length < all.length ? ['(Earlier parts are left out.)'] : []), ...kept].join(
+    '\n\n',
+  )
+}
+
+/** The events' parts, oldest first. Without `limits`, tool calls and results are left out. */
+function parts(events: readonly SessionEvent[], limits: TranscriptLimits | undefined): string[] {
+  const rendered: string[] = []
   for (const event of events) {
     switch (event.type) {
       case 'user/message': {
         const heading = PROMPTS[event.data.source.kind]
         if (heading === undefined) break
         const text = blocksText(event.data.content)
-        if (text !== '') parts.push(`### ${heading}\n${text}`)
+        if (text !== '') rendered.push(`### ${heading}\n${text}`)
         break
       }
       case 'assistant/message': {
         const lines: string[] = []
         for (const block of event.data.message.content) {
           if (block.type === 'text' && block.text.trim() !== '') lines.push(block.text.trim())
-          if (block.type === 'tool-call')
+          if (block.type === 'tool-call' && limits !== undefined)
             lines.push(`- tool call: ${block.name} ${cut(block.arguments, limits.toolArguments)}`)
         }
-        if (lines.length > 0) parts.push(`### Assistant\n${lines.join('\n')}`)
+        if (lines.length > 0) rendered.push(`### Assistant\n${lines.join('\n')}`)
         break
       }
       case 'tool/result': {
+        if (limits === undefined) break
         const { message } = event.data
         const label = message.isError === true ? 'tool error' : 'tool result'
-        parts.push(`- ${label}: ${cut(blocksText(message.content), limits.toolResult)}`)
+        rendered.push(`- ${label}: ${cut(blocksText(message.content), limits.toolResult)}`)
         break
       }
       case 'turn/end': {
         const { kind } = event.data.reason
-        if (kind !== 'completed') parts.push(`(The turn ended: ${kind}.)`)
+        if (kind !== 'completed') rendered.push(`(The turn ended: ${kind}.)`)
         break
       }
       default:
         break
     }
   }
-  return parts.join('\n\n')
+  return rendered
 }
 
 /** The readable text of message content; attachments are named, not included. */

@@ -1,19 +1,32 @@
 // Host: keeps a memory directory up to date from every conversation, and gives
 // conversations what it holds.
 //
-// Writing: when a conversation's turn ends, the part of it not read yet goes to a
-// new scribe, a subagent of the day's memory conversation in the memory
-// directory's workspace. The memory conversation only holds the day's scribes:
-// its one turn, a short reply when it starts, is there for the sidebar to list it. One scribe works at a time; its changes become one
+// Writing: when a conversation's turn ends, the part of it not read yet goes to
+// the conversation's scribe, a subagent of the day's memory conversation in the
+// memory directory's workspace. One scribe works at a time; the changes of its turn become one
 // commit whose message is its reply. A turn that ends in any other conversation
 // in that workspace (someone working on memory there) is committed the same way.
 //
+// A conversation keeps one scribe for the day, so the scribe knows what it
+// already recorded and its history is read from the prompt cache. A scribe that
+// is new to a conversation nearly always writes something on its first turn, so
+// every handover adds to memory what no one needed; a scribe is therefore
+// replaced only when the day's memory conversation is, or when its context grew
+// past `continueTokens`, a guard against a runaway one. The new scribe starts
+// from the user's guidance, the index, and the end of what the conversation said.
+//
+// Tidying: a day's memory conversation starts when the day does, and its first
+// turn, its only one, goes through the whole directory: what the scribes wrote a
+// turn at a time, each seeing one conversation, is left as a later conversation
+// would want to find it. Scribes wait until it is done. After it the memory
+// conversation only holds the day's scribes.
+//
 // The memory conversation and its scribes run on the memory preset (declared in
-// cordis.patch.yml): file tools and nothing else. A scribe starts from the
-// user's guidance, the index and the transcript, which the request carries.
+// cordis.patch.yml): file tools and nothing else.
 //
 // Reading: at the start of a conversation's turn, it is given the beginning of
-// the index the first time, and afterwards what changed in other conversations.
+// the index the first time, and afterwards the names of the files that other
+// conversations' scribes changed.
 /// <reference types="@deepseek-ai/dsh-agent-preset-registry" />
 /// <reference types="@deepseek-ai/dsh-api-session-controller" />
 /// <reference types="@deepseek-ai/dsh-session-query" />
@@ -23,8 +36,13 @@
 import { readFile, realpath } from 'node:fs/promises'
 import { join, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import { createUserMessage, type ContextFormed, type UserMessage } from '@deepseek-ai/dsh-llm'
+import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
+import {
+  createUserMessage,
+  ReasoningEffortId,
+  type ContextFormed,
+  type UserMessage,
+} from '@deepseek-ai/dsh-llm'
 import {
   isReplacementSurfaceEvent,
   SessionId,
@@ -41,11 +59,12 @@ import {
   commitMessage,
   GUIDANCE_FILE,
   INDEX_FILE,
-  MEMORY_CONVERSATION,
   MEMORY_MD,
-  scribeRequest,
+  firstRequest,
+  nextRequest,
+  tidyRequest,
 } from '../scribe.ts'
-import { renderTranscript, unreadFrom } from '../transcript.ts'
+import { renderContext, renderTranscript, unreadFrom } from '../transcript.ts'
 import { Repository } from './repository.ts'
 
 export const name = 'langify-memory'
@@ -58,12 +77,13 @@ declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
     /** Memory given to a conversation: the index when `baseline`, otherwise what changed. */
     'langify-memory': { kind: 'langify-memory'; version: string; baseline?: true } & ContextFormed
-    /** The one message a day's memory conversation is given. */
+    /** The first message of a day's memory conversation, which asks it to tidy the directory. */
     'langify-memory-day': { kind: 'langify-memory-day' }
   }
 }
 
 export const inject: readonly string[] = [
+  'agents',
   'agentPresets',
   'tools',
   'sessionQuery',
@@ -81,11 +101,18 @@ export interface Config {
   dayStartsAt: number
   subagentProvider: string
   agentPreset: string
+  scribeProvider?: string
+  scribeModel?: string
+  scribeReasoningEffort?: string
+  tidyProvider?: string
+  tidyModel?: string
+  tidyReasoningEffort?: string
   toolArguments: number
   toolResult: number
+  contextChars: number
+  continueTokens: number
   indexLines: number
   indexBytes: number
-  rebaselineAfter: number
 }
 
 export const Config: Schema<Config> = Schema.object({
@@ -106,26 +133,61 @@ export const Config: Schema<Config> = Schema.object({
   agentPreset: Schema.string()
     .default('langify-memory')
     .description('The agent preset the memory conversations and their scribes run on.'),
+  scribeProvider: Schema.string().description(
+    "The LLM provider of the scribes' model, set together with scribeModel. Without them, the memory conversation's model.",
+  ),
+  scribeModel: Schema.string().description("The scribes' model, set together with scribeProvider."),
+  scribeReasoningEffort: Schema.string().description(
+    "The scribes' reasoning effort, one the model offers. Without it, the model's default.",
+  ),
+  tidyProvider: Schema.string().description(
+    "The LLM provider of the model that tidies the directory, set together with tidyModel. Without them, the default model when the day's memory conversation starts.",
+  ),
+  tidyModel: Schema.string().description(
+    'The model that tidies the directory, set together with tidyProvider.',
+  ),
+  tidyReasoningEffort: Schema.string().description(
+    "The reasoning effort of tidying, one the model offers. Without it, the model's default.",
+  ),
   toolArguments: Schema.natural()
     .default(300)
     .description("Characters of a tool call's arguments a scribe reads."),
   toolResult: Schema.natural()
     .default(500)
     .description('Characters of a tool result a scribe reads.'),
+  contextChars: Schema.natural()
+    .default(8000)
+    .description(
+      'Characters of what a conversation said before the part to record that a new scribe is given as context.',
+    ),
+  continueTokens: Schema.natural()
+    .default(200000)
+    .description(
+      "Tokens of context past which a conversation's scribe is replaced by a new one: a guard against a runaway scribe, not a setting to tune.",
+    ),
   indexLines: Schema.natural()
     .default(200)
     .description('Lines of MEMORY.md a conversation is given when it starts.'),
   indexBytes: Schema.natural()
     .default(25600)
     .description('Bytes of MEMORY.md a conversation is given when it starts.'),
-  rebaselineAfter: Schema.natural()
-    .default(20)
-    .description(
-      'Commits after which a conversation is given MEMORY.md again instead of what changed.',
-    ),
 })
 
-/** What the plugin keeps: how far each conversation has been read, and each day's memory conversation. */
+/** The scribe of a conversation, as its last turn left it. */
+interface Scribe {
+  readonly id: string
+  /** The memory conversation it is a subagent of. */
+  readonly parent: string
+  /** The commit memory was at when its last turn ended. */
+  readonly seen: string
+  /** Its context after its last turn, in tokens. */
+  readonly tokens: number
+}
+
+/**
+ * What the plugin keeps: how far each conversation has been read, each day's
+ * memory conversation, and each conversation's scribe.
+ */
 const domain = defineDomain({
   name: 'langify_memory',
   version: 1,
@@ -134,6 +196,10 @@ const domain = defineDomain({
     read: domainTable<string, { seq: number }>(z.object({ seq: z.number() })),
     /** Day (YYYY-MM-DD) → that day's memory conversation. */
     scribes: domainTable<string, { sessionId: string }>(z.object({ sessionId: z.string() })),
+    /** Conversation id → its scribe. Kept across restarts: a restart is no reason for a new scribe. */
+    conversations: domainTable<string, Scribe>(
+      z.object({ id: z.string(), parent: z.string(), seen: z.string(), tokens: z.number() }),
+    ),
   },
 })
 
@@ -168,7 +234,18 @@ interface Projections {
 /** A turn of a conversation in the memory workspace, followed until it ends. */
 interface MemoryTurn {
   reply: string
+  /** The context the turn's last step ran with, and what it added. */
+  tokens: number
 }
+
+/** How a scribe's turn ended: `ended` is `completed`, or why it stopped short. */
+interface ScribeTurn {
+  readonly reply: string
+  readonly ended: string
+}
+
+/** How long a scribe that goes on has for one turn before it is stopped. */
+const SCRIBE_TURN_MS = 600_000
 
 /** Services this plugin uses whose published declarations it cannot import. */
 export interface Services {
@@ -176,6 +253,20 @@ export interface Services {
 }
 
 export async function apply(ctx: Context & Services, config: Config): Promise<void> {
+  if ((config.scribeProvider === undefined) !== (config.scribeModel === undefined)) {
+    throw new Error('memory: scribeProvider and scribeModel are set together')
+  }
+  if ((config.tidyProvider === undefined) !== (config.tidyModel === undefined)) {
+    throw new Error('memory: tidyProvider and tidyModel are set together')
+  }
+  /** What a scribe runs on where it differs from the memory conversation. */
+  const scribeOptions: AgentOptions = {
+    ...(config.scribeProvider === undefined ? {} : { provider: config.scribeProvider }),
+    ...(config.scribeModel === undefined ? {} : { model: config.scribeModel }),
+    ...(config.scribeReasoningEffort === undefined
+      ? {}
+      : { reasoningEffort: ReasoningEffortId(config.scribeReasoningEffort) }),
+  }
   const repository = new Repository(config.git, config.directory)
   await repository.init({ [GUIDANCE_FILE]: AGENTS_MD, [INDEX_FILE]: MEMORY_MD })
   const directories = [config.directory, await realpath(config.directory)]
@@ -183,6 +274,7 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
   ctx.effect(() => () => store.close(), 'memory: storage')
   const read = store.table('read')
   const days = store.table('scribes')
+  const scribes = store.table('conversations')
   const projections = ctx.sessionProjections
   const warn = (what: string) => (error: unknown) =>
     ctx.logger.warn(`memory: ${what}: ${messageOf(error)}`)
@@ -249,26 +341,48 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     // The title is its first event: it makes the conversation durable and named.
     ctx.get('sessionTitle')?.rename(resolved.agent.session, `Memory · ${today}`)
     await days.put(today, { sessionId })
+    // The scribes of earlier memory conversations are not gone on with.
+    const earlier = [...scribes.entries()].filter(([, scribe]) => scribe.parent !== sessionId)
+    for (const [conversation] of earlier) await scribes.delete(conversation)
     return open(resolved.agent)
   }
 
   /**
-   * Give a memory conversation that never had a turn its one turn. The sidebar
-   * hides conversations without one, and the scribes with them.
+   * Give a memory conversation that never had a turn its one turn, which tidies
+   * the directory, and wait for it: it is the only writer meanwhile. Its changes
+   * are committed as its turn ends, like those of anyone working in the workspace.
    */
   const opened = new Set<string>()
   const open = async (agent: Agent): Promise<Agent> => {
     if (opened.has(agent.id)) return agent
     opened.add(agent.id)
     const log = await ctx.sessionQuery.readSession(agent.session.id)
-    if (!log.events.some((event) => event.type === 'turn/start')) {
-      agent.followup(
-        createUserMessage({
-          content: [{ type: 'text', text: MEMORY_CONVERSATION }],
-          source: { kind: DAY_KIND },
-        }),
-      )
+    if (log.events.some((event) => event.type === 'turn/start')) return agent
+    const now = agent.model.current()
+    const provider = config.tidyProvider ?? now?.provider
+    const model = config.tidyModel ?? now?.model
+    if (
+      provider !== undefined &&
+      model !== undefined &&
+      (config.tidyModel !== undefined || config.tidyReasoningEffort !== undefined)
+    ) {
+      agent.model.select({
+        provider,
+        model,
+        ...(config.tidyReasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: ReasoningEffortId(config.tidyReasoningEffort) }),
+      })
     }
+    const text = tidyRequest(await memoryFile(GUIDANCE_FILE), {
+      indexLines: config.indexLines,
+      indexBytes: config.indexBytes,
+    })
+    agent.followup(
+      createUserMessage({ content: [{ type: 'text', text }], source: { kind: DAY_KIND } }),
+    )
+    await agent.whenIdle()
+    await committing
     return agent
   }
 
@@ -304,8 +418,126 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     hidden.delete(agent.id)
   })
 
+  // Turns of the conversations in the memory workspace, followed as they go.
+  const turns = new Map<string, MemoryTurn>()
+  /** The context size of each scribe after its last turn. */
+  const sizes = new Map<string, number>()
+  /** Who waits for a scribe's turn to end. */
+  const waiting = new Map<string, (turn: ScribeTurn) => void>()
+  const follow = (session: Session, event: SessionEvent): void => {
+    switch (event.type) {
+      case 'turn/start':
+        turns.set(session.id, { reply: '', tokens: 0 })
+        break
+      case 'assistant/message': {
+        const turn = turns.get(session.id)
+        if (turn === undefined) break
+        const text = event.data.message.content
+          .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+          .join('\n')
+          .trim()
+        if (text !== '') turn.reply = text
+        const { usage } = event.data
+        if (usage !== undefined) {
+          turn.tokens =
+            usage.totalTokens ??
+            usage.inputTokens +
+              usage.outputTokens +
+              (usage.cacheReadTokens ?? 0) +
+              (usage.cacheWriteTokens ?? 0)
+        }
+        break
+      }
+      case 'turn/end': {
+        const turn = turns.get(session.id) ?? { reply: '', tokens: 0 }
+        turns.delete(session.id)
+        if (session.header.origin === 'subagent') {
+          // A scribe: `record` commits its turn, with the conversation it came from.
+          sizes.set(session.id, turn.tokens)
+          waiting.get(session.id)?.({ reply: turn.reply, ended: event.data.reason.kind })
+        } else {
+          // Someone working on memory in its workspace.
+          commit(commitMessage(turn.reply, [])).catch(() => {})
+        }
+        break
+      }
+      default:
+        break
+    }
+  }
+
+  /** Start a new scribe under `parent` with its first message, and wait for its turn. */
+  const start = async (
+    parent: Agent,
+    label: string,
+    text: string,
+  ): Promise<{ id: string; turn: ScribeTurn }> => {
+    const activation = await ctx.subagents.startActivation({
+      provider: config.subagentProvider,
+      agentPreset: config.agentPreset,
+      agentOptions: scribeOptions,
+      label,
+      prompt: [{ type: 'text', text }],
+      parent,
+      signal: AbortSignal.timeout(60_000),
+      delivery: 'caller',
+    })
+    try {
+      const result = await activation.result
+      if (result.diagnostic !== undefined)
+        warn(`the scribe ${activation.childId}`)(result.diagnostic)
+      const reply = result.output
+        .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+        .join('\n')
+      return { id: activation.childId, turn: { reply, ended: result.stopReason } }
+    } finally {
+      // The scribe's session stays; a later message resumes it.
+      await activation.dispose()
+    }
+  }
+
+  /** Give a scribe that finished a turn its next message, and wait for the turn it starts. */
+  const resume = async (parent: Agent, id: string, text: string): Promise<ScribeTurn> => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      const ended = new Promise<ScribeTurn>((resolve, reject) => {
+        waiting.set(id, resolve)
+        timer = setTimeout(
+          () => reject(new Error('the scribe did not finish its turn')),
+          SCRIBE_TURN_MS,
+        )
+      })
+      await ctx.subagents.sendMessage(parent, SessionId(id), [{ type: 'text', text }], {
+        signal: AbortSignal.timeout(60_000),
+      })
+      return await ended
+    } catch (error) {
+      // A scribe that may still be writing: the next one must be the only writer.
+      ctx.agents.get(SessionId(id))?.cancel({ kind: 'parent' })
+      throw error
+    } finally {
+      clearTimeout(timer)
+      waiting.delete(id)
+    }
+  }
+
   // One scribe at a time, in the order the turns ended: one writer of memory.
   let recording: Promise<void> = Promise.resolve()
+
+  // The day's memory conversation starts when the day does, not at its first
+  // conversation: a conversation that starts in the morning is given tidied memory.
+  let started = day()
+  const clock = setInterval(() => {
+    const today = day()
+    if (today === started) return
+    started = today
+    recording = recording
+      .then(() => memoryConversation())
+      .then(() => undefined)
+      .catch(warn('starting the day'))
+  }, 60_000)
+  ctx.effect(() => () => clearInterval(clock), 'memory: day clock')
+
   const record = async (session: Session, to: number): Promise<void> => {
     const log = await ctx.sessionQuery.readSession(session.id)
     const from = Math.max(
@@ -323,10 +555,29 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
       return
     }
     const title = ctx.get('sessionTitle')?.get(session)?.title
-    const index = await memoryFile(INDEX_FILE)
-    const text = scribeRequest(
-      { sessionId: session.id, title, cwd: session.header.cwd, from, to },
-      {
+    const source = { sessionId: session.id, title, cwd: session.header.cwd, from, to }
+    const parent = await memoryConversation()
+
+    // Until its turn completes, the conversation has no scribe to go on with.
+    const known = scribes.get(session.id)
+    if (known !== undefined) await scribes.delete(session.id)
+    let scribe: { id: string; turn: ScribeTurn } | undefined
+    if (
+      known !== undefined &&
+      known.parent === parent.id &&
+      known.tokens <= config.continueTokens
+    ) {
+      try {
+        const changed = await repository.changed(known.seen, current.head)
+        const turn = await resume(parent, known.id, nextRequest(source, changed, transcript))
+        scribe = { id: known.id, turn }
+      } catch (error) {
+        warn(`going on with the scribe ${known.id}`)(error)
+      }
+    }
+    if (scribe === undefined) {
+      const index = await memoryFile(INDEX_FILE)
+      const memory = {
         guidance: await memoryFile(GUIDANCE_FILE),
         index:
           index === undefined
@@ -334,59 +585,33 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
             : indexHead(index, { lines: config.indexLines, bytes: config.indexBytes }),
         indexLines: config.indexLines,
         indexBytes: config.indexBytes,
-      },
-      transcript,
-    )
-    const activation = await ctx.subagents.startActivation({
-      provider: config.subagentProvider,
-      agentPreset: config.agentPreset,
-      label: title ?? session.id,
-      prompt: [{ type: 'text', text }],
-      parent: await memoryConversation(),
-      signal: AbortSignal.timeout(60_000),
-      delivery: 'caller',
-    })
-    try {
-      const result = await activation.result
-      const reply = result.output
-        .flatMap((block) => (block.type === 'text' ? [block.text] : []))
-        .join('\n')
-      const stopped =
-        result.stopReason === 'completed' ? '' : `\n\n(The scribe stopped: ${result.stopReason}.)`
-      await commit(commitMessage(reply + stopped, [session.id]))
-      // What a scribe did not finish is read again with the next turn.
-      if (result.stopReason === 'completed') await read.put(session.id, { seq: to })
-      else warn(`recording ${session.id}`)(result.diagnostic ?? result.stopReason)
-    } finally {
-      await activation.dispose()
+      }
+      const context = renderContext(
+        log.events.filter((event) => event.seq < from),
+        config.contextChars,
+      )
+      scribe = await start(
+        parent,
+        title ?? session.id,
+        firstRequest(source, memory, context, transcript),
+      )
     }
-  }
 
-  // Someone working on memory in its workspace: their turns are committed as they end.
-  const turns = new Map<string, MemoryTurn>()
-  const follow = (session: Session, event: SessionEvent): void => {
-    switch (event.type) {
-      case 'turn/start':
-        turns.set(session.id, { reply: '' })
-        break
-      case 'assistant/message': {
-        const turn = turns.get(session.id)
-        const text = event.data.message.content
-          .flatMap((block) => (block.type === 'text' ? [block.text] : []))
-          .join('\n')
-          .trim()
-        if (turn !== undefined && text !== '') turn.reply = text
-        break
-      }
-      case 'turn/end': {
-        const reply = turns.get(session.id)?.reply ?? ''
-        turns.delete(session.id)
-        commit(commitMessage(reply, [])).catch(() => {})
-        break
-      }
-      default:
-        break
+    const { id, turn } = scribe
+    const stopped = turn.ended === 'completed' ? '' : `\n\n(The scribe stopped: ${turn.ended}.)`
+    await commit(commitMessage(turn.reply + stopped, [session.id]))
+    if (turn.ended !== 'completed') {
+      // What a scribe did not finish is read again with the next turn, by a new scribe.
+      warn(`recording ${session.id}`)(turn.ended)
+      return
     }
+    await read.put(session.id, { seq: to })
+    await scribes.put(session.id, {
+      id,
+      parent: parent.id,
+      seen: current.head,
+      tokens: sizes.get(id) ?? 0,
+    })
   }
 
   ctx.on('session/event', (session: Session, event: SessionEvent) => {
@@ -395,11 +620,23 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
       recording = recording
         .then(() => record(session, event.seq))
         .catch(warn(`recording ${session.id}`))
-    } else if (inMemory(session) && session.header.origin !== 'subagent') {
-      // Scribes are subagents, committed by `record` with their sources.
+    } else if (inMemory(session)) {
       follow(session, event)
     }
   })
+
+  // A memory conversation only holds scribes. DSH tells a conversation when a
+  // subagent that was sent a message has finished; that alone starts no turn here.
+  ctx.on(
+    'agent/pre-step',
+    ({ agent, messages }, next) => {
+      const holdsScribes = [...days.entries()].some(([, held]) => held.sessionId === agent.id)
+      const onlyNotices =
+        messages.length > 0 && messages.every((m) => m.source.kind === 'subagent-settled')
+      return holdsScribes && onlyNotices ? Promise.resolve({ kind: 'reject' }) : next()
+    },
+    { prepend: true },
+  )
 
   // What each conversation was given, read back from its log.
   ctx.effect(
@@ -452,22 +689,21 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     }
     if (given === null) return baseline()
     if (given.version === head) return undefined
-    const sinceBaseline = await repository.commits(given.baseline, head)
-    if (sinceBaseline === undefined || sinceBaseline.length > config.rebaselineAfter)
-      return baseline()
     const since = await repository.commits(given.version, head)
     if (since === undefined) return baseline()
     // What this conversation itself taught memory, it already knows.
-    const news = since.filter(
+    const others = since.some(
       (c) => c.sources.length === 0 || c.sources.some((id) => id !== session.id),
     )
-    if (news.length === 0) return undefined
-    const text = updateText(given.version, head, news)
+    if (!others) return undefined
+    const files = await repository.changed(given.version, head)
+    if (files.length === 0) return undefined
+    const text = updateText(given.version, head, files)
     return contextMessage(text, {
       kind: CONTEXT_KIND,
       version: head,
       form: 'notice',
-      summary: `Memory changed in ${news.length} commit(s)`,
+      summary: `Memory changed in ${files.length} file(s)`,
     })
   }
 

@@ -1,5 +1,5 @@
 // What a conversation is given of memory: the beginning of the index when it
-// starts, and afterwards what changed, told in the memory agents' own words.
+// starts, and afterwards which files changed.
 import { SOURCE_TRAILER } from './scribe.ts'
 
 /** How much of the index a conversation is given. */
@@ -73,13 +73,15 @@ export function baselineText(
   ].join('\n')
 }
 
-/** What changed in memory since `from`, as the memory agents told it. */
-export function updateText(from: string, to: string, commits: readonly MemoryCommit[]): string {
+/**
+ * What changed in memory since `from`: the files, not what was written. Most
+ * changes come from conversations about something else, so a conversation is
+ * told where to look and reads what concerns it.
+ */
+export function updateText(from: string, to: string, files: readonly string[]): string {
   return [
     `<memory-update from="${short(from)}" to="${short(to)}">`,
-    'Memory changed since it was last given to you:',
-    '',
-    commits.map((commit) => commit.message).join('\n\n---\n\n'),
+    `Memory changed since it was last given to you, in: ${files.join(', ')}`,
     '</memory-update>',
   ].join('\n')
 }

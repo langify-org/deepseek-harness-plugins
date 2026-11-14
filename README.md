@@ -6,10 +6,11 @@ Open-source plugins for [DeepSeek Harness](https://github.com/deepseek-ai/deepse
 
 ## Plugins
 
-| Package                                    | Description                                                                                         |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| [`@langify-org/dsh-tasks`](packages/tasks) | Run justfile recipes from a Tasks tab in the right sidebar, in a terminal tab.                      |
-| [`@langify-org/dsh-tmux`](packages/tmux)   | A terminal tab per conversation on tmux, shared with the model, that outlives reloads and restarts. |
+| Package                                      | Description                                                                                         |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| [`@langify-org/dsh-memory`](packages/memory) | A memory directory that a scribe agent keeps up to date from every conversation.                    |
+| [`@langify-org/dsh-tasks`](packages/tasks)   | Run justfile recipes from a Tasks tab in the right sidebar, in a terminal tab.                      |
+| [`@langify-org/dsh-tmux`](packages/tmux)     | A terminal tab per conversation on tmux, shared with the model, that outlives reloads and restarts. |
 
 ## Install
 

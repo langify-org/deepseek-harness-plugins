@@ -1,0 +1,7 @@
+# Bundle layer: inserts the memory plugin. The memory directory is under the DSH
+# home, so every DSH home has its own memory.
+- insert:
+    - id: langify-memory
+      name: '@langify-org/dsh-memory'
+      config:
+        directory: !!js dshHomePath('memory')

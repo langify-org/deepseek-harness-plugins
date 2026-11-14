@@ -6,7 +6,7 @@ Run the recipes of a [justfile](https://just.systems) from a **Tasks** tab in De
 
 ## Requirements
 
-- DSH `>=0.2.2-rc.1 <0.3.0-0` with the Web UI.
+- DSH `>=0.2.2-rc.2 <0.3.0-0` with the Web UI.
 - [`just`](https://just.systems) on the host's `PATH`. Parameter help, options, and flags come from `[arg(...)]` attributes, which recent `just` releases support; with an older release, recipes are listed without them.
 
 ## Install

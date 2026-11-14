@@ -66,7 +66,7 @@ export const Config: Schema<Config> = Schema.object({
 
 /** What the plugin keeps: how far each conversation has been read, and each day's scribe. */
 const domain = defineDomain({
-  name: 'langify-memory',
+  name: 'langify_memory',
   version: 1,
   tables: {
     /** Conversation id → the last event handed to the scribe. */

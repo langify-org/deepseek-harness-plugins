@@ -1,20 +1,25 @@
 // What the plugin says to the memory agents and what it writes for them: the
-// first files of the memory directory, the request that hands the scribe part of
-// a conversation, and the commit message made from the reply that ends a turn.
+// first files of the memory directory, the request that hands a scribe part of a
+// conversation, and the commit message made from the reply that ends a turn.
+//
+// What the plugin's mechanisms need an agent to know is the memory preset's
+// system prompt (cordis.patch.yml), which changes with the plugin. What to
+// remember is the user's, in the directory's AGENTS.md, which the plugin only
+// starts and quotes.
 
-/** The memory agents' instructions: what memory is for, not how to keep it. */
+/** The file that holds the user's guidance, and the one that holds the index. */
+export const GUIDANCE_FILE = 'AGENTS.md'
+export const INDEX_FILE = 'MEMORY.md'
+
+/** The user's guidance as it starts: what memory is for, not how to keep it. */
 export const AGENTS_MD = `# Memory
 
 This directory is the memory of DeepSeek Harness: what was learned in every conversation with this user.
 It exists so that future sessions working with this user do not ask the same things again or repeat the same mistakes.
 
-- \`MEMORY.md\` is the index. Its beginning (200 lines or 25 KB) is given to every session when it starts, so it should show what is known and where to find it. The rest of the directory is organized as you see fit.
 - Conversation logs are the source of truth; memory is derived from them.
-- Where memory and an AGENTS.md the user wrote disagree, the AGENTS.md is right.
-- Never write secrets (tokens, passwords, keys).
-- Write in the language the user speaks with you.
-- This AGENTS.md is the user's; leave it as it is.
-- The reply that ends your turn becomes the commit message of your changes, and other sessions are told about them with it: write it for them. If you changed nothing, say only that.
+- Where memory and an AGENTS.md the user wrote elsewhere disagree, that AGENTS.md is right.
+- Write in the language the user speaks.
 `
 
 /** The index before anything is remembered. */
@@ -39,11 +44,47 @@ export interface ScribeSource {
   readonly to: number
 }
 
-/** The scribe's request to update memory from one transcript. */
-export function scribeRequest(source: ScribeSource, transcript: string): string {
+/** Memory as a scribe starts from it. */
+export interface ScribeMemory {
+  /** The user's guidance file; undefined when there is none. */
+  readonly guidance: string | undefined
+  /** The beginning of the index, as conversations are given it; undefined when there is none. */
+  readonly index: string | undefined
+  /** How much of the index conversations are given. */
+  readonly indexLines: number
+  readonly indexBytes: number
+}
+
+/** A scribe's request to update memory from one transcript. */
+export function scribeRequest(
+  source: ScribeSource,
+  memory: ScribeMemory,
+  transcript: string,
+): string {
   const title = source.title === undefined ? '' : ` "${source.title}"`
   const cwd = source.cwd === undefined ? '' : `, working in ${source.cwd}`
+  const given = `at most ${memory.indexLines} lines or ${memory.indexBytes} bytes`
   return [
+    ...(memory.guidance === undefined
+      ? []
+      : [
+          `The user's guidance, ${GUIDANCE_FILE}:`,
+          '',
+          '<guidance>',
+          memory.guidance.trim(),
+          '</guidance>',
+          '',
+        ]),
+    ...(memory.index === undefined
+      ? [`There is no ${INDEX_FILE}. Conversations are given its beginning (${given}).`, '']
+      : [
+          `The beginning of ${INDEX_FILE}, as conversations are given it (${given}):`,
+          '',
+          '<index>',
+          memory.index,
+          '</index>',
+          '',
+        ]),
     `A conversation went on: session ${source.sessionId}${title}${cwd}, events ${source.from} to ${source.to}.`,
     'Update memory from it if anything is worth remembering.',
     '',

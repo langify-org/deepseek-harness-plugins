@@ -8,14 +8,20 @@
 // commit whose message is its reply. A turn that ends in any other conversation
 // in that workspace (someone working on memory there) is committed the same way.
 //
+// The memory conversation and its scribes run on the memory preset (declared in
+// cordis.patch.yml): file tools and nothing else. A scribe starts from the
+// user's guidance, the index and the transcript, which the request carries.
+//
 // Reading: at the start of a conversation's turn, it is given the beginning of
 // the index the first time, and afterwards what changed in other conversations.
+/// <reference types="@deepseek-ai/dsh-agent-preset-registry" />
 /// <reference types="@deepseek-ai/dsh-api-session-controller" />
 /// <reference types="@deepseek-ai/dsh-session-query" />
 /// <reference types="@deepseek-ai/dsh-session-title" />
 /// <reference types="@deepseek-ai/dsh-subagent" />
-import { realpath } from 'node:fs/promises'
-import { sep } from 'node:path'
+/// <reference types="@deepseek-ai/dsh-tools" />
+import { readFile, realpath } from 'node:fs/promises'
+import { join, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, type ContextFormed, type UserMessage } from '@deepseek-ai/dsh-llm'
@@ -33,6 +39,8 @@ import { baselineText, indexHead, updateText } from '../delivery.ts'
 import {
   AGENTS_MD,
   commitMessage,
+  GUIDANCE_FILE,
+  INDEX_FILE,
   MEMORY_CONVERSATION,
   MEMORY_MD,
   scribeRequest,
@@ -56,6 +64,8 @@ declare module '@deepseek-ai/dsh-llm' {
 }
 
 export const inject: readonly string[] = [
+  'agentPresets',
+  'tools',
   'sessionQuery',
   'sessionController',
   'sessionProjections',
@@ -70,6 +80,7 @@ export interface Config {
   timeZone?: string
   dayStartsAt: number
   subagentProvider: string
+  agentPreset: string
   toolArguments: number
   toolResult: number
   indexLines: number
@@ -92,6 +103,9 @@ export const Config: Schema<Config> = Schema.object({
   subagentProvider: Schema.string()
     .default('spawn')
     .description('The subagent provider that starts the scribes.'),
+  agentPreset: Schema.string()
+    .default('langify-memory')
+    .description('The agent preset the memory conversations and their scribes run on.'),
   toolArguments: Schema.natural()
     .default(300)
     .description("Characters of a tool call's arguments a scribe reads."),
@@ -163,7 +177,7 @@ export interface Services {
 
 export async function apply(ctx: Context & Services, config: Config): Promise<void> {
   const repository = new Repository(config.git, config.directory)
-  await repository.init({ 'AGENTS.md': AGENTS_MD, 'MEMORY.md': MEMORY_MD })
+  await repository.init({ [GUIDANCE_FILE]: AGENTS_MD, [INDEX_FILE]: MEMORY_MD })
   const directories = [config.directory, await realpath(config.directory)]
   const store = await ctx.storageDomain.open(domain)
   ctx.effect(() => () => store.close(), 'memory: storage')
@@ -177,7 +191,7 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
   let current = await snapshot()
   async function snapshot(): Promise<{ head: string; index: string | undefined }> {
     const head = await repository.head()
-    return { head, index: await repository.show(head, 'MEMORY.md') }
+    return { head, index: await repository.show(head, INDEX_FILE) }
   }
   // Commits one at a time, in the order the turns ended.
   let committing: Promise<unknown> = Promise.resolve()
@@ -226,7 +240,10 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
       warn(`opening the memory conversation ${known.sessionId}`)(resolved.error)
     }
     const { id } = await workspace()
-    const { sessionId } = await ctx.sessionController.create({ workspaceId: id })
+    const { sessionId } = await ctx.sessionController.create({
+      workspaceId: id,
+      agentPreset: config.agentPreset,
+    })
     const resolved = await ctx.sessionController.resolveAgent(sessionId)
     if ('error' in resolved) throw resolved.error
     // The title is its first event: it makes the conversation durable and named.
@@ -255,6 +272,38 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     return agent
   }
 
+  /** A file of the memory directory as it is on disk, where a scribe would read it. */
+  const memoryFile = (file: string): Promise<string | undefined> =>
+    readFile(join(config.directory, file), 'utf8').catch((error: unknown) => {
+      if (isMissing(error)) return undefined
+      throw error
+    })
+
+  // The memory preset's agents see the preset's tools and none of the profile's
+  // global ones (MCP servers, browser control and so on): hidden when the agent
+  // is created, so a tool registered globally afterwards stays visible to it.
+  const hidden = new Map<string, () => void>()
+  ctx.effect(
+    () => () => {
+      for (const dispose of hidden.values()) dispose()
+      hidden.clear()
+    },
+    'memory: hidden tools',
+  )
+  ctx.on('agent/created', ({ agent }) => {
+    if (ctx.agentPresets.composedPreset(agent.ctx) !== config.agentPreset) return undefined
+    const globals = ctx.tools.schemas().map((schema) => schema.name)
+    if (globals.length === 0) return undefined
+    hidden.set(
+      agent.id,
+      agent.ctx.effect(() => agent.ctx.tools.restrict({ deny: globals }), 'memory: hidden tools'),
+    )
+    return undefined
+  })
+  ctx.on('agent/disposed', ({ agent }) => {
+    hidden.delete(agent.id)
+  })
+
   // One scribe at a time, in the order the turns ended: one writer of memory.
   let recording: Promise<void> = Promise.resolve()
   const record = async (session: Session, to: number): Promise<void> => {
@@ -274,12 +323,23 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
       return
     }
     const title = ctx.get('sessionTitle')?.get(session)?.title
+    const index = await memoryFile(INDEX_FILE)
     const text = scribeRequest(
       { sessionId: session.id, title, cwd: session.header.cwd, from, to },
+      {
+        guidance: await memoryFile(GUIDANCE_FILE),
+        index:
+          index === undefined
+            ? undefined
+            : indexHead(index, { lines: config.indexLines, bytes: config.indexBytes }),
+        indexLines: config.indexLines,
+        indexBytes: config.indexBytes,
+      },
       transcript,
     )
     const activation = await ctx.subagents.startActivation({
       provider: config.subagentProvider,
+      agentPreset: config.agentPreset,
       label: title ?? session.id,
       prompt: [{ type: 'text', text }],
       parent: await memoryConversation(),
@@ -436,6 +496,10 @@ function contextMessage(
   source: { kind: 'langify-memory'; version: string; baseline?: true } & ContextFormed,
 ): UserMessage {
   return createUserMessage({ content: [{ type: 'text', text }], source })
+}
+
+function isMissing(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT'
 }
 
 function messageOf(error: unknown): string {

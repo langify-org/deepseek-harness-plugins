@@ -1,0 +1,69 @@
+{
+  "name": "@langify-org/dsh-memory",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Give DeepSeek Harness a memory directory that a scribe agent keeps up to date from every conversation",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "memory"
+  ],
+  "homepage": "https://github.com/langify-org/deepseek-harness-plugins/tree/main/packages/memory#readme",
+  "bugs": "https://github.com/langify-org/deepseek-harness-plugins/issues",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/langify-org/deepseek-harness-plugins.git",
+    "directory": "packages/memory"
+  },
+  "files": [
+    "dist",
+    "cordis.patch.yml",
+    "README*.md"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown"
+  },
+  "dependencies": {
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "catalog:",
+    "@deepseek-ai/dsh-agent": "catalog:",
+    "@deepseek-ai/dsh-agent-preset-registry": "catalog:",
+    "@deepseek-ai/dsh-api-session-controller": "catalog:",
+    "@deepseek-ai/dsh-llm": "catalog:",
+    "@deepseek-ai/dsh-session": "catalog:",
+    "@deepseek-ai/dsh-session-query": "catalog:",
+    "@deepseek-ai/dsh-session-title": "catalog:",
+    "@deepseek-ai/dsh-storage-domain": "catalog:",
+    "@deepseek-ai/dsh-subagent": "catalog:",
+    "@deepseek-ai/dsh-tools": "catalog:",
+    "@deepseek-ai/dsh-workspace": "catalog:",
+    "@deepseek-ai/schemastery": "catalog:"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.5",
+    "@deepseek-ai/dsh-llm": ">=0.2.2-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-session": ">=0.2.2-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-storage-domain": ">=0.2.2-rc.2 <0.3.0-0",
+    "@deepseek-ai/schemastery": "^3.18.5"
+  },
+  "engines": {
+    "dsh": ">=0.2.2-rc.2 <0.3.0-0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

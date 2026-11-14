@@ -19,7 +19,7 @@ It exists so that future sessions working with this user do not ask the same thi
 
 - Conversation logs are the source of truth; memory is derived from them.
 - Where memory and an AGENTS.md the user wrote elsewhere disagree, that AGENTS.md is right.
-- Write in the language the user speaks.
+- Write memory, and your replies, in the language the user speaks.
 `
 
 /** The index before anything is remembered. */

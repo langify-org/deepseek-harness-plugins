@@ -23,6 +23,11 @@ export const MEMORY_MD = `# Memory
 Nothing is remembered yet.
 `
 
+/** The one message a day's memory conversation is given: it only holds that day's scribes. */
+export const MEMORY_CONVERSATION = `This conversation holds today's memory scribes: each is a subagent that records part of a conversation into this directory, started by the memory plugin. Nothing else happens here.
+Reply with one short sentence saying so, and do nothing else.
+`
+
 /** Where the conversation came from, and which of its events the transcript covers. */
 export interface ScribeSource {
   readonly sessionId: string

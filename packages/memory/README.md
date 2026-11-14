@@ -43,7 +43,7 @@ It also registers the directory as the **memory** workspace.
 
 ### Writing
 
-Each day has one memory conversation in the memory workspace, **Memory · YYYY-MM-DD**, started at its first use; a day starts at `dayStartsAt`. Archiving it starts a new one at the next use, since DSH runs no subagent of an archived conversation; archive past days freely. The memory conversation never runs itself: it only holds the day's scribes.
+Each day has one memory conversation in the memory workspace, **Memory · YYYY-MM-DD**, started at its first use; a day starts at `dayStartsAt`. Archiving it starts a new one at the next use, since DSH runs no subagent of an archived conversation; archive past days freely. The memory conversation only holds the day's scribes. Its model replies once, with one short sentence, when it starts: the sidebar hides conversations without a turn, and the scribes with them. Open it and choose a scribe from its header's subagent menu.
 
 When a turn ends in a conversation, the plugin starts a scribe, a subagent of that day's memory conversation, and gives it the part of the conversation not recorded yet. A conversation never recorded, such as one from before the plugin was installed, starts at the turn that just ended. A scribe reads what you and the model said, the tool calls and the start of each result; reasoning and context DSH injected (instruction files, skills, notices) are left out. Every scribe starts from nothing but the memory directory, so what one conversation said does not leak into what another is remembered for.
 

@@ -3,8 +3,8 @@
 //
 // Writing: when a conversation's turn ends, the part of it not read yet goes to a
 // new scribe, a subagent of the day's memory conversation in the memory
-// directory's workspace. The memory conversation itself never runs: it only
-// holds the day's scribes. One scribe works at a time; its changes become one
+// directory's workspace. The memory conversation only holds the day's scribes:
+// its one turn, a short reply when it starts, is there for the sidebar to list it. One scribe works at a time; its changes become one
 // commit whose message is its reply. A turn that ends in any other conversation
 // in that workspace (someone working on memory there) is committed the same way.
 //
@@ -30,19 +30,28 @@ import type { Workspace } from '@deepseek-ai/dsh-workspace'
 import Schema from '@deepseek-ai/schemastery'
 import { z } from 'zod'
 import { baselineText, indexHead, updateText } from '../delivery.ts'
-import { AGENTS_MD, commitMessage, MEMORY_MD, scribeRequest } from '../scribe.ts'
+import {
+  AGENTS_MD,
+  commitMessage,
+  MEMORY_CONVERSATION,
+  MEMORY_MD,
+  scribeRequest,
+} from '../scribe.ts'
 import { renderTranscript, unreadFrom } from '../transcript.ts'
 import { Repository } from './repository.ts'
 
 export const name = 'langify-memory'
 
 const CONTEXT_KIND = 'langify-memory'
+const DAY_KIND = 'langify-memory-day'
 const PROJECTION_KEY = 'langifyMemory'
 
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
     /** Memory given to a conversation: the index when `baseline`, otherwise what changed. */
     'langify-memory': { kind: 'langify-memory'; version: string; baseline?: true } & ContextFormed
+    /** The one message a day's memory conversation is given. */
+    'langify-memory-day': { kind: 'langify-memory-day' }
   }
 }
 
@@ -213,7 +222,7 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
       ctx.workspaceRegistry.archivedSessionIds.some((archivedId) => archivedId === id)
     if (known !== undefined && !archived(known.sessionId)) {
       const resolved = await ctx.sessionController.resolveAgent(SessionId(known.sessionId))
-      if ('agent' in resolved) return resolved.agent
+      if ('agent' in resolved) return open(resolved.agent)
       warn(`opening the memory conversation ${known.sessionId}`)(resolved.error)
     }
     const { id } = await workspace()
@@ -223,7 +232,27 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     // The title is its first event: it makes the conversation durable and named.
     ctx.get('sessionTitle')?.rename(resolved.agent.session, `Memory · ${today}`)
     await days.put(today, { sessionId })
-    return resolved.agent
+    return open(resolved.agent)
+  }
+
+  /**
+   * Give a memory conversation that never had a turn its one turn. The sidebar
+   * hides conversations without one, and the scribes with them.
+   */
+  const opened = new Set<string>()
+  const open = async (agent: Agent): Promise<Agent> => {
+    if (opened.has(agent.id)) return agent
+    opened.add(agent.id)
+    const log = await ctx.sessionQuery.readSession(agent.session.id)
+    if (!log.events.some((event) => event.type === 'turn/start')) {
+      agent.followup(
+        createUserMessage({
+          content: [{ type: 'text', text: MEMORY_CONVERSATION }],
+          source: { kind: DAY_KIND },
+        }),
+      )
+    }
+    return agent
   }
 
   // One scribe at a time, in the order the turns ended: one writer of memory.

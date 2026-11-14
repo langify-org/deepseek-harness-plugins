@@ -3,9 +3,7 @@
 //
 // Writing: when a conversation's turn ends, the part of it not read yet goes to
 // the conversation's scribe, a subagent of the day's memory conversation in the
-// memory directory's workspace. The memory conversation only holds the day's
-// scribes: its one turn, a short reply when it starts, is there for the sidebar
-// to list it. One scribe works at a time; the changes of its turn become one
+// memory directory's workspace. One scribe works at a time; the changes of its turn become one
 // commit whose message is its reply. A turn that ends in any other conversation
 // in that workspace (someone working on memory there) is committed the same way.
 //
@@ -15,6 +13,12 @@
 // scribe's context grew long: every step reads the whole context again, so a long
 // one costs more than starting over. The new scribe starts from the user's
 // guidance, the index, and the end of what the conversation said.
+//
+// Tidying: a day's memory conversation starts when the day does, and its first
+// turn, its only one, goes through the whole directory: what the scribes wrote a
+// turn at a time, each seeing one conversation, is left as a later conversation
+// would want to find it. Scribes wait until it is done. After it the memory
+// conversation only holds the day's scribes.
 //
 // The memory conversation and its scribes run on the memory preset (declared in
 // cordis.patch.yml): file tools and nothing else.
@@ -54,10 +58,10 @@ import {
   commitMessage,
   GUIDANCE_FILE,
   INDEX_FILE,
-  MEMORY_CONVERSATION,
   MEMORY_MD,
   firstRequest,
   nextRequest,
+  tidyRequest,
 } from '../scribe.ts'
 import { renderContext, renderTranscript, unreadFrom } from '../transcript.ts'
 import { Repository } from './repository.ts'
@@ -72,7 +76,7 @@ declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
     /** Memory given to a conversation: the index when `baseline`, otherwise what changed. */
     'langify-memory': { kind: 'langify-memory'; version: string; baseline?: true } & ContextFormed
-    /** The one message a day's memory conversation is given. */
+    /** The first message of a day's memory conversation, which asks it to tidy the directory. */
     'langify-memory-day': { kind: 'langify-memory-day' }
   }
 }
@@ -99,6 +103,9 @@ export interface Config {
   scribeProvider?: string
   scribeModel?: string
   scribeReasoningEffort?: string
+  tidyProvider?: string
+  tidyModel?: string
+  tidyReasoningEffort?: string
   toolArguments: number
   toolResult: number
   contextChars: number
@@ -132,6 +139,15 @@ export const Config: Schema<Config> = Schema.object({
   scribeModel: Schema.string().description("The scribes' model, set together with scribeProvider."),
   scribeReasoningEffort: Schema.string().description(
     "The scribes' reasoning effort, one the model offers. Without it, the model's default.",
+  ),
+  tidyProvider: Schema.string().description(
+    "The LLM provider of the model that tidies the directory, set together with tidyModel. Without them, the default model when the day's memory conversation starts.",
+  ),
+  tidyModel: Schema.string().description(
+    'The model that tidies the directory, set together with tidyProvider.',
+  ),
+  tidyReasoningEffort: Schema.string().description(
+    "The reasoning effort of tidying, one the model offers. Without it, the model's default.",
   ),
   toolArguments: Schema.natural()
     .default(300)
@@ -238,6 +254,9 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
   if ((config.scribeProvider === undefined) !== (config.scribeModel === undefined)) {
     throw new Error('memory: scribeProvider and scribeModel are set together')
   }
+  if ((config.tidyProvider === undefined) !== (config.tidyModel === undefined)) {
+    throw new Error('memory: tidyProvider and tidyModel are set together')
+  }
   /** What a scribe runs on where it differs from the memory conversation. */
   const scribeOptions: AgentOptions = {
     ...(config.scribeProvider === undefined ? {} : { provider: config.scribeProvider }),
@@ -323,22 +342,41 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
   }
 
   /**
-   * Give a memory conversation that never had a turn its one turn. The sidebar
-   * hides conversations without one, and the scribes with them.
+   * Give a memory conversation that never had a turn its one turn, which tidies
+   * the directory, and wait for it: it is the only writer meanwhile. Its changes
+   * are committed as its turn ends, like those of anyone working in the workspace.
    */
   const opened = new Set<string>()
   const open = async (agent: Agent): Promise<Agent> => {
     if (opened.has(agent.id)) return agent
     opened.add(agent.id)
     const log = await ctx.sessionQuery.readSession(agent.session.id)
-    if (!log.events.some((event) => event.type === 'turn/start')) {
-      agent.followup(
-        createUserMessage({
-          content: [{ type: 'text', text: MEMORY_CONVERSATION }],
-          source: { kind: DAY_KIND },
-        }),
-      )
+    if (log.events.some((event) => event.type === 'turn/start')) return agent
+    const now = agent.model.current()
+    const provider = config.tidyProvider ?? now?.provider
+    const model = config.tidyModel ?? now?.model
+    if (
+      provider !== undefined &&
+      model !== undefined &&
+      (config.tidyModel !== undefined || config.tidyReasoningEffort !== undefined)
+    ) {
+      agent.model.select({
+        provider,
+        model,
+        ...(config.tidyReasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: ReasoningEffortId(config.tidyReasoningEffort) }),
+      })
     }
+    const text = tidyRequest(await memoryFile(GUIDANCE_FILE), {
+      indexLines: config.indexLines,
+      indexBytes: config.indexBytes,
+    })
+    agent.followup(
+      createUserMessage({ content: [{ type: 'text', text }], source: { kind: DAY_KIND } }),
+    )
+    await agent.whenIdle()
+    await committing
     return agent
   }
 
@@ -480,6 +518,21 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
   // One scribe at a time, in the order the turns ended: one writer of memory.
   const scribes = new Map<string, Scribe>()
   let recording: Promise<void> = Promise.resolve()
+
+  // The day's memory conversation starts when the day does, not at its first
+  // conversation: a conversation that starts in the morning is given tidied memory.
+  let started = day()
+  const clock = setInterval(() => {
+    const today = day()
+    if (today === started) return
+    started = today
+    recording = recording
+      .then(() => memoryConversation())
+      .then(() => undefined)
+      .catch(warn('starting the day'))
+  }, 60_000)
+  ctx.effect(() => () => clearInterval(clock), 'memory: day clock')
+
   const record = async (session: Session, to: number): Promise<void> => {
     const log = await ctx.sessionQuery.readSession(session.id)
     const from = Math.max(

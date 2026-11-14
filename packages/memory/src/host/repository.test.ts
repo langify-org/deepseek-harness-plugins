@@ -6,16 +6,16 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { commitMessage } from '../scribe.ts'
 import { Repository } from './repository.ts'
 
-let directory: string | undefined
+let root: string | undefined
 
 afterEach(async () => {
-  if (directory !== undefined) await rm(directory, { recursive: true, force: true })
-  directory = undefined
+  if (root !== undefined) await rm(root, { recursive: true, force: true })
+  root = undefined
 })
 
 async function repository(): Promise<Repository> {
-  directory = join(await mkdtemp(join(tmpdir(), 'dsh-memory-')), 'memory')
-  return new Repository('git', directory)
+  root = await mkdtemp(join(tmpdir(), 'dsh-memory-'))
+  return new Repository('git', join(root, 'memory'))
 }
 
 function log(dir: string): string {

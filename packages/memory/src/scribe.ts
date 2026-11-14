@@ -1,12 +1,12 @@
 // What the plugin says to the memory agents and what it writes for them: the
 // first files of the memory directory, the messages that hand a scribe its
-// conversation part by part, and the commit message made from the reply that
-// ends a turn.
+// conversation part by part, the message that asks for the directory to be
+// tidied, and the commit message made from the reply that ends a turn.
 //
-// What the plugin's mechanisms need an agent to know is the memory preset's
-// system prompt (cordis.patch.yml), which changes with the plugin. What to
-// remember is the user's, in the directory's AGENTS.md, which the plugin only
-// starts and quotes.
+// What every memory agent needs to know of the plugin's mechanisms is the memory
+// preset's system prompt (cordis.patch.yml). What one agent is there to do is the
+// beginning of its first message, here. What to remember is the user's, in the
+// directory's AGENTS.md, which the plugin only starts and quotes.
 
 /** The file that holds the user's guidance, and the one that holds the index. */
 export const GUIDANCE_FILE = 'AGENTS.md'
@@ -30,10 +30,39 @@ export const MEMORY_MD = `# Memory
 Nothing is remembered yet.
 `
 
-/** The one message a day's memory conversation is given: it only holds that day's scribes. */
-export const MEMORY_CONVERSATION = `This conversation holds today's memory scribes: each is a subagent that records part of a conversation into this directory, started by the memory plugin. Nothing else happens here.
-Reply with one short sentence saying so, and do nothing else.
-`
+/** What a scribe is there to do: the beginning of its first message. */
+const SCRIBE = `You record one conversation, part by part. This message gives you the user's guidance, the beginning of the index, what the conversation said before you came to it, and the first part to record. After each later turn of the conversation, a message gives you the next part, after the names of the files that other agents changed since your last turn.
+
+Write to the directory when the user asks for something to be remembered, or when a part holds something clearly worth remembering: something you expect a later conversation to need. Most parts hold nothing of the kind, and then you change nothing.
+
+The part to record comes last in a message: it starts after a line that names its events, like "=== events 12 to 34 ===", and runs to the end of the message. A new agent takes your place when the conversation pauses or your context grows long. It starts from the directory and the last of what the conversation said, not from what you have in mind.`
+
+/** How much of the index every conversation is given. */
+export interface IndexShare {
+  readonly indexLines: number
+  readonly indexBytes: number
+}
+
+/**
+ * The first message of a day's memory conversation: tidy the directory. It is
+ * the conversation's only turn; after it the conversation holds the day's scribes.
+ */
+export function tidyRequest(guidance: string | undefined, share: IndexShare): string {
+  return [
+    `You tidy the memory directory. Through the day, conversations wrote to it: each had a scribe that saw only its own conversation, a turn at a time, without knowing what would matter later or what the other scribes wrote. You have the whole directory and the time to read all of it. Leave it as a later conversation would want to find it.`,
+    '',
+    '- A later conversation needs how things stand and what was learned, not the order in which it came out. Notes written a turn at a time pile up as a chronicle: drafts that were replaced, states that have since changed, the same thing in several places.',
+    `- The beginning of ${INDEX_FILE} (at most ${share.indexLines} lines or ${share.indexBytes} bytes) is all that most conversations ever read of memory, and most of them are about something else: it has to be short, and to say where the rest is.`,
+    '- You cannot see the conversations the notes came from, so you can mark a note you doubt, but not correct it.',
+    '- Nothing you remove is lost: the directory keeps every earlier state in its history, and the user can go back to any of them. You cannot read that history.',
+    '- Notes say when they were written, and the time now is given to you.',
+    '',
+    ...(guidance === undefined
+      ? []
+      : [`The user's guidance, ${GUIDANCE_FILE}:`, '', guidance.trim(), '']),
+    'This conversation also holds the scribes of the day that follows, as its subagents. When this turn ends it has nothing more to do.',
+  ].join('\n')
+}
 
 /** Where the conversation came from, and which of its events the transcript covers. */
 export interface ScribeSource {
@@ -47,14 +76,11 @@ export interface ScribeSource {
 }
 
 /** Memory as a scribe starts from it. */
-export interface ScribeMemory {
+export interface ScribeMemory extends IndexShare {
   /** The user's guidance file; undefined when there is none. */
   readonly guidance: string | undefined
   /** The beginning of the index, as conversations are given it; undefined when there is none. */
   readonly index: string | undefined
-  /** How much of the index conversations are given. */
-  readonly indexLines: number
-  readonly indexBytes: number
 }
 
 /**
@@ -81,6 +107,8 @@ export function firstRequest(
   const cwd = source.cwd === undefined ? '' : `, working in ${source.cwd}`
   const given = `at most ${memory.indexLines} lines or ${memory.indexBytes} bytes`
   return [
+    SCRIBE,
+    '',
     ...(memory.guidance === undefined
       ? []
       : [`The user's guidance, ${GUIDANCE_FILE}:`, '', memory.guidance.trim(), '']),

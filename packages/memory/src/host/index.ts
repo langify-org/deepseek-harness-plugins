@@ -20,7 +20,8 @@
 // cordis.patch.yml): file tools and nothing else.
 //
 // Reading: at the start of a conversation's turn, it is given the beginning of
-// the index the first time, and afterwards what changed in other conversations.
+// the index the first time, and afterwards the names of the files that other
+// conversations' scribes changed.
 /// <reference types="@deepseek-ai/dsh-agent-preset-registry" />
 /// <reference types="@deepseek-ai/dsh-api-session-controller" />
 /// <reference types="@deepseek-ai/dsh-session-query" />
@@ -105,7 +106,6 @@ export interface Config {
   continueTokens: number
   indexLines: number
   indexBytes: number
-  rebaselineAfter: number
 }
 
 export const Config: Schema<Config> = Schema.object({
@@ -160,11 +160,6 @@ export const Config: Schema<Config> = Schema.object({
   indexBytes: Schema.natural()
     .default(25600)
     .description('Bytes of MEMORY.md a conversation is given when it starts.'),
-  rebaselineAfter: Schema.natural()
-    .default(20)
-    .description(
-      'Commits after which a conversation is given MEMORY.md again instead of what changed.',
-    ),
 })
 
 /** What the plugin keeps: how far each conversation has been read, and each day's memory conversation. */
@@ -567,6 +562,19 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     }
   })
 
+  // A memory conversation only holds scribes. DSH tells a conversation when a
+  // subagent that was sent a message has finished; that alone starts no turn here.
+  ctx.on(
+    'agent/pre-step',
+    ({ agent, messages }, next) => {
+      const holdsScribes = [...days.entries()].some(([, held]) => held.sessionId === agent.id)
+      const onlyNotices =
+        messages.length > 0 && messages.every((m) => m.source.kind === 'subagent-settled')
+      return holdsScribes && onlyNotices ? Promise.resolve({ kind: 'reject' }) : next()
+    },
+    { prepend: true },
+  )
+
   // What each conversation was given, read back from its log.
   ctx.effect(
     () =>
@@ -618,22 +626,21 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     }
     if (given === null) return baseline()
     if (given.version === head) return undefined
-    const sinceBaseline = await repository.commits(given.baseline, head)
-    if (sinceBaseline === undefined || sinceBaseline.length > config.rebaselineAfter)
-      return baseline()
     const since = await repository.commits(given.version, head)
     if (since === undefined) return baseline()
     // What this conversation itself taught memory, it already knows.
-    const news = since.filter(
+    const others = since.some(
       (c) => c.sources.length === 0 || c.sources.some((id) => id !== session.id),
     )
-    if (news.length === 0) return undefined
-    const text = updateText(given.version, head, news)
+    if (!others) return undefined
+    const files = await repository.changed(given.version, head)
+    if (files.length === 0) return undefined
+    const text = updateText(given.version, head, files)
     return contextMessage(text, {
       kind: CONTEXT_KIND,
       version: head,
       form: 'notice',
-      summary: `Memory changed in ${news.length} commit(s)`,
+      summary: `Memory changed in ${files.length} file(s)`,
     })
   }
 

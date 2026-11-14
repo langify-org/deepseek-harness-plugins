@@ -13,7 +13,7 @@ export const GUIDANCE_FILE = 'AGENTS.md'
 export const INDEX_FILE = 'MEMORY.md'
 
 /** The user's guidance as it starts: what memory is for, not how to keep it. */
-export const AGENTS_MD = `# Memory
+export const AGENTS_MD: string = `# Memory
 
 This directory is the memory of DeepSeek Harness: what was learned in every conversation with this user.
 It exists so that future sessions working with this user do not ask the same things again or repeat the same mistakes.
@@ -21,6 +21,7 @@ It exists so that future sessions working with this user do not ask the same thi
 - Conversation logs are the source of truth; memory is derived from them.
 - Where memory and an AGENTS.md the user wrote elsewhere disagree, that AGENTS.md is right.
 - Write memory, and your replies, in the language the user speaks.
+- Most conversations that are given the beginning of ${INDEX_FILE} are about something else. It holds what such a conversation needs: who the user is, what is going on in a line each, and where the details are. Where a task stands from one moment to the next belongs in the task's own file.
 `
 
 /** The index before anything is remembered. */

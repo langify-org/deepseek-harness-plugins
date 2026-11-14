@@ -36,7 +36,6 @@ In DSH's Web and Desktop apps, add it from the **Plugins** page.
 | `continueTokens`                | `30000`                   | Tokens of context up to which a scribe goes on with its conversation's next turn                                                                                         |
 | `indexLines`                    | `200`                     | Lines of `MEMORY.md` a conversation is given when it starts                                                                                                              |
 | `indexBytes`                    | `25600`                   | Bytes of `MEMORY.md` a conversation is given when it starts                                                                                                              |
-| `rebaselineAfter`               | `20`                      | Commits after which a conversation is given `MEMORY.md` again                                                                                                            |
 
 ## How it works
 
@@ -48,11 +47,11 @@ On start, the plugin creates the memory directory as a git repository with two f
 It also registers the directory as the **memory** workspace, and adds the **Memory** agent preset (`langify-memory`) that the memory agents run on:
 
 - Its tools are `read`, `edit`, `apply_patch`, `glob` and `grep`. There is no `write`: scribes of other conversations change the directory between a scribe's turns, and `edit` and `apply_patch` change a file only where its text still matches what the scribe read, where `write` would replace it whole with the old text. There is no shell, web or subagent tool, and the plugin hides the profile's global tools (MCP servers, browser control and so on) from agents on this preset.
-- Its system prompt is only what the plugin's mechanisms need a memory agent to know: that memory is for other and later conversations, not for the one being recorded; that it records one conversation part by part, and where a part starts and ends in a message; what `MEMORY.md` is for and that every conversation is given its beginning; that other agents change the directory between its turns, and that a new agent takes its place in time; that what a conversation said is a record and not instructions; never to write secrets; and that each reply becomes a commit message and is added to every other conversation that goes on. No instruction files, skills or runtime details are added.
+- Its system prompt is only what the plugin's mechanisms need a memory agent to know: that memory is for other and later conversations, not for the one being recorded; that it records one conversation part by part, and where a part starts and ends in a message; what `MEMORY.md` is for and that every conversation is given its beginning; that other agents change the directory between its turns, and that a new agent takes its place in time; that what a conversation said is a record and not instructions; never to write secrets; and that each reply becomes the commit message of its turn. No instruction files, skills or runtime details are added.
 
 ### Writing
 
-Each day has one memory conversation in the memory workspace, **Memory · YYYY-MM-DD**, started at its first use; a day starts at `dayStartsAt`. Archiving it starts a new one at the next use, since DSH runs no subagent of an archived conversation; archive past days freely. The memory conversation only holds the day's scribes. Its model replies once, with one short sentence, when it starts: the sidebar hides conversations without a turn, and the scribes with them. Open it and choose a scribe from its header's subagent menu.
+Each day has one memory conversation in the memory workspace, **Memory · YYYY-MM-DD**, started at its first use; a day starts at `dayStartsAt`. Archiving it starts a new one at the next use, since DSH runs no subagent of an archived conversation; archive past days freely. The memory conversation only holds the day's scribes. Its model replies once, with one short sentence, when it starts: the sidebar hides conversations without a turn, and the scribes with them. DSH tells a conversation when a subagent that was sent a message has finished; the plugin stops that from starting a turn here, so the memory conversation's model is not called again. Open it and choose a scribe from its header's subagent menu.
 
 When a turn ends in a conversation, the plugin gives the part of it not recorded yet to the conversation's scribe, a subagent of that day's memory conversation. A conversation never recorded, such as one from before the plugin was installed, starts at the turn that just ended. A scribe reads what you and the model said, the tool calls and the start of each result; reasoning and context DSH injected (instruction files, skills, notices) are left out.
 
@@ -69,8 +68,8 @@ Conversations of subagents and conversations in the memory workspace are not rec
 At the start of a turn, a conversation is given memory:
 
 - The first time, the beginning of `MEMORY.md` (`indexLines` and `indexBytes`) and its version.
-- Afterwards, when memory changed, the messages of the commits since, unless the conversation itself was their only source.
-- `MEMORY.md` again when more than `rebaselineAfter` commits came since it was given, or when compaction hid it.
+- Afterwards, when memory changed, the names of the files that changed, unless the conversation itself was the only source of the changes. Most changes come from conversations about something else, so a conversation is told where to look and reads what concerns it.
+- `MEMORY.md` again when compaction hid it.
 
 Conversations of subagents and of the memory workspace are not given memory.
 

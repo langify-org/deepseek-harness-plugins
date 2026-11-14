@@ -36,7 +36,7 @@
                 - A new agent takes your place when the conversation pauses or your context grows long. It starts from the directory and the last of what the conversation said, not from what you have in mind.
                 - Never write secrets (tokens, passwords, keys).
                 - AGENTS.md in the directory is the user's guidance on what to remember. Your first message quotes it: follow it, and leave the file as it is.
-                - The reply that ends each of your turns becomes the commit message of that turn's changes, and is added to every other conversation that goes on, whatever it is about: write it for them. If you changed nothing, say only that.
+                - The reply that ends each of your turns becomes the commit message of that turn's changes: write it for someone reading the history of memory. Other conversations are only told which files changed. If you changed nothing, say only that.
           - id: time-context
             name: '@deepseek-ai/dsh-time-context'
           - id: tool-fs

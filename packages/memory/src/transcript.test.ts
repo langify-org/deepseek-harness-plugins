@@ -1,6 +1,6 @@
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { describe, expect, it } from 'vitest'
-import { renderTranscript } from './transcript.ts'
+import { renderTranscript, unreadFrom } from './transcript.ts'
 
 const limits = { toolArguments: 20, toolResult: 10 }
 
@@ -74,5 +74,26 @@ describe('renderTranscript', () => {
         limits,
       ),
     ).toBe('')
+  })
+})
+
+describe('unreadFrom', () => {
+  const log = events(
+    { type: 'turn/start', data: {} },
+    user('user', 'one'),
+    { type: 'turn/end', data: { reason: { kind: 'completed' } } },
+    { type: 'turn/start', data: {} },
+    user('user', 'two'),
+    { type: 'turn/end', data: { reason: { kind: 'completed' } } },
+    { type: 'turn/start', data: {} },
+  )
+
+  it('continues after what was read', () => {
+    expect(unreadFrom(log, 2, 5)).toBe(3)
+  })
+
+  it('starts a conversation it never read at the turn that ended, not at a later one', () => {
+    expect(unreadFrom(log, undefined, 5)).toBe(3)
+    expect(unreadFrom(log, undefined, 2)).toBe(0)
   })
 })

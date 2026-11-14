@@ -18,6 +18,25 @@ const PROMPTS: Readonly<Record<string, string>> = {
   schedule: 'Scheduled instruction',
 }
 
+/**
+ * The first event the scribe has not read, up to `to`: the one after `read`, the
+ * last event it was given. A conversation it has never been given starts at the
+ * turn that just ended: what came before is from before the plugin was there.
+ */
+export function unreadFrom(
+  events: readonly SessionEvent[],
+  read: number | undefined,
+  to: number,
+): number {
+  if (read !== undefined) return read + 1
+  let from = 0
+  for (const event of events) {
+    if (event.seq > to) break
+    if (event.type === 'turn/start') from = event.seq
+  }
+  return from
+}
+
 /** The events as text, oldest first; empty when nothing in them is worth reading. */
 export function renderTranscript(
   events: readonly SessionEvent[],

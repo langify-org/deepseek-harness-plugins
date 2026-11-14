@@ -38,7 +38,7 @@ On start, the plugin creates the memory directory as a git repository with two f
 
 It also registers the directory as the **memory** workspace.
 
-When a turn ends in a conversation, the plugin sends the part of the conversation the scribe has not read yet to that day's scribe conversation, **Memory scribe · YYYY-MM-DD** in the memory workspace, which it starts when there is none. The scribe reads what you and the model said, the tool calls and the start of each result; reasoning and context DSH injected (instruction files, skills, notices) are left out. Conversations of subagents and conversations in the memory workspace are not sent. Requests that arrive while the scribe works wait and are read together.
+When a turn ends in a conversation, the plugin sends the part of the conversation the scribe has not read yet to that day's scribe conversation, **Memory scribe · YYYY-MM-DD** in the memory workspace, which it starts when there is none. The scribe reads what you and the model said, the tool calls and the start of each result; reasoning and context DSH injected (instruction files, skills, notices) are left out. Conversations of subagents and conversations in the memory workspace are not sent. A conversation the scribe has never read, such as one from before the plugin was installed, starts at the turn that just ended. Requests that arrive while the scribe works wait and are read together.
 
 When a turn ends in any conversation in the memory workspace, the plugin commits every change in the directory. The commit message is the reply that ended the turn, with a `Memory-Source: <session id>` trailer for each conversation the turn read. A turn that changed nothing makes no commit.
 

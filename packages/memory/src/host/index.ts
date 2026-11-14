@@ -19,7 +19,7 @@ import type { Workspace } from '@deepseek-ai/dsh-workspace'
 import Schema from '@deepseek-ai/schemastery'
 import { z } from 'zod'
 import { AGENTS_MD, commitMessage, MEMORY_MD, scribeRequest } from '../scribe.ts'
-import { renderTranscript } from '../transcript.ts'
+import { renderTranscript, unreadFrom } from '../transcript.ts'
 import { Repository } from './repository.ts'
 
 export const name = 'langify-memory'
@@ -136,7 +136,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   let handing: Promise<void> = Promise.resolve()
   const hand = async (session: Session, to: number): Promise<void> => {
     const log = await ctx.sessionQuery.readSession(session.id)
-    const from = Math.max((read.get(session.id)?.seq ?? -1) + 1, log.inheritedEventCount)
+    const from = Math.max(
+      unreadFrom(log.events, read.get(session.id)?.seq, to),
+      log.inheritedEventCount,
+    )
     const events = log.events.filter((event) => event.seq >= from && event.seq <= to)
     const transcript = renderTranscript(events, {
       toolArguments: config.toolArguments,

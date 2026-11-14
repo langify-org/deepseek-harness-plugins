@@ -54,7 +54,8 @@ export function tidyRequest(guidance: string | undefined, share: IndexShare): st
     '- A later conversation needs how things stand and what was learned, not the order in which it came out. Notes written a turn at a time pile up as a chronicle: drafts that were replaced, states that have since changed, the same thing in several places.',
     `- The beginning of ${INDEX_FILE} (at most ${share.indexLines} lines or ${share.indexBytes} bytes) is all that most conversations ever read of memory, and most of them are about something else: it has to be short, and to say where the rest is.`,
     '- You cannot see the conversations the notes came from, so you can mark a note you doubt, but not correct it.',
-    '- Nothing you remove is lost: the directory keeps every earlier state in its history, and the user can go back to any of them. You cannot read that history.',
+    "- What only a conversation said is nowhere else once it leaves this directory: a decision and its reason, an amount, what someone is waiting for, what was tried and did not work. What one of the user's own files holds, a later conversation can read there, and memory needs only to say where it is.",
+    "- What you remove, no later conversation will see: they cannot read the directory's history, and neither can you. The user can, and can bring anything back.",
     '- Notes say when they were written, and the time now is given to you.',
     '',
     ...(guidance === undefined

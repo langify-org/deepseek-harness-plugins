@@ -10,7 +10,8 @@
 //
 // The memory conversation and its scribes run on the memory preset (declared in
 // cordis.patch.yml): file tools and nothing else. A scribe starts from the
-// user's guidance, the index and the transcript, which the request carries.
+// user's guidance, the index, what the conversation said before and the
+// transcript, which the request carries.
 //
 // Reading: at the start of a conversation's turn, it is given the beginning of
 // the index the first time, and afterwards what changed in other conversations.
@@ -45,7 +46,7 @@ import {
   MEMORY_MD,
   scribeRequest,
 } from '../scribe.ts'
-import { renderTranscript, unreadFrom } from '../transcript.ts'
+import { renderContext, renderTranscript, unreadFrom } from '../transcript.ts'
 import { Repository } from './repository.ts'
 
 export const name = 'langify-memory'
@@ -83,6 +84,7 @@ export interface Config {
   agentPreset: string
   toolArguments: number
   toolResult: number
+  contextChars: number
   indexLines: number
   indexBytes: number
   rebaselineAfter: number
@@ -112,6 +114,11 @@ export const Config: Schema<Config> = Schema.object({
   toolResult: Schema.natural()
     .default(500)
     .description('Characters of a tool result a scribe reads.'),
+  contextChars: Schema.natural()
+    .default(8000)
+    .description(
+      'Characters of what a conversation said before the part to record that a scribe is given as context.',
+    ),
   indexLines: Schema.natural()
     .default(200)
     .description('Lines of MEMORY.md a conversation is given when it starts.'),
@@ -335,6 +342,10 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
         indexLines: config.indexLines,
         indexBytes: config.indexBytes,
       },
+      renderContext(
+        log.events.filter((event) => event.seq < from),
+        config.contextChars,
+      ),
       transcript,
     )
     const activation = await ctx.subagents.startActivation({

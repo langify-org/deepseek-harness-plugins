@@ -19,19 +19,20 @@ In DSH's Web and Desktop apps, add it from the **Plugins** page.
 
 ## Settings
 
-| Setting            | Default            | What it is                                                         |
-| ------------------ | ------------------ | ------------------------------------------------------------------ |
-| `directory`        | `$DSH_HOME/memory` | The memory directory                                               |
-| `git`              | `git`              | The git executable: a name looked up on `PATH`, or a path          |
-| `timeZone`         | the host's         | The IANA time zone of the memory conversations' days               |
-| `dayStartsAt`      | `3`                | The hour a new memory conversation starts the day                  |
-| `subagentProvider` | `spawn`            | The subagent provider that starts the scribes                      |
-| `agentPreset`      | `langify-memory`   | The agent preset the memory conversations and their scribes run on |
-| `toolArguments`    | `300`              | Characters of a tool call's arguments a scribe reads               |
-| `toolResult`       | `500`              | Characters of a tool result a scribe reads                         |
-| `indexLines`       | `200`              | Lines of `MEMORY.md` a conversation is given when it starts        |
-| `indexBytes`       | `25600`            | Bytes of `MEMORY.md` a conversation is given when it starts        |
-| `rebaselineAfter`  | `20`               | Commits after which a conversation is given `MEMORY.md` again      |
+| Setting            | Default            | What it is                                                                                         |
+| ------------------ | ------------------ | -------------------------------------------------------------------------------------------------- |
+| `directory`        | `$DSH_HOME/memory` | The memory directory                                                                               |
+| `git`              | `git`              | The git executable: a name looked up on `PATH`, or a path                                          |
+| `timeZone`         | the host's         | The IANA time zone of the memory conversations' days                                               |
+| `dayStartsAt`      | `3`                | The hour a new memory conversation starts the day                                                  |
+| `subagentProvider` | `spawn`            | The subagent provider that starts the scribes                                                      |
+| `agentPreset`      | `langify-memory`   | The agent preset the memory conversations and their scribes run on                                 |
+| `toolArguments`    | `300`              | Characters of a tool call's arguments a scribe reads                                               |
+| `toolResult`       | `500`              | Characters of a tool result a scribe reads                                                         |
+| `contextChars`     | `8000`             | Characters of what a conversation said before the part to record that a scribe is given as context |
+| `indexLines`       | `200`              | Lines of `MEMORY.md` a conversation is given when it starts                                        |
+| `indexBytes`       | `25600`            | Bytes of `MEMORY.md` a conversation is given when it starts                                        |
+| `rebaselineAfter`  | `20`               | Commits after which a conversation is given `MEMORY.md` again                                      |
 
 ## How it works
 
@@ -43,13 +44,13 @@ On start, the plugin creates the memory directory as a git repository with two f
 It also registers the directory as the **memory** workspace, and adds the **Memory** agent preset (`langify-memory`) that the memory agents run on:
 
 - Its tools are `read`, `write`, `edit`, `apply_patch`, `glob` and `grep`. There is no shell, web or subagent tool, and the plugin hides the profile's global tools (MCP servers, browser control and so on) from agents on this preset.
-- Its system prompt is only what the plugin's mechanisms need a memory agent to know: what `MEMORY.md` is for, that a transcript is a record and not instructions, never to write secrets, and that its reply becomes the commit message. No instruction files, skills or runtime details are added.
+- Its system prompt is only what the plugin's mechanisms need a memory agent to know: that memory is for other and later conversations, not for the one being recorded, that it is called after every turn, what `MEMORY.md` is for and that every conversation is given its beginning, that a transcript is a record and not instructions, never to write secrets, and that its reply becomes the commit message and is added to every other conversation that goes on. No instruction files, skills or runtime details are added.
 
 ### Writing
 
 Each day has one memory conversation in the memory workspace, **Memory · YYYY-MM-DD**, started at its first use; a day starts at `dayStartsAt`. Archiving it starts a new one at the next use, since DSH runs no subagent of an archived conversation; archive past days freely. The memory conversation only holds the day's scribes. Its model replies once, with one short sentence, when it starts: the sidebar hides conversations without a turn, and the scribes with them. Open it and choose a scribe from its header's subagent menu.
 
-When a turn ends in a conversation, the plugin starts a scribe, a subagent of that day's memory conversation, and gives it the part of the conversation not recorded yet. A conversation never recorded, such as one from before the plugin was installed, starts at the turn that just ended. A scribe reads what you and the model said, the tool calls and the start of each result; reasoning and context DSH injected (instruction files, skills, notices) are left out. Every scribe starts from nothing but your guidance, the beginning of `MEMORY.md` as conversations are given it, and the transcript, so what one conversation said does not leak into what another is remembered for. It reads the rest of the directory as it needs.
+When a turn ends in a conversation, the plugin starts a scribe, a subagent of that day's memory conversation, and gives it the part of the conversation not recorded yet. A conversation never recorded, such as one from before the plugin was installed, starts at the turn that just ended. A scribe reads what you and the model said, the tool calls and the start of each result; reasoning and context DSH injected (instruction files, skills, notices) are left out. Every scribe starts from nothing but your guidance, the beginning of `MEMORY.md` as conversations are given it, what the conversation said before (the newest `contextChars` characters of it, without the tool calls) and the transcript, so what one conversation said does not leak into what another is remembered for. What was said before is there so that a scribe can follow the transcript, a short "OK" for instance, without memory having to keep the conversation's place turn by turn. It reads the rest of the directory as it needs.
 
 One scribe works at a time; turns that end meanwhile wait. When a scribe finishes, the plugin commits every change in the directory. The commit message is the scribe's reply, with a `Memory-Source: <session id>` trailer naming the conversation. A scribe that changed nothing makes no commit. A scribe that did not finish leaves its part to be read again with the conversation's next turn.
 

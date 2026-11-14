@@ -1,6 +1,6 @@
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { describe, expect, it } from 'vitest'
-import { renderTranscript, unreadFrom } from './transcript.ts'
+import { renderContext, renderTranscript, unreadFrom } from './transcript.ts'
 
 const limits = { toolArguments: 20, toolResult: 10 }
 
@@ -95,5 +95,48 @@ describe('unreadFrom', () => {
   it('starts a conversation it never read at the turn that ended, not at a later one', () => {
     expect(unreadFrom(log, undefined, 5)).toBe(3)
     expect(unreadFrom(log, undefined, 2)).toBe(0)
+  })
+})
+
+/** An assistant message that says `text` and calls a tool. */
+const said = (text: string): object => ({
+  type: 'assistant/message',
+  data: {
+    message: {
+      content: [
+        { type: 'text', text },
+        { type: 'tool-call', id: 'c', name: 'read', arguments: '{}' },
+      ],
+    },
+  },
+})
+
+describe('renderContext', () => {
+  const result = {
+    type: 'tool/result',
+    data: { message: { content: [{ type: 'text', text: 'file contents' }] } },
+  }
+  const log = events(
+    user('user', 'first question'),
+    said('first answer'),
+    result,
+    user('user', 'OK'),
+  )
+
+  it('keeps what was said and leaves out the tool traffic', () => {
+    expect(renderContext(log, 1000)).toBe(
+      '### User\nfirst question\n\n### Assistant\nfirst answer\n\n### User\nOK',
+    )
+  })
+
+  it('keeps the newest parts that fit, and says that older ones were left out', () => {
+    expect(renderContext(log, 40)).toBe(
+      '(Earlier parts are left out.)\n\n### Assistant\nfirst answer\n\n### User\nOK',
+    )
+  })
+
+  it('keeps the end of a newest part longer than the limit, and is empty when nothing was said', () => {
+    expect(renderContext(events(user('user', 'abcdefghij')), 4)).toBe('…ghij')
+    expect(renderContext(events(result), 100)).toBe('')
   })
 })

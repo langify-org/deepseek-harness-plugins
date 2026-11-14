@@ -55,10 +55,15 @@ export interface ScribeMemory {
   readonly indexBytes: number
 }
 
-/** A scribe's request to update memory from one transcript. */
+/**
+ * A scribe's request to update memory from one transcript. `context` is what the
+ * conversation said before it, which earlier scribes were given: with it a scribe
+ * can follow the transcript without memory having kept the conversation's place.
+ */
 export function scribeRequest(
   source: ScribeSource,
   memory: ScribeMemory,
+  context: string,
   transcript: string,
 ): string {
   const title = source.title === undefined ? '' : ` "${source.title}"`
@@ -86,7 +91,18 @@ export function scribeRequest(
           '',
         ]),
     `A conversation went on: session ${source.sessionId}${title}${cwd}, events ${source.from} to ${source.to}.`,
-    'Update memory from it if anything is worth remembering.',
+    ...(context === ''
+      ? []
+      : [
+          '',
+          'What it said before, already offered for recording, without the tool calls:',
+          '',
+          '<context>',
+          context,
+          '</context>',
+        ]),
+    '',
+    'Update memory from the transcript if anything in it is worth remembering.',
     '',
     '<transcript>',
     transcript,

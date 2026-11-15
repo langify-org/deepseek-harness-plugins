@@ -42,7 +42,7 @@ export const NOTHING = '(nothing)'
 /** What a scribe is there to do: the beginning of its first message. */
 const SCRIBE = `You note one conversation, part by part, as it goes. This message gives you the user's guidance, the beginning of the index of what is known, what the conversation said before you came to it, and the first part. After each later turn of the conversation, a message gives you the next part.
 
-Your reply to a part is its entry in the day's record of this conversation. The memory plugin puts it, under the time, at the end of a file in ${EPISODES}/ that is not rewritten afterwards; you write no file yourself. A later conversation finds the entry when it searches for what was said, and tonight another agent brings what is known up to date from the day's entries. Neither sees this conversation, so the entry has to stand on its own and hold what they need from it and cannot get elsewhere: what was decided and why, what was learned and how it is known, what was promised and for which date, what changed and from what. A reader on another day cannot tell which day "tomorrow" was. A part that holds nothing of the kind gets no entry: reply with exactly ${NOTHING}. Most parts do.
+Your reply to a part is its entry in the day's record of this conversation. The memory plugin puts it, under a heading that gives the time and the part's events, at the end of a file in ${EPISODES}/ that is not rewritten afterwards; you write no file yourself. A later conversation finds the entry when it searches for what was said, and tonight another agent brings what is known up to date from the day's entries. Neither sees this conversation, so the entry has to stand on its own and hold what they need from it and cannot get elsewhere: what was decided and why, what was learned and how it is known, what was promised and for which date, what changed and from what. A reader on another day cannot tell which day "tomorrow" was. A part that holds nothing of the kind gets no entry: reply with exactly ${NOTHING}. Most parts do.
 
 The part comes last in a message: it starts after a line that names its events, like "=== events 12 to 34 ===", and runs to the end of the message. You stay with this conversation for the day, and what you noted before is in your own replies.`
 
@@ -246,9 +246,15 @@ export function episodeHead(source: ScribeSource): string {
   return `# ${source.title ?? source.sessionId}\n\nNoted from the conversation ${source.sessionId}${cwd}.\n`
 }
 
-/** One entry of that file: when it was noted, the events it is about, and the scribe's reply. */
+/**
+ * One entry of that file: when it was noted, the events it is about, and the
+ * scribe's reply. The reply's own headings go two levels down, so that only the
+ * line an entry starts under is a heading of that level: nothing a scribe
+ * writes can pass for the start of an entry.
+ */
 export function episodeEntry(source: ScribeSource, at: string, entry: string): string {
-  return `\n## ${at} (events ${source.from} to ${source.to})\n\n${entry.trim()}\n`
+  const body = entry.trim().replaceAll(/^(?=#+ )/gm, '##')
+  return `\n## ${at} (events ${source.from} to ${source.to})\n\n${body}\n`
 }
 
 /** The trailer that names a conversation a commit learned from. */

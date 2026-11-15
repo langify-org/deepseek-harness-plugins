@@ -100,8 +100,8 @@ catalogs:
       specifier: 8.18.2
       version: 8.18.2
     '@wterm/dom':
-      specifier: 0.5.9
-      version: 0.5.9
+      specifier: 0.5.10
+      version: 0.5.10
     ws:
       specifier: 8.22.1
       version: 8.22.1
@@ -319,7 +319,7 @@ importers:
         version: 8.18.2
       '@wterm/dom':
         specifier: 'catalog:'
-        version: 0.5.9
+        version: 0.5.10
 
 packages:
 
@@ -4333,11 +4333,11 @@ packages:
   '@vscode/ripgrep@1.18.0':
     resolution: {integrity: sha512-ns5lWe44tSfbTMbVUsyB+I1819PVSw4AdpgK0RNkzfWfwy6+3IUNSxwSrfTno1/oWaS/hERNz+XLWVyga2aJBQ==}
 
-  '@wterm/core@0.5.9':
-    resolution: {integrity: sha512-+S5VA/CGmbU60PnN8PrE8i0hWBbzUzdrbjRYsnaioMum7alubzgRQ7IJ+SWCeymX6lKA6SfzfdkdYsNffTLA1Q==}
+  '@wterm/core@0.5.10':
+    resolution: {integrity: sha512-kVzgs094y/9z/w2IVaYUd75F+bUFa14cn7uhec0g9QDI1kalh8W7Ft6ckOER478gncsPrf7a9oRf1bAOe3ERgQ==}
 
-  '@wterm/dom@0.5.9':
-    resolution: {integrity: sha512-0Ghz0FVbtr6g4Frk8F3I92H9UjCsIbhjQ1X8U+tly9oF172qDq685mrRPBeI8XZ5OIXK2bLr+/XAEYPUmxzwBA==}
+  '@wterm/dom@0.5.10':
+    resolution: {integrity: sha512-Tcdig0gqVgqpoWB/i9pp4z3+ZI2Rf5MOeCy3geOuRvGSSXMGgeF6xcA/PD667tCe8Te47ldVeKYsM92uUgijCg==}
 
   '@xterm/addon-serialize@0.14.0':
     resolution: {integrity: sha512-uteyTU1EkrQa2Ux6P/uFl2fzmXI46jy5uoQMKEOM0fKTyiW7cSn0WrFenHm5vO5uEXX/GpwW/FgILvv3r0WbkA==}
@@ -10505,11 +10505,11 @@ snapshots:
       '@vscode/ripgrep-win32-ia32': 1.18.0
       '@vscode/ripgrep-win32-x64': 1.18.0
 
-  '@wterm/core@0.5.9': {}
+  '@wterm/core@0.5.10': {}
 
-  '@wterm/dom@0.5.9':
+  '@wterm/dom@0.5.10':
     dependencies:
-      '@wterm/core': 0.5.9
+      '@wterm/core': 0.5.10
 
   '@xterm/addon-serialize@0.14.0': {}
 

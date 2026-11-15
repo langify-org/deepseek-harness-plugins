@@ -1,0 +1,6 @@
+# Bundle layer: inserts the Exa providers. Choosing them stays with the profile
+# (`searchProvider: exa` and `fetchProvider: exa` on the `web` row): a bundle
+# must not redefine a row another bundle owns.
+- insert:
+    - id: langify-exa
+      name: '@langify-org/dsh-exa'

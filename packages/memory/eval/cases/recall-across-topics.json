@@ -1,0 +1,18 @@
+{
+  "about": "A fact learned under one topic is needed under another, whose own file says the opposite.",
+  "fixture": "base",
+  "steps": [
+    {
+      "do": "ask",
+      "key": "deploy",
+      "text": "kiln の移行の件。さっき家計の集計のデプロイが 7 割のところで落ちた。最初からやり直すしかないよね？"
+    }
+  ],
+  "checks": [
+    {
+      "name": "the answer uses the fact from the other topic",
+      "answer": "deploy",
+      "match": ["--resume"]
+    }
+  ]
+}

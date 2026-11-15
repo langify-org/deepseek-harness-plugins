@@ -1,0 +1,18 @@
+{
+  "about": "A fact learned under one project is needed under another, in a memory of realistic size.",
+  "fixture": "large",
+  "steps": [
+    {
+      "do": "ask",
+      "key": "q",
+      "text": "猫カメラの件。年末の帰省中（12/27〜1/3）に旅行先からカメラを見る準備、今のままで足りてる？"
+    }
+  ],
+  "checks": [
+    {
+      "name": "the answer uses the fact from the other project",
+      "answer": "q",
+      "match": ["12/20"]
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "about": "A promise with a day on it, asked for the next morning.",
+  "fixture": "base",
+  "steps": [
+    {
+      "do": "say",
+      "as": "club",
+      "text": "読書会の小野さんに、明日の午前中に次の課題本の候補を 3 冊送ると約束した。忘れそうなので覚えといて。（ツールは使わず「了解」とだけ返して）"
+    },
+    {
+      "do": "new-day"
+    },
+    {
+      "do": "ask",
+      "key": "today",
+      "text": "おはよう。今日やらなきゃいけないこと、何かあったっけ？"
+    }
+  ],
+  "checks": [
+    {
+      "name": "the promise is brought up",
+      "answer": "today",
+      "match": ["小野", "課題本|候補"]
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "about": "The same, for another tool.",
+  "fixture": "large",
+  "minutes": 40,
+  "steps": [
+    {
+      "do": "say",
+      "as": "kiln",
+      "text": "kiln の手順書に書いた：デプロイが途中で落ちたら、必ず最初からやり直す。途中から再開する方法は kiln には無い。覚えといて。（ツールは使わず「了解」とだけ返して）"
+    },
+    {
+      "do": "new-day"
+    },
+    {
+      "do": "ask",
+      "key": "q",
+      "text": "kiln のデプロイが途中で落ちたとき、いちばん早く済ませるにはどうすればいい？"
+    }
+  ],
+  "checks": [
+    {
+      "name": "the verified note survives the night",
+      "memory": "blog-move",
+      "match": ["--resume"]
+    },
+    {
+      "name": "where the new claim is written, the other note is named",
+      "memory": "kiln-migration",
+      "match": ["resume"]
+    },
+    {
+      "name": "the answer uses the verified fact",
+      "answer": "q",
+      "match": ["--resume"]
+    }
+  ]
+}

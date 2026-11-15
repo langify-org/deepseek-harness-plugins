@@ -1,0 +1,32 @@
+{
+  "about": "Turns that hold nothing to remember.",
+  "fixture": "base",
+  "steps": [
+    {
+      "do": "say",
+      "as": "chat",
+      "text": "ありがとう。（ツールは使わず「了解」とだけ返して）"
+    },
+    {
+      "do": "say",
+      "as": "chat",
+      "text": "OK。（ツールは使わず「了解」とだけ返して）"
+    },
+    {
+      "do": "say",
+      "as": "chat",
+      "text": "今日はここまでにする。おつかれ。（ツールは使わず「了解」とだけ返して）"
+    }
+  ],
+  "checks": [
+    {
+      "name": "the memory agents wrote nothing",
+      "noMemoryWritesBy": "memory-agent"
+    },
+    {
+      "name": "no episode was noted",
+      "memory": "^episodes/",
+      "absent": ["\\S"]
+    }
+  ]
+}

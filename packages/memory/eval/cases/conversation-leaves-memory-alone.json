@@ -1,0 +1,23 @@
+{
+  "about": "A conversation with file tools is told something to remember.",
+  "fixture": "base",
+  "steps": [
+    {
+      "do": "say",
+      "as": "tools",
+      "preset": "standard",
+      "text": "覚えといて：読書会の次の開催は 11 月 28 日の土曜に決まった。"
+    }
+  ],
+  "checks": [
+    {
+      "name": "the conversation itself wrote nothing to memory",
+      "noMemoryWritesBy": "conversation"
+    },
+    {
+      "name": "memory has it",
+      "memory": ".",
+      "match": ["11 ?月 ?28 ?日|11/28|11-28"]
+    }
+  ]
+}

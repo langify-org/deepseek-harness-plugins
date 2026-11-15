@@ -1,0 +1,18 @@
+{
+  "about": "A fact learned under one project is needed under another, in a memory of realistic size.",
+  "fixture": "large",
+  "steps": [
+    {
+      "do": "ask",
+      "key": "q",
+      "text": "kiln の移行の件。さっき家計の集計のデプロイが 7 割のところで落ちた。最初からやり直すしかないよね？"
+    }
+  ],
+  "checks": [
+    {
+      "name": "the answer uses the fact from the other project",
+      "answer": "q",
+      "match": ["--resume"]
+    }
+  ]
+}

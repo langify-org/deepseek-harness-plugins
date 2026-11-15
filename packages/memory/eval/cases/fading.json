@@ -1,0 +1,34 @@
+{
+  "about": "An episode older than the days episodes are kept: after a night it has left the directory, and what it established is still known.",
+  "fixture": "base",
+  "memory": {
+    "episodes/{{long-ago}}/0a1b2c3d.md": "# 庭のセンサーの電池\n\nNoted from the conversation session-0a1b2c3d-0000-4000-8000-000000000000, working in /home/minori/garden.\n\n## 21:10 (events 4 to 22)\n\nベランダの温湿度センサーの電池を、単 3 のアルカリから充電池（エネループ）に替えた。理由は、アルカリだと 9 日で切れて、月に 3 回の交換が面倒だったから。充電池にしてからは、10 分おきの読み取りで 11 週間もった（本人が記録を見て確認）。予備の充電池 4 本は、玄関の棚の 2 段目の青い箱にある。\n"
+  },
+  "steps": [
+    {
+      "do": "new-day"
+    },
+    {
+      "do": "ask",
+      "key": "q",
+      "text": "ベランダのセンサーの電池って、いま何を使ってて、予備はどこに置いたんだっけ？"
+    }
+  ],
+  "checks": [
+    {
+      "name": "the old episode has left the directory",
+      "memory": "^episodes/{{long-ago}}/",
+      "absent": ["."]
+    },
+    {
+      "name": "what it established is still known",
+      "memory": "^(?!episodes/)",
+      "match": ["青い箱"]
+    },
+    {
+      "name": "a later conversation is told it",
+      "answer": "q",
+      "match": ["充電池|エネループ", "青い箱"]
+    }
+  ]
+}

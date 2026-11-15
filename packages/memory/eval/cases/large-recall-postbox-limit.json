@@ -1,0 +1,18 @@
+{
+  "about": "A fact learned under one project is needed under another, in a memory of realistic size.",
+  "fixture": "large",
+  "steps": [
+    {
+      "do": "ask",
+      "key": "q",
+      "text": "読書会アプリの件。来週、会員と OB 合わせて 320 人に案内メールを 1 日で一斉に送りたい。postbox でそのまま送って大丈夫？"
+    }
+  ],
+  "checks": [
+    {
+      "name": "the answer uses the fact from the other project",
+      "answer": "q",
+      "match": ["200"]
+    }
+  ]
+}

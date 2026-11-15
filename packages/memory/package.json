@@ -2,7 +2,7 @@
   "name": "@langify-org/dsh-memory",
   "version": "0.1.0",
   "private": true,
-  "description": "Give DeepSeek Harness a memory directory that a scribe agent keeps up to date from every conversation",
+  "description": "Give DeepSeek Harness a memory: episodes noted from every conversation, knowledge made from them overnight, and recall when something said calls for it",
   "keywords": [
     "deepseek-harness",
     "dsh",
@@ -20,7 +20,8 @@
   "files": [
     "dist",
     "cordis.patch.yml",
-    "README*.md"
+    "README*.md",
+    "DESIGN*.md"
   ],
   "type": "module",
   "exports": {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { indexHead, parseCommits } from './delivery.ts'
+import { baselineText, indexHead, parseCommits, recallText, todayText } from './delivery.ts'
 
 describe('parseCommits', () => {
   it('separates each message from its source trailers', () => {
@@ -31,5 +31,39 @@ describe('indexHead', () => {
     expect(indexHead('記憶\n記憶\n記憶', { lines: 10, bytes: 8 })).toBe(
       '記憶\n\n(2 more lines in MEMORY.md)',
     )
+  })
+})
+
+describe('baselineText', () => {
+  it('names the files of episodes that what is known does not hold yet', () => {
+    const text = baselineText('/memory', '0123456789abcdef', '# Memory', [
+      { file: 'episodes/2026-11-15/1234abcd.md', title: 'Cat camera' },
+    ])
+    expect(text).toContain('<memory version="0123456">')
+    expect(text).toContain('- episodes/2026-11-15/1234abcd.md: Cat camera')
+  })
+
+  it('says nothing of episodes when all are part of what is known', () => {
+    expect(baselineText('/memory', '0123456789abcdef', '# Memory', [])).not.toContain('episodes')
+  })
+})
+
+describe('what is put beside what was said', () => {
+  const line = {
+    file: 'projects/cat.md',
+    line: 12,
+    text: '- postbox drops what is over 200 a day.',
+  }
+
+  it('shows each recalled line with where it is', () => {
+    expect(recallText([line])).toContain(
+      '- projects/cat.md:12: - postbox drops what is over 200 a day.',
+    )
+  })
+
+  it('shows the lines that name today under its date', () => {
+    const text = todayText('2026-11-16', [line])
+    expect(text).toContain('<memory-today date="2026-11-16">')
+    expect(text).toContain('- projects/cat.md:12:')
   })
 })

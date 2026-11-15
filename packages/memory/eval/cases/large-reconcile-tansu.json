@@ -1,0 +1,37 @@
+{
+  "about": "A procedure is stated that a verified note under another project contradicts; then a night; then the question.",
+  "fixture": "large",
+  "minutes": 40,
+  "steps": [
+    {
+      "do": "say",
+      "as": "club",
+      "text": "読書会アプリの手順書に書いた：tansu のマイグレーションは取り消せないので、失敗したら必ず事前のコピーから戻す。覚えといて。（ツールは使わず「了解」とだけ返して）"
+    },
+    {
+      "do": "new-day"
+    },
+    {
+      "do": "ask",
+      "key": "q",
+      "text": "読書会アプリでマイグレーションを 1 つ間違えて流してしまった。どう直すのがいちばん早い？"
+    }
+  ],
+  "checks": [
+    {
+      "name": "the verified note survives the night",
+      "memory": "household",
+      "match": ["tansu rollback"]
+    },
+    {
+      "name": "where the new claim is written, the other note is named",
+      "memory": "reading-club",
+      "match": ["rollback"]
+    },
+    {
+      "name": "the answer uses the verified fact",
+      "answer": "q",
+      "match": ["rollback"]
+    }
+  ]
+}

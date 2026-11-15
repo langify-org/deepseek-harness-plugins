@@ -64,7 +64,7 @@ export function baselineText(
   const body =
     index === undefined
       ? 'Its index, MEMORY.md, is missing.'
-      : `The beginning of its index, MEMORY.md, follows; the files it points to hold the rest.\n\n${index}`
+      : `The beginning of its index, MEMORY.md, follows; the files it points to hold the rest. The index names topics, not what was learned: earlier conversations may already have worked out what comes up in this one, and a search of the directory for the subject finds it.\n\n${index}`
   return [
     `<memory version="${short(version)}">`,
     `This is your memory of earlier conversations with this user, kept in ${directory}. You do not keep it yourself: after each of your turns, an agent records there what this conversation said that is worth remembering, including whatever the user asks you to remember.`,

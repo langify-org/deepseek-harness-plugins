@@ -76,7 +76,7 @@ It runs on `tidyProvider`, `tidyModel` and `tidyReasoningEffort`. To tidy now, a
 
 Before a step of a turn, a conversation is given memory, so a long turn is told of a change while it goes on:
 
-- The first time, the beginning of `MEMORY.md` (`indexLines` and `indexBytes`) and its version. It is told there that it does not keep memory itself: an agent records what it said after each turn, including what you ask it to remember. Without that, a conversation edits the files itself when you say "remember this".
+- The first time, the beginning of `MEMORY.md` (`indexLines` and `indexBytes`) and its version. It is told there that it does not keep memory itself: an agent records what it said after each turn, including what you ask it to remember. Without that, a conversation edits the files itself when you say "remember this". It is also told that the index names topics, not what was learned, and that a search of the directory for a subject finds what earlier conversations worked out. Without that, a conversation reads only the file the index names for its topic: asked about something an earlier conversation had settled and noted in another topic's file, two of two answered wrongly, and with the sentence two of two found the note.
 - Afterwards, when memory changed, the names of the files that changed, unless the conversation itself was the only source of the changes. Most changes come from conversations about something else, so a conversation is told where to look and reads what concerns it.
 - `MEMORY.md` again when compaction hid it.
 

@@ -49,7 +49,7 @@ On start, the plugin creates the memory directory as a git repository, keeping w
 
 - `AGENTS.md`: your guidance, what memory is for. Every memory agent is given it, so this is where you say what matters to you and in which language to write. It starts with what memory is for, not how to keep it: strong models remember better when they judge what is worth keeping themselves. The plugin never changes it once it exists.
 - `MEMORY.md` and the files it points to: **what is known**, by subject. `MEMORY.md` is the index.
-- `episodes/<day>/<conversation>.md`: **the record**. What a scribe noted of one conversation on one day, entry by entry, each under the time and the events it is about. The plugin appends to these files and nothing rewrites them.
+- `episodes/<day>/<conversation>.md`: **the record**. What a scribe noted of one conversation on one day, entry by entry, each under a heading that gives the time and the events it is about; headings in an entry itself are moved two levels down. The plugin appends to these files and nothing rewrites them.
 
 It also registers the directory as the **memory** workspace, and adds the **Memory** agent preset (`langify-memory`) that the memory agents run on. Its tools are `read`, `edit`, `apply_patch`, `glob` and `grep`, and scribes are left only the three that read: there is no shell, web or subagent tool, and the plugin hides the profile's global tools (MCP servers, browser control and so on) from agents on this preset. Its system prompt holds what every memory agent needs to know of the mechanisms; what one agent is there to do is the beginning of its first message. No instruction files, skills or runtime details are added.
 

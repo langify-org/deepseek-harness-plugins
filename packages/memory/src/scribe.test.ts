@@ -28,6 +28,22 @@ describe('a file of episodes', () => {
     ])
   })
 
+  it('keeps a reply that has headings of its own as one entry', () => {
+    const file =
+      episodeHead(source) +
+      episodeEntry(
+        source,
+        '14:21',
+        '## 14:20 Cat camera\n\nRecordings stay at home.\n\n# Why\n\nThe room.',
+      )
+    expect(episodeEntries(file)).toEqual([
+      {
+        heading: '14:21 (events 4 to 18)',
+        entry: '#### 14:20 Cat camera\n\nRecordings stay at home.\n\n### Why\n\nThe room.',
+      },
+    ])
+  })
+
   it('has no entries before any was appended', () => {
     expect(episodeEntries(episodeHead(source))).toEqual([])
   })

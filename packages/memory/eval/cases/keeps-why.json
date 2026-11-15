@@ -1,0 +1,36 @@
+{
+  "about": "A decision and its reason, asked for after a night.",
+  "fixture": "base",
+  "steps": [
+    {
+      "do": "say",
+      "as": "cat",
+      "text": "猫カメラの件。録画の保存先を決めた。クラウドには置かず、家の hinoki にだけ置く。理由は 2 つ。むぎの映像に部屋の中が映るので外に出したくないのと、月額の費用を払いたくないから。（ツールは使わず「了解」とだけ返して）"
+    },
+    {
+      "do": "say",
+      "as": "cat",
+      "text": "あと、保存は 7 日じゃなくて 14 日にする。旅行が 10 日あるので、帰ってから見返したい。（ツールは使わず「了解」とだけ返して）"
+    },
+    {
+      "do": "new-day"
+    },
+    {
+      "do": "ask",
+      "key": "why",
+      "text": "猫カメラの録画をクラウドに置かないことにしたのは、なぜだっけ？あと保存は何日で、その理由は？"
+    }
+  ],
+  "checks": [
+    {
+      "name": "the reason for the decision is recalled",
+      "answer": "why",
+      "match": ["部屋|外に出", "費用|月額"]
+    },
+    {
+      "name": "the changed value and its reason are recalled",
+      "answer": "why",
+      "match": ["14", "旅行"]
+    }
+  ]
+}

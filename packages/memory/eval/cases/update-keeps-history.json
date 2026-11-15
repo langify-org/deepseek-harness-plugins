@@ -1,0 +1,41 @@
+{
+  "about": "A value that changed three times: the present one, and what it was at first.",
+  "fixture": "base",
+  "steps": [
+    {
+      "do": "say",
+      "as": "club",
+      "text": "読書会アプリ。次の課題本の投票の締め切りを、開催の 7 日前にする。（ツールは使わず「了解」とだけ返して）"
+    },
+    {
+      "do": "say",
+      "as": "club",
+      "text": "やっぱり 5 日前にする。7 日前だと早すぎると小野さんに言われた。（ツールは使わず「了解」とだけ返して）"
+    },
+    {
+      "do": "say",
+      "as": "club",
+      "text": "最終的に、投票の締め切りは開催の 4 日前で確定。出欠の締め切り（3 日前）の前日にそろえた。（ツールは使わず「了解」とだけ返して）"
+    },
+    {
+      "do": "new-day"
+    },
+    {
+      "do": "ask",
+      "key": "now",
+      "text": "読書会アプリの課題本の投票、締め切りは開催の何日前にしたんだっけ？最初の案は何日前だった？"
+    }
+  ],
+  "checks": [
+    {
+      "name": "the present value",
+      "answer": "now",
+      "match": ["4 ?日前"]
+    },
+    {
+      "name": "the first value",
+      "answer": "now",
+      "match": ["7 ?日前"]
+    }
+  ]
+}

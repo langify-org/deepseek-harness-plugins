@@ -1,0 +1,18 @@
+{
+  "about": "A fact learned under one project is needed under another, in a memory of realistic size.",
+  "fixture": "large",
+  "steps": [
+    {
+      "do": "ask",
+      "key": "q",
+      "text": "写真の整理の件。動画もふくめて tsumugi の夜のバックアップに入ってるから、古い外付けディスクの写しは消していいよね？"
+    }
+  ],
+  "checks": [
+    {
+      "name": "the answer uses the fact from the other project",
+      "answer": "q",
+      "match": ["2 ?GB|--large|nobackup"]
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "about": "A promise for today, written days ago in a project file and not in the index, asked for on the day.",
+  "fixture": "base",
+  "memory": {
+    "projects/reading-club.md": "# 読書会アプリ\n\n- 友人 9 人の読書会の出欠と、次に読む本の投票。\n- 出欠の締め切りは開催の 3 日前。締め切り後の変更は幹事（小野さん）に直接連絡する決まり。\n- データベースは SQLite のファイル 1 つ。\n- 通知はメールだけ。LINE 連携は、公式アカウントの費用がかかるのでやめた。\n- 次の開催は月末の土曜、課題本は未定。\n- {{today}} の 15 時までに、小野さんへ次の課題本の候補を 3 冊送る約束（先週の読書会で本人が約束した）。\n- {{yesterday}} に会場の予約を確認した。\n"
+  },
+  "steps": [
+    {
+      "do": "ask",
+      "key": "today",
+      "preset": "minimal",
+      "text": "おはよう。今日やらなきゃいけないこと、何かあったっけ？"
+    }
+  ],
+  "checks": [
+    {
+      "name": "the promise for today is brought up",
+      "answer": "today",
+      "match": ["小野", "課題本|候補"]
+    }
+  ]
+}

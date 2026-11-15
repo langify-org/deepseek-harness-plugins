@@ -1,12 +1,15 @@
 // What the plugin says to the memory agents and what it writes for them: the
 // first files of the memory directory, the messages that hand a scribe its
-// conversation part by part, the message that asks for the directory to be
-// tidied, and the commit message made from the reply that ends a turn.
+// conversation part by part, the entries it makes of a scribe's replies, the
+// message that asks for what is known to be brought up to date, and commit
+// messages.
 //
 // What every memory agent needs to know of the plugin's mechanisms is the memory
 // preset's system prompt (cordis.patch.yml). What one agent is there to do is the
 // beginning of its first message, here. What to remember is the user's, in the
 // directory's AGENTS.md, which the plugin only starts and quotes.
+
+import type { NoteLine } from './related.ts'
 
 /** The file that holds the user's guidance, and the one that holds the index. */
 export const GUIDANCE_FILE = 'AGENTS.md'
@@ -30,12 +33,18 @@ export const MEMORY_MD = `# Memory
 Nothing is remembered yet.
 `
 
+/** The directory, in the memory directory, of what the scribes note: the record, never rewritten. */
+export const EPISODES = 'episodes'
+
+/** A scribe's whole reply to a part that holds nothing to note. */
+export const NOTHING = '(nothing)'
+
 /** What a scribe is there to do: the beginning of its first message. */
-const SCRIBE = `You record one conversation, part by part. This message gives you the user's guidance, the beginning of the index, what the conversation said before you came to it, and the first part to record. After each later turn of the conversation, a message gives you the next part, after the names of the files that other agents changed since your last turn.
+const SCRIBE = `You note one conversation, part by part, as it goes. This message gives you the user's guidance, the beginning of the index of what is known, what the conversation said before you came to it, and the first part. After each later turn of the conversation, a message gives you the next part.
 
-Write to the directory when the user asks for something to be remembered, or when a part holds something clearly worth remembering: something you expect a later conversation to need. Most parts hold nothing of the kind, and then you change nothing.
+Your reply to a part is its entry in the day's record of this conversation. The memory plugin puts it, under the time, at the end of a file in ${EPISODES}/ that is not rewritten afterwards; you write no file yourself. A later conversation finds the entry when it searches for what was said, and tonight another agent brings what is known up to date from the day's entries. Neither sees this conversation, so the entry has to stand on its own and hold what they need from it and cannot get elsewhere: what was decided and why, what was learned and how it is known, what was promised and for which date, what changed and from what. A reader on another day cannot tell which day "tomorrow" was. A part that holds nothing of the kind gets no entry: reply with exactly ${NOTHING}. Most parts do.
 
-The part to record comes last in a message: it starts after a line that names its events, like "=== events 12 to 34 ===", and runs to the end of the message. You stay with this conversation for the day. The agent that takes your place afterwards starts from the directory and the last of what the conversation said, not from what you have in mind.`
+The part comes last in a message: it starts after a line that names its events, like "=== events 12 to 34 ===", and runs to the end of the message. You stay with this conversation for the day, and what you noted before is in your own replies.`
 
 /** How much of the index every conversation is given. */
 export interface IndexShare {
@@ -49,25 +58,103 @@ export interface Kept {
   readonly days: number
 }
 
+/** One entry of an episode, and the lines of what is known that share the most words with it. */
+export interface Compared {
+  readonly file: string
+  /** The entry's heading: when it was noted and the events it is about. */
+  readonly heading: string
+  readonly entry: string
+  readonly lines: readonly NoteLine[]
+}
+
+/** The entries of a file of episodes: each heading and what was noted under it. */
+export function episodeEntries(text: string): { heading: string; entry: string }[] {
+  return text
+    .split(/^## /m)
+    .slice(1)
+    .map((part) => {
+      const [heading = '', ...rest] = part.split('\n')
+      return { heading: heading.trim(), entry: rest.join('\n').trim() }
+    })
+    .filter(({ entry }) => entry !== '')
+}
+
+/** A line of a note as it is shown beside something it may be about. */
+export function shown(line: NoteLine): string {
+  const text = line.text.length <= LINE_CHARS ? line.text : `${line.text.slice(0, LINE_CHARS)}…`
+  return `${line.file}:${line.line}: ${text}`
+}
+
+/** How much of a long line is shown; the rest is in its file. */
+const LINE_CHARS = 400
+
 /**
- * The first message of a day's memory conversation: tidy the directory. It is
- * the conversation's only turn; after it the conversation holds the day's scribes.
+ * The message before what is known is brought up to date: each new entry beside
+ * the lines of what is known that it may be about, and the question whether they
+ * agree. A model that only has two notes in front of it does not compare them;
+ * asked about the pair, it does.
  */
-export function tidyRequest(guidance: string | undefined, share: IndexShare, kept: Kept): string {
+export function compareRequest(compared: readonly Compared[]): string {
   return [
-    `You tidy the memory directory. Through the day, conversations wrote to it: each had a scribe that saw only its own conversation, a turn at a time, without knowing what would matter later or what the other scribes wrote. You have the whole directory and the time to read all of it. Leave it as a later conversation would want to find it.`,
+    `Before what memory knows is brought up to date, compare. Below are the entries that scribes noted from conversations since the last time. Under each are the lines of what is known that share the most words with it: some are about the same thing, some only look so.`,
     '',
-    '- A later conversation needs how things stand and what was learned, not the order in which it came out. Notes written a turn at a time pile up as a chronicle: drafts that were replaced, states that have since changed, the same thing in several places.',
-    `- The beginning of ${INDEX_FILE} (at most ${share.indexLines} lines or ${share.indexBytes} bytes) is all that most conversations ever read of memory, and most of them are about something else: it has to be short, and to say where the rest is.`,
+    'For each entry, name the lines it disagrees with or makes out of date, and say in a sentence what each side says. Say nothing about the other lines; where there is none, say: none. Change no file yet: the next message asks for the changes.',
+    ...compared.flatMap(({ file, heading, entry, lines }) => [
+      '',
+      `=== ${file}, ${heading} ===`,
+      entry,
+      '',
+      ...(lines.length === 0
+        ? ['(No line of what is known shares words with it.)']
+        : lines.map((line, index) => `${index + 1}. ${shown(line)}`)),
+    ]),
+  ].join('\n')
+}
+
+/** The episodes that what is known does not hold yet, and how long episodes stay. */
+export interface Episodes {
+  /** Files, as paths in the memory directory. */
+  readonly added: readonly string[]
+  /** Whether their entries were just compared with what is known. */
+  readonly compared: boolean
+  readonly days: number
+}
+
+/**
+ * The first message of a day's memory conversation: bring what is known up to
+ * date from the episodes. It is the conversation's only turn; after it the
+ * conversation holds the day's scribes.
+ */
+export function consolidateRequest(
+  guidance: string | undefined,
+  share: IndexShare,
+  kept: Kept,
+  episodes: Episodes,
+): string {
+  return [
+    `You bring what memory knows up to date. The directory holds two kinds of files. Those in ${EPISODES}/ are the record: what a scribe noted of each conversation as it went, a file for each conversation and day. They stay as they are. All the others are what is known: how things stand and what was learned, by subject, with ${INDEX_FILE} as their index. Once a day, now, what the new episodes hold becomes part of what is known. Leave what is known as a later conversation would want to find it.`,
+    '',
+    ...(episodes.added.length === 0
+      ? ['No episodes were added since the last time.']
+      : ['Episodes added since the last time:', ...episodes.added.map((file) => `- ${file}`)]),
+    '',
+    `- A later conversation is given the beginning of ${INDEX_FILE} (at most ${share.indexLines} lines or ${share.indexBytes} bytes) and reads the file it names for the subject at hand. It reads an episode only when it searches. So what an episode established has to be where that conversation will look: under the subject it is about, which is often not the conversation it came up in. What was learned about a tool while working on one project is needed by the next project that uses the tool.`,
+    ...(episodes.compared
+      ? [
+          '- You have just compared the new entries with what was known. A decision or a state of things can change, and then what is known says the new one. A statement about how something works does not become true by being newer, or by who made it: where two of those disagree, one of them is wrong, and which is not known until it is checked against the thing itself, the code or the document. Until then both places say that they disagree and what the other says, so that a conversation that reads only one of them is not misled.',
+        ]
+      : []),
+    `- An episode holds why something was decided and how something is known. What is known can say it in a few words and name the episode's file for the rest.`,
+    `- Episodes older than ${episodes.days} days leave the directory. What is to be known for longer has to be in a file outside ${EPISODES}/ by then.`,
+    '- What was promised or planned for a day has to be where a conversation on that day sees it without looking for it.',
     `- What the scribes were given of the conversations in the last ${kept.days} days is kept in ${kept.directory}: a directory for each day, a file for each conversation. A note you doubt can be checked there against what the conversation said.`,
-    "- What only a conversation said is nowhere else once it leaves this directory: a decision and its reason, an amount, what someone is waiting for, what was tried and did not work. What one of the user's own files holds, a later conversation can read there, and memory needs only to say where it is. You can read those files too.",
-    "- What you remove, no later conversation will see: they cannot read the directory's history, and neither can you. The user can, and can bring anything back.",
-    '- Notes say when they were written, and the time now is given to you.',
+    "- What one of the user's own files holds, a later conversation can read there, and memory needs only to say where it is. You can read those files too.",
+    '- The time now is given to you.',
     '',
     ...(guidance === undefined
       ? []
       : [`The user's guidance, ${GUIDANCE_FILE}:`, '', guidance.trim(), '']),
-    'This conversation also holds the scribes of the day that follows, as its subagents. When this turn ends it has nothing more to do.',
+    'Your reply becomes the commit message of your changes: write it for someone reading the history of memory. This conversation also holds the scribes of the day that follows, as its subagents. When this turn ends it has nothing more to do.',
   ].join('\n')
 }
 
@@ -99,7 +186,7 @@ function partLine(source: ScribeSource): string {
   return `=== events ${source.from} to ${source.to} ===`
 }
 
-/** A part as it is kept for the tidying agent: the conversation and its events, then the part. */
+/** A part as it is kept beside the directory: the conversation and its events, then the part. */
 export function keptPart(source: ScribeSource, transcript: string): string {
   const title = source.title === undefined ? '' : ` "${source.title}"`
   const cwd = source.cwd === undefined ? '' : `, working in ${source.cwd}`
@@ -148,22 +235,20 @@ export function firstRequest(
   ].join('\n')
 }
 
-/**
- * A scribe's message for a later turn of its conversation: the next part to
- * record, after the files of memory that others changed since its last turn.
- */
-export function nextRequest(
-  source: ScribeSource,
-  changed: readonly string[],
-  transcript: string,
-): string {
-  return [
-    ...(changed.length === 0
-      ? []
-      : [`Changed by others since your last turn: ${changed.join(', ')}.`, '']),
-    partLine(source),
-    transcript,
-  ].join('\n')
+/** A scribe's message for a later turn of its conversation: the next part. */
+export function nextRequest(source: ScribeSource, transcript: string): string {
+  return [partLine(source), transcript].join('\n')
+}
+
+/** How a conversation's file of episodes for one day begins. */
+export function episodeHead(source: ScribeSource): string {
+  const cwd = source.cwd === undefined ? '' : `, working in ${source.cwd}`
+  return `# ${source.title ?? source.sessionId}\n\nNoted from the conversation ${source.sessionId}${cwd}.\n`
+}
+
+/** One entry of that file: when it was noted, the events it is about, and the scribe's reply. */
+export function episodeEntry(source: ScribeSource, at: string, entry: string): string {
+  return `\n## ${at} (events ${source.from} to ${source.to})\n\n${entry.trim()}\n`
 }
 
 /** The trailer that names a conversation a commit learned from. */

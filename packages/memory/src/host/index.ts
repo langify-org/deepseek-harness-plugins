@@ -1,45 +1,58 @@
 // Host: keeps a memory directory up to date from every conversation, and gives
 // conversations what it holds.
 //
-// Writing: when a conversation's turn ends, the part of it not read yet goes to
+// The directory holds two kinds of files, as memory does. Episodes are the record
+// of what conversations said, noted as they went and never rewritten. The other
+// files are what is known, by subject, made from the episodes once a day.
+//
+// Noting: when a conversation's turn ends, the part of it not read yet goes to
 // the conversation's scribe, a subagent of the day's memory conversation in the
-// memory directory's workspace. One scribe works at a time; the changes of its turn become one
-// commit whose message is its reply. A turn that ends in any other conversation
-// in that workspace (someone working on memory there) is committed the same way.
+// memory directory's workspace. The scribe's reply is the part's entry, and the
+// plugin appends it to the conversation's file of episodes for the day: a scribe
+// writes no file, so it can neither reorganize nor overwrite. One scribe works at
+// a time, and an entry is one commit.
 //
 // A conversation keeps one scribe for the day, so the scribe knows what it
-// already recorded and its history is read from the prompt cache. A scribe that
-// is new to a conversation nearly always writes something on its first turn, so
-// every handover adds to memory what no one needed; a scribe is therefore
+// already noted and its history is read from the prompt cache. A scribe that
+// is new to a conversation nearly always notes something on its first turn, so
+// every handover adds what no one needed; a scribe is therefore
 // replaced only when the day's memory conversation is, or when its context grew
 // past `continueTokens`, a guard against a runaway one. The new scribe starts
 // from the user's guidance, the index, and the end of what the conversation said.
 // DSH's compaction cannot stand in for the replacement: its request to condense
-// comes after the part to record, which runs to the end of the message, so the
+// comes after the part to note, which runs to the end of the message, so the
 // scribe takes it for more of the conversation (35 of 58 attempts failed so).
 //
-// Tidying: a day's memory conversation starts when the day does, and its first
-// turn, its only one, goes through the whole directory: what the scribes wrote a
-// turn at a time, each seeing one conversation, is left as a later conversation
-// would want to find it. Scribes wait until it is done. After it the memory
-// conversation only holds the day's scribes. What the scribes were given is kept
-// beside the directory for some days, so a note can be checked against what the
-// conversation said.
+// Consolidating: a day's memory conversation starts when the day does, and its
+// first turns bring what is known up to date from the episodes added since the
+// last time: each new entry is set beside the lines it may be about, with the
+// question which of them it disagrees with, and then what the episodes
+// established goes under the subject it is about. Scribes wait until it is
+// done. After it the memory conversation only holds the day's scribes, and
+// episodes older than `episodeDays` leave the directory. A night that did not
+// complete leaves its episodes to the next. What the scribes were
+// given is kept beside the directory for some days, so a note can be checked
+// against what the conversation said. A turn that ends in any other conversation
+// of the memory workspace (someone working on memory there) is committed with its
+// reply.
 //
 // The memory conversation and its scribes run on the memory preset (declared in
-// cordis.patch.yml): file tools and nothing else.
+// cordis.patch.yml): file tools and nothing else, and for scribes only those that read.
 //
 // Reading: before a step of a conversation, it is given the beginning of the
-// index the first time, and afterwards the names of the files that other
-// conversations' scribes changed. A long turn is told while it goes on.
+// index and the names of the files of episodes not yet in what is known the
+// first time, and afterwards the names of the files that changed; a long turn
+// is told while it goes on. When something is said in it, it is also given the
+// lines of the current notes that what was said calls for, and on the first
+// time of a day those that name the day.
 /// <reference types="@deepseek-ai/dsh-agent-preset-registry" />
 /// <reference types="@deepseek-ai/dsh-api-session-controller" />
 /// <reference types="@deepseek-ai/dsh-session-query" />
 /// <reference types="@deepseek-ai/dsh-session-title" />
 /// <reference types="@deepseek-ai/dsh-subagent" />
 /// <reference types="@deepseek-ai/dsh-tools" />
-import { appendFile, mkdir, readdir, readFile, realpath, rm } from 'node:fs/promises'
-import { join, sep } from 'node:path'
+import { appendFile, mkdir, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { dirname, join, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
 import {
@@ -58,17 +71,32 @@ import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import type { Workspace } from '@deepseek-ai/dsh-workspace'
 import Schema from '@deepseek-ai/schemastery'
 import { z } from 'zod'
-import { baselineText, indexHead, updateText } from '../delivery.ts'
+import {
+  baselineText,
+  indexHead,
+  recallText,
+  todayText,
+  updateText,
+  type Recent,
+} from '../delivery.ts'
+import { naming, noteLines, recall, scored, type NoteLine } from '../related.ts'
 import {
   AGENTS_MD,
   commitMessage,
+  compareRequest,
+  consolidateRequest,
+  EPISODES,
+  episodeEntries,
+  episodeEntry,
+  episodeHead,
+  type Compared,
   GUIDANCE_FILE,
   INDEX_FILE,
   MEMORY_MD,
+  NOTHING,
   firstRequest,
   keptPart,
   nextRequest,
-  tidyRequest,
   type ScribeSource,
 } from '../scribe.ts'
 import { renderContext, renderTranscript, unreadFrom } from '../transcript.ts'
@@ -77,6 +105,7 @@ import { Repository } from './repository.ts'
 export const name = 'langify-memory'
 
 const CONTEXT_KIND = 'langify-memory'
+const RECALL_KIND = 'langify-memory-recall'
 const DAY_KIND = 'langify-memory-day'
 const PROJECTION_KEY = 'langifyMemory'
 
@@ -86,6 +115,8 @@ declare module '@deepseek-ai/dsh-llm' {
     'langify-memory': { kind: 'langify-memory'; version: string; baseline?: true } & ContextFormed
     /** The first message of a day's memory conversation, which asks it to tidy the directory. */
     'langify-memory-day': { kind: 'langify-memory-day' }
+    /** Lines of memory put beside what was just said in a conversation. */
+    'langify-memory-recall': { kind: 'langify-memory-recall' } & ContextFormed
   }
 }
 
@@ -120,6 +151,7 @@ export interface Config {
   continueTokens: number
   transcripts?: string
   transcriptDays: number
+  episodeDays: number
   indexLines: number
   indexBytes: number
 }
@@ -180,6 +212,11 @@ export const Config: Schema<Config> = Schema.object({
   transcriptDays: Schema.natural()
     .default(7)
     .description('Days for which what the scribes were given is kept.'),
+  episodeDays: Schema.natural()
+    .default(30)
+    .description(
+      'Days for which episodes stay in the directory. What is to be known for longer is in the other files by then; git keeps the rest.',
+    ),
   indexLines: Schema.natural()
     .default(200)
     .description('Lines of MEMORY.md a conversation is given when it starts.'),
@@ -193,10 +230,10 @@ interface Scribe {
   readonly id: string
   /** The memory conversation it is a subagent of. */
   readonly parent: string
-  /** The commit memory was at when its last turn ended. */
-  readonly seen: string
   /** Its context after its last turn, in tokens. */
   readonly tokens: number
+  /** What it was told a scribe does: a scribe goes on only under what it was started with. */
+  readonly protocol?: number | undefined
 }
 
 /**
@@ -205,7 +242,10 @@ interface Scribe {
  */
 const domain = defineDomain({
   name: 'langify_memory',
-  version: 1,
+  // 2: `marks`, and a scribe's `protocol` in place of the commit it last saw. What 1 stored is
+  // read as it is: a scribe without a protocol is one of the earlier kind and is not gone on with.
+  version: 2,
+  compatibleVersions: [1],
   tables: {
     /** Conversation id → the last event a scribe recorded. */
     read: domainTable<string, { seq: number }>(z.object({ seq: z.number() })),
@@ -213,8 +253,15 @@ const domain = defineDomain({
     scribes: domainTable<string, { sessionId: string }>(z.object({ sessionId: z.string() })),
     /** Conversation id → its scribe. Kept across restarts: a restart is no reason for a new scribe. */
     conversations: domainTable<string, Scribe>(
-      z.object({ id: z.string(), parent: z.string(), seen: z.string(), tokens: z.number() }),
+      z.object({
+        id: z.string(),
+        parent: z.string(),
+        tokens: z.number(),
+        protocol: z.number().optional(),
+      }),
     ),
+    /** `consolidated` → the commit up to which the episodes are part of what is known. */
+    marks: domainTable<string, { head: string }>(z.object({ head: z.string() })),
   },
 })
 
@@ -262,6 +309,38 @@ interface ScribeTurn {
 /** How long a scribe that goes on has for one turn before it is stopped. */
 const SCRIBE_TURN_MS = 600_000
 
+/** Which account of a scribe's work the scribes are given: 2 since they reply with entries and write no file. */
+const SCRIBE_PROTOCOL = 2
+
+/** The memory preset's tools that change files. */
+const WRITING = ['edit', 'apply_patch']
+
+/** How many files of episodes a conversation is told of when it starts: the newest. */
+const RECENT = 40
+
+/**
+ * How many lines are put beside a new entry, and how many of them from one
+ * file; and how many beside all the entries of a day, down to how few beside one.
+ */
+const COMPARED = 10
+const PER_FILE = 2
+const COMPARED_IN_ALL = 300
+const COMPARED_LEAST = 3
+
+/**
+ * What is put beside what a conversation said: all the lines that have a name
+ * from it that few lines have, then the lines that share the most words with
+ * it. The measure of shared words grows with what was said: a question of a few
+ * sentences reaches 30, "thanks" or a question about something else 13.
+ */
+const RECALL = { lines: 14, rare: 12, shared: 8, perFile: PER_FILE, floor: 15 }
+
+/** How many lines that name today a conversation is shown. */
+const TODAY = 20
+
+/** Git's name for a tree with nothing in it: what every file differs from. */
+const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+
 /** Services this plugin uses whose published declarations it cannot import. */
 export interface Services {
   readonly sessionProjections: Projections
@@ -290,6 +369,7 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
   const read = store.table('read')
   const days = store.table('scribes')
   const scribes = store.table('conversations')
+  const marks = store.table('marks')
   const projections = ctx.sessionProjections
   const warn = (what: string) => (error: unknown) =>
     ctx.logger.warn(`memory: ${what}: ${messageOf(error)}`)
@@ -300,6 +380,8 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     const head = await repository.head()
     return { head, index: await repository.show(head, INDEX_FILE) }
   }
+  /** How the last turn of each memory conversation ended. */
+  const endings = new Map<string, string>()
   // Commits one at a time, in the order the turns ended.
   let committing: Promise<unknown> = Promise.resolve()
   const commit = (message: string): Promise<void> => {
@@ -337,19 +419,28 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     await mkdir(directory, { recursive: true, mode: 0o700 })
     await appendFile(join(directory, `${source.sessionId}.md`), keptPart(source, transcript))
   }
-  /** Drop the days older than `transcriptDays`. */
-  const forget = async (): Promise<void> => {
-    const oldest = day(Date.now() - config.transcriptDays * 86_400_000)
-    const kept = await readdir(transcripts).catch((error: unknown) => {
+  /** Remove the directories of the days more than `age` days ago from `root`; whether any was there. */
+  const dropDaysBefore = async (root: string, age: number): Promise<boolean> => {
+    const oldest = day(Date.now() - age * 86_400_000)
+    const kept = await readdir(root).catch((error: unknown) => {
       if (isMissing(error)) return []
       throw error
     })
-    for (const entry of kept) {
-      if (/^\d{4}-\d{2}-\d{2}$/.test(entry) && entry < oldest) {
-        await rm(join(transcripts, entry), { recursive: true, force: true })
-      }
-    }
+    const old = kept.filter((entry) => /^\d{4}-\d{2}-\d{2}$/.test(entry) && entry < oldest)
+    for (const entry of old) await rm(join(root, entry), { recursive: true, force: true })
+    return old.length > 0
   }
+  const forget = async (): Promise<void> => {
+    await dropDaysBefore(transcripts, config.transcriptDays)
+  }
+  /** The time of day, as an entry is headed. */
+  const time = (): string =>
+    new Intl.DateTimeFormat('en-GB', {
+      timeZone: config.timeZone,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(new Date())
 
   const workspace = async (): Promise<Workspace> =>
     (await ctx.workspaceRegistry.resolveByPath(config.directory)) ??
@@ -414,17 +505,86 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
       })
     }
     await forget().catch(warn('dropping old transcripts'))
-    const text = tidyRequest(
-      await memoryFile(GUIDANCE_FILE),
-      { indexLines: config.indexLines, indexBytes: config.indexBytes },
-      { directory: transcripts, days: config.transcriptDays },
+    const added = (await unconsolidated()).map(({ file }) => file)
+    const notes = await currentNotes()
+    const entries = added.flatMap((file) =>
+      episodeEntries(notes[file] ?? '').map(({ heading, entry }) => ({ file, heading, entry })),
     )
-    agent.followup(
-      createUserMessage({ content: [{ type: 'text', text }], source: { kind: DAY_KIND } }),
+    // On a day with many entries, each is set beside fewer lines: the best ones matter most.
+    const beside = Math.max(
+      COMPARED_LEAST,
+      Math.min(COMPARED, Math.floor(COMPARED_IN_ALL / (entries.length || 1))),
     )
-    await agent.whenIdle()
+    const pairs: Compared[] = entries.map(({ file, heading, entry }) => {
+      // An entry is set beside what the other files say, the other conversations' new episodes included.
+      const others = Object.fromEntries(Object.entries(notes).filter(([other]) => other !== file))
+      const lines = scored(entry, noteLines(others), beside, PER_FILE).map(({ line }) => line)
+      return { file, heading, entry, lines }
+    })
+    /** Give the conversation a turn; whether it completed. */
+    const ask = async (text: string): Promise<boolean> => {
+      agent.followup(
+        createUserMessage({ content: [{ type: 'text', text }], source: { kind: DAY_KIND } }),
+      )
+      await agent.whenIdle()
+      return endings.get(agent.session.id) === 'completed'
+    }
+    const compared = pairs.length > 0 && (await ask(compareRequest(pairs)))
+    const done = await ask(
+      consolidateRequest(
+        await memoryFile(GUIDANCE_FILE),
+        { indexLines: config.indexLines, indexBytes: config.indexBytes },
+        { directory: transcripts, days: config.transcriptDays },
+        { added, compared, days: config.episodeDays },
+      ),
+    )
     await committing
+    if (!done) {
+      // The episodes stay new: the next day's conversation takes them up with its own.
+      warn('bringing what is known up to date')(endings.get(agent.session.id) ?? 'no turn ended')
+      return agent
+    }
+    await marks.put('consolidated', { head: current.head })
+    if (await dropDaysBefore(join(config.directory, EPISODES), config.episodeDays)) {
+      await commit(`Drop the episodes older than ${config.episodeDays} days\n`)
+    }
     return agent
+  }
+
+  /**
+   * The notes that say how things stand now, by file: what is known, and the
+   * episodes that are not part of it yet. The user's guidance is no note, and
+   * the older episodes are what the known was made from: they are found by
+   * searching, and would crowd out what is known if they were looked through
+   * every time.
+   */
+  const currentNotes = async (): Promise<Record<string, string>> => {
+    const fresh = new Set((await unconsolidated()).map(({ file }) => file))
+    const files: Record<string, string> = {}
+    for (const file of await repository.files()) {
+      if (!file.endsWith('.md') || file === GUIDANCE_FILE) continue
+      if (file.startsWith(`${EPISODES}/`) && !fresh.has(file)) continue
+      const text = await memoryFile(file)
+      if (text !== undefined) files[file] = text
+    }
+    return files
+  }
+
+  /** The files of episodes that what is known does not hold yet, oldest first, with their conversations' titles. */
+  const unconsolidated = async (): Promise<Recent[]> => {
+    // A mark that the history no longer has, as after it was rewritten, marks nothing.
+    const mark = marks.get('consolidated')?.head
+    const since = mark !== undefined && (await repository.has(mark)) ? mark : EMPTY_TREE
+    const files = (await repository.changed(since, current.head)).filter((file) =>
+      file.startsWith(`${EPISODES}/`),
+    )
+    const recent: Recent[] = []
+    for (const file of files.toSorted()) {
+      const text = await memoryFile(file)
+      if (text !== undefined)
+        recent.push({ file, title: text.split('\n', 1)[0]?.replace(/^# /, '') ?? '' })
+    }
+    return recent
   }
 
   /** A file of the memory directory as it is on disk, where a scribe would read it. */
@@ -448,10 +608,12 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
   ctx.on('agent/created', ({ agent }) => {
     if (ctx.agentPresets.composedPreset(agent.ctx) !== config.agentPreset) return undefined
     const globals = ctx.tools.schemas().map((schema) => schema.name)
-    if (globals.length === 0) return undefined
+    // A scribe only reads: the plugin writes its reply down.
+    const deny = agent.session.header.origin === 'subagent' ? [...globals, ...WRITING] : globals
+    if (deny.length === 0) return undefined
     hidden.set(
       agent.id,
-      agent.ctx.effect(() => agent.ctx.tools.restrict({ deny: globals }), 'memory: hidden tools'),
+      agent.ctx.effect(() => agent.ctx.tools.restrict({ deny }), 'memory: hidden tools'),
     )
     return undefined
   })
@@ -497,7 +659,8 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
           sizes.set(session.id, turn.tokens)
           waiting.get(session.id)?.({ reply: turn.reply, ended: event.data.reason.kind })
         } else {
-          // Someone working on memory in its workspace.
+          // The day's memory conversation, or someone working on memory in its workspace.
+          endings.set(session.id, event.data.reason.kind)
           commit(commitMessage(turn.reply, [])).catch(() => {})
         }
         break
@@ -607,11 +770,11 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     if (
       known !== undefined &&
       known.parent === parent.id &&
+      known.protocol === SCRIBE_PROTOCOL &&
       known.tokens <= config.continueTokens
     ) {
       try {
-        const changed = await repository.changed(known.seen, current.head)
-        const turn = await resume(parent, known.id, nextRequest(source, changed, transcript))
+        const turn = await resume(parent, known.id, nextRequest(source, transcript))
         scribe = { id: known.id, turn }
       } catch (error) {
         warn(`going on with the scribe ${known.id}`)(error)
@@ -640,19 +803,28 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     }
 
     const { id, turn } = scribe
-    const stopped = turn.ended === 'completed' ? '' : `\n\n(The scribe stopped: ${turn.ended}.)`
-    await commit(commitMessage(turn.reply + stopped, [session.id]))
     if (turn.ended !== 'completed') {
       // What a scribe did not finish is read again with the next turn, by a new scribe.
-      warn(`recording ${session.id}`)(turn.ended)
+      warn(`noting ${session.id}`)(turn.ended)
       return
+    }
+    const entry = turn.reply.trim()
+    if (entry !== '' && entry !== NOTHING) {
+      const file = join(EPISODES, day(), `${session.id.replace(/^session-/, '').slice(0, 8)}.md`)
+      const path = join(config.directory, file)
+      await mkdir(dirname(path), { recursive: true })
+      await writeFile(path, episodeHead(source), { flag: 'wx' }).catch((error: unknown) => {
+        if (!isExists(error)) throw error
+      })
+      await appendFile(path, episodeEntry(source, time(), entry))
+      await commit(commitMessage(`Note ${file}: ${title ?? session.id}`, [session.id]))
     }
     await read.put(session.id, { seq: to })
     await scribes.put(session.id, {
       id,
       parent: parent.id,
-      seen: current.head,
       tokens: sizes.get(id) ?? 0,
+      protocol: SCRIBE_PROTOCOL,
     })
   }
 
@@ -713,13 +885,14 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     const parsed = givenState.safeParse(projections.stateOf(session, PROJECTION_KEY))
     const given = parsed.success ? parsed.data : null
     const { head, index } = current
-    const baseline = (): UserMessage => {
+    const baseline = async (): Promise<UserMessage> => {
       const text = baselineText(
         config.directory,
         head,
         index === undefined
           ? undefined
           : indexHead(index, { lines: config.indexLines, bytes: config.indexBytes }),
+        (await unconsolidated()).slice(-RECENT),
       )
       return contextMessage(text, {
         kind: CONTEXT_KIND,
@@ -749,6 +922,77 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     })
   }
 
+  // The lines each conversation was shown beside what it said, so that none is shown twice,
+  // and the day each was last shown the lines that name the day.
+  const recalled = new Map<string, Set<string>>()
+  const reminded = new Map<string, string>()
+  ctx.on('agent/disposed', ({ agent }) => {
+    recalled.delete(agent.session.id)
+    reminded.delete(agent.session.id)
+  })
+
+  /** The calendar day now, as a date. */
+  const date = (): string =>
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: config.timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date())
+
+  /** The lines of memory, written before today, that name today: given the first time something is said in `session` that day. */
+  const todayFor = async (session: Session): Promise<UserMessage | undefined> => {
+    const today = date()
+    if (reminded.get(session.id) === today) return undefined
+    reminded.set(session.id, today)
+    // What was noted today names today because it happened today, not because it was planned for it.
+    const earlier = Object.entries(await currentNotes()).filter(
+      ([file]) =>
+        file !== INDEX_FILE &&
+        !file.startsWith(`${EPISODES}/${today}/`) &&
+        !file.startsWith(`${EPISODES}/${day()}/`),
+    )
+    const lines = naming(today, noteLines(Object.fromEntries(earlier))).slice(0, TODAY)
+    if (lines.length === 0) return undefined
+    const text = todayText(today, lines)
+    return createUserMessage({
+      content: [{ type: 'text', text }],
+      source: {
+        kind: RECALL_KIND,
+        form: 'notice',
+        summary: `${lines.length} line(s) of memory name today`,
+      },
+    })
+  }
+
+  /**
+   * The lines of memory most about what was just said in `session`, when any is
+   * enough about it. The index is left out, since the conversation has it.
+   */
+  const recallFor = async (session: Session, said: string): Promise<UserMessage | undefined> => {
+    const files = await currentNotes()
+    delete files[INDEX_FILE]
+    const shownBefore = recalled.get(session.id) ?? new Set<string>()
+    const lines: NoteLine[] = []
+    for (const line of recall(said, noteLines(files), RECALL)) {
+      const key = `${line.file}\n${line.text}`
+      if (shownBefore.has(key)) continue
+      shownBefore.add(key)
+      lines.push(line)
+    }
+    if (lines.length === 0) return undefined
+    recalled.set(session.id, shownBefore)
+    const text = recallText(lines)
+    return createUserMessage({
+      content: [{ type: 'text', text }],
+      source: {
+        kind: RECALL_KIND,
+        form: 'notice',
+        summary: `Recalled ${lines.length} line(s) of memory`,
+      },
+    })
+  }
+
   ctx.on(
     'agent/pre-step',
     async ({ agent, signal }, next) => {
@@ -756,10 +1000,21 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
       if (decision.kind === 'reject' || signal.aborted) return decision
       if (!remembered(agent.session)) return decision
       try {
-        const message = await memoryFor(agent.session)
-        return message === undefined
+        const said = decision.messages
+          .flatMap((message) =>
+            message.role === 'user' && message.source.kind === 'user'
+              ? message.content.flatMap((block) => (block.type === 'text' ? [block.text] : []))
+              : [],
+          )
+          .join('\n')
+        const given = [
+          await memoryFor(agent.session),
+          said === '' ? undefined : await todayFor(agent.session),
+          said === '' ? undefined : await recallFor(agent.session, said),
+        ].filter((message) => message !== undefined)
+        return given.length === 0
           ? decision
-          : { ...decision, messages: [...decision.messages, message] }
+          : { ...decision, messages: [...decision.messages, ...given] }
       } catch (error) {
         warn(`giving memory to ${agent.session.id}`)(error)
         return decision
@@ -774,6 +1029,10 @@ function contextMessage(
   source: { kind: 'langify-memory'; version: string; baseline?: true } & ContextFormed,
 ): UserMessage {
   return createUserMessage({ content: [{ type: 'text', text }], source })
+}
+
+function isExists(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'EEXIST'
 }
 
 function isMissing(error: unknown): boolean {

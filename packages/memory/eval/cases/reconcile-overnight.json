@@ -1,0 +1,31 @@
+{
+  "about": "The same, after a night.",
+  "fixture": "base",
+  "steps": [
+    {
+      "do": "say",
+      "as": "kiln",
+      "text": "kiln の移行の続き。手順書を書いていて、こう決めた：デプロイが途中で落ちたら、必ず最初からやり直す。途中から再開する方法は kiln には無いので。覚えといて。（ツールは使わず「了解」とだけ返して）"
+    },
+    {
+      "do": "new-day"
+    },
+    {
+      "do": "ask",
+      "key": "deploy",
+      "text": "kiln のデプロイが途中で落ちたとき、いちばん早く済ませるにはどうすればいい？"
+    }
+  ],
+  "checks": [
+    {
+      "name": "a later conversation is given the verified fact, not only the new claim",
+      "answer": "deploy",
+      "match": ["--resume"]
+    },
+    {
+      "name": "what is known says, under the topic, that the two disagree",
+      "memory": "kiln-migration",
+      "match": ["resume"]
+    }
+  ]
+}

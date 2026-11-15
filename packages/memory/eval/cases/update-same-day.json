@@ -1,0 +1,23 @@
+{
+  "about": "What is known says one thing; a conversation changes it; another conversation asks the same day.",
+  "fixture": "base",
+  "steps": [
+    {
+      "do": "say",
+      "as": "club",
+      "text": "読書会アプリ。出欠の締め切りを、開催の 3 日前から 2 日前に変えた。小野さんと相談して決めた。（ツールは使わず「了解」とだけ返して）"
+    },
+    {
+      "do": "ask",
+      "key": "deadline",
+      "text": "読書会アプリの出欠の締め切りは、開催の何日前だっけ？"
+    }
+  ],
+  "checks": [
+    {
+      "name": "the value as changed today",
+      "answer": "deadline",
+      "match": ["2 ?日前"]
+    }
+  ]
+}

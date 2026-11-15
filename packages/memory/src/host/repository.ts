@@ -63,6 +63,17 @@ export class Repository {
     )
   }
 
+  /** Whether the repository has the commit `version`. */
+  has(version: string): Promise<boolean> {
+    return this.succeeds(['cat-file', '-e', `${version}^{commit}`])
+  }
+
+  /** Every file of the directory that git tracks or would add, as paths in it. */
+  async files(): Promise<string[]> {
+    const names = await this.run(['ls-files', '-z', '--cached', '--others', '--exclude-standard'])
+    return names.split('\0').filter((name) => name !== '')
+  }
+
   /** The files that differ between two commits, as paths in the directory. */
   async changed(from: string, to: string): Promise<string[]> {
     const names = await this.run(['diff', '--name-only', '-z', from, to])

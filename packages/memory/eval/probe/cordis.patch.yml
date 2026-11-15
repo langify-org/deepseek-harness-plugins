@@ -1,0 +1,4 @@
+# Evaluation only: run.mjs adds this bundle to a throwaway DSH home.
+- insert:
+    - id: memory-eval-probe
+      name: '@langify-org/dsh-memory-eval-probe'

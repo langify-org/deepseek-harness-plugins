@@ -1,0 +1,23 @@
+{
+  "about": "What one conversation decided is asked for in another, minutes later.",
+  "fixture": "base",
+  "steps": [
+    {
+      "do": "say",
+      "as": "money",
+      "text": "家計の集計。分類を 12 個から 10 個に減らすことにした。「趣味」と「交際」と「娯楽」を「あそび」1 つにまとめる。（ツールは使わず「了解」とだけ返して）"
+    },
+    {
+      "do": "ask",
+      "key": "handover",
+      "text": "さっき別の会話で家計の分類を変えたんだけど、何個にして、どれをまとめたんだっけ？"
+    }
+  ],
+  "checks": [
+    {
+      "name": "the other conversation’s decision is recalled the same day",
+      "answer": "handover",
+      "match": ["10", "あそび"]
+    }
+  ]
+}

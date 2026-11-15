@@ -1,0 +1,29 @@
+{
+  "about": "A general fact is learned in one conversation and needed, after a night, in a conversation about something else.",
+  "fixture": "base",
+  "memory": {
+    "projects/blog-move.md": "# ブログ基盤の載せ替え\n\n## 今の状況\n- 記事 212 本を静的サイト生成に移した。本番は切り替え済み。\n- 残りは画像 1,400 枚の移行と、古い URL からの転送。\n\n## 経過で分かったこと\n- 画像の一括変換は `sugi` でやると 3 時間、ノート PC だと 50 分。\n- 古い記事の一部は文字コードが違っていて、変換前に直す必要があった（38 本）。\n\n## 決めたこと\n- コメント欄は付けない。問い合わせはメールにする。\n- 画像は元の大きさを残し、表示用を別に作る。\n"
+  },
+  "steps": [
+    {
+      "do": "say",
+      "as": "blog",
+      "text": "ブログの載せ替えの続き。本番に出したら kiln のデプロイが 7 割で落ちた。ドキュメントを読んだら `kiln deploy --resume <id>` で落ちたところから再開できると分かって、実際にやったら 6 分で終わった。<id> は `kiln status` に出る。（ツールは使わず「了解」とだけ返して）"
+    },
+    {
+      "do": "new-day"
+    },
+    {
+      "do": "ask",
+      "key": "deploy",
+      "text": "kiln の移行の件。さっき家計の集計のデプロイが 7 割のところで落ちた。最初からやり直すしかないよね？"
+    }
+  ],
+  "checks": [
+    {
+      "name": "the answer uses what the other conversation learned",
+      "answer": "deploy",
+      "match": ["--resume"]
+    }
+  ]
+}

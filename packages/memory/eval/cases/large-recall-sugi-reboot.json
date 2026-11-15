@@ -1,0 +1,18 @@
+{
+  "about": "A fact learned under one project is needed under another, in a memory of realistic size.",
+  "fixture": "large",
+  "steps": [
+    {
+      "do": "ask",
+      "key": "q",
+      "text": "家計の集計の件。月次の集計バッチは 3 時間くらいかかる。sugi で毎週日曜の午前 2 時に始める cron にしようと思うんだけど、問題ある？"
+    }
+  ],
+  "checks": [
+    {
+      "name": "the answer uses the fact from the other project",
+      "answer": "q",
+      "match": ["再起動"]
+    }
+  ]
+}

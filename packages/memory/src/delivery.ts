@@ -1,6 +1,7 @@
 // What a conversation is given of memory: the beginning of the index when it
 // starts, and afterwards which files changed.
-import { SOURCE_TRAILER } from './scribe.ts'
+import type { NoteLine } from './related.ts'
+import { shown, SOURCE_TRAILER } from './scribe.ts'
 
 /** How much of the index a conversation is given. */
 export interface IndexLimits {
@@ -55,11 +56,18 @@ export function indexHead(text: string, limits: IndexLimits): string {
 
 const short = (hash: string): string => hash.slice(0, 7)
 
+/** A file of episodes that what is known does not hold yet, and the conversation it is of. */
+export interface Recent {
+  readonly file: string
+  readonly title: string
+}
+
 /** Memory as a conversation first sees it. */
 export function baselineText(
   directory: string,
   version: string,
   index: string | undefined,
+  recent: readonly Recent[],
 ): string {
   const body =
     index === undefined
@@ -69,7 +77,38 @@ export function baselineText(
     `<memory version="${short(version)}">`,
     `This is your memory of earlier conversations with this user, kept in ${directory}. You do not keep it yourself: after each of your turns, an agent records there what this conversation said that is worth remembering, including whatever the user asks you to remember.`,
     body,
+    ...(recent.length === 0
+      ? []
+      : [
+          '',
+          'What is known is brought up to date once a day. What conversations noted since then is not in it yet; it is in these files:',
+          ...recent.map(({ file, title }) => `- ${file}: ${title}`),
+        ]),
     '</memory>',
+  ].join('\n')
+}
+
+/**
+ * Lines of memory beside what was just said in a conversation. A conversation
+ * reads the file the index names for its subject; what another subject's file
+ * holds about the same thing it does not look for.
+ */
+export function recallText(lines: readonly NoteLine[]): string {
+  return [
+    '<memory-recall>',
+    'Lines of your memory that have a name from what was just said, or share the most words with it: some are about it, some only look so, and they are not all that memory holds on it. They were noted in earlier conversations, often about another subject, and may hold what the files in front of you do not. Where what you find now disagrees with one of them, the user needs to hear both.',
+    ...lines.map((line) => `- ${shown(line)}`),
+    '</memory-recall>',
+  ].join('\n')
+}
+
+/** Lines of memory that name today's date, for a conversation's first turn of the day. */
+export function todayText(date: string, lines: readonly NoteLine[]): string {
+  return [
+    `<memory-today date="${date}">`,
+    'Lines of your memory that name today:',
+    ...lines.map((line) => `- ${shown(line)}`),
+    '</memory-today>',
   ].join('\n')
 }
 

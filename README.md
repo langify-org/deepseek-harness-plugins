@@ -8,6 +8,7 @@ Open-source plugins for [DeepSeek Harness](https://github.com/deepseek-ai/deepse
 
 | Package                                      | Description                                                                                                                                                                 |
 | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`@langify-org/dsh-exa`](packages/exa)       | Runs DSH's own `web_search` and `web_fetch` on Exa, with an Exa API key and no DeepSeek API. Not published yet.                                                             |
 | [`@langify-org/dsh-memory`](packages/memory) | A memory built the way people's is: episodes noted from every conversation, knowledge made from them overnight, recall when something said calls for it. Not published yet. |
 | [`@langify-org/dsh-tasks`](packages/tasks)   | Run justfile recipes from a Tasks tab in the right sidebar, in a terminal tab.                                                                                              |
 | [`@langify-org/dsh-tmux`](packages/tmux)     | A terminal tab per conversation on tmux, shared with the model, that outlives reloads and restarts.                                                                         |

@@ -1,0 +1,58 @@
+{
+  "name": "@langify-org/dsh-exa",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Exa behind DeepSeek Harness's web_search and web_fetch, with no DeepSeek API involved",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "exa",
+    "web-fetch",
+    "web-search"
+  ],
+  "homepage": "https://github.com/langify-org/deepseek-harness-plugins/tree/main/packages/exa#readme",
+  "bugs": "https://github.com/langify-org/deepseek-harness-plugins/issues",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/langify-org/deepseek-harness-plugins.git",
+    "directory": "packages/exa"
+  },
+  "files": [
+    "dist",
+    "cordis.patch.yml",
+    "README*.md"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "catalog:",
+    "@deepseek-ai/dsh-launch-environment": "catalog:",
+    "@deepseek-ai/dsh-web": "catalog:",
+    "@deepseek-ai/schemastery": "catalog:"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.5",
+    "@deepseek-ai/dsh-launch-environment": ">=0.2.2-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-web": ">=0.2.2-rc.2 <0.3.0-0",
+    "@deepseek-ai/schemastery": "^3.18.5"
+  },
+  "engines": {
+    "dsh": ">=0.2.2-rc.2 <0.3.0-0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

@@ -14,26 +14,31 @@
 // replaced only when the day's memory conversation is, or when its context grew
 // past `continueTokens`, a guard against a runaway one. The new scribe starts
 // from the user's guidance, the index, and the end of what the conversation said.
+// DSH's compaction cannot stand in for the replacement: its request to condense
+// comes after the part to record, which runs to the end of the message, so the
+// scribe takes it for more of the conversation (35 of 58 attempts failed so).
 //
 // Tidying: a day's memory conversation starts when the day does, and its first
 // turn, its only one, goes through the whole directory: what the scribes wrote a
 // turn at a time, each seeing one conversation, is left as a later conversation
 // would want to find it. Scribes wait until it is done. After it the memory
-// conversation only holds the day's scribes.
+// conversation only holds the day's scribes. What the scribes were given is kept
+// beside the directory for some days, so a note can be checked against what the
+// conversation said.
 //
 // The memory conversation and its scribes run on the memory preset (declared in
 // cordis.patch.yml): file tools and nothing else.
 //
-// Reading: at the start of a conversation's turn, it is given the beginning of
-// the index the first time, and afterwards the names of the files that other
-// conversations' scribes changed.
+// Reading: before a step of a conversation, it is given the beginning of the
+// index the first time, and afterwards the names of the files that other
+// conversations' scribes changed. A long turn is told while it goes on.
 /// <reference types="@deepseek-ai/dsh-agent-preset-registry" />
 /// <reference types="@deepseek-ai/dsh-api-session-controller" />
 /// <reference types="@deepseek-ai/dsh-session-query" />
 /// <reference types="@deepseek-ai/dsh-session-title" />
 /// <reference types="@deepseek-ai/dsh-subagent" />
 /// <reference types="@deepseek-ai/dsh-tools" />
-import { readFile, realpath } from 'node:fs/promises'
+import { appendFile, mkdir, readdir, readFile, realpath, rm } from 'node:fs/promises'
 import { join, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
@@ -61,8 +66,10 @@ import {
   INDEX_FILE,
   MEMORY_MD,
   firstRequest,
+  keptPart,
   nextRequest,
   tidyRequest,
+  type ScribeSource,
 } from '../scribe.ts'
 import { renderContext, renderTranscript, unreadFrom } from '../transcript.ts'
 import { Repository } from './repository.ts'
@@ -111,6 +118,8 @@ export interface Config {
   toolResult: number
   contextChars: number
   continueTokens: number
+  transcripts?: string
+  transcriptDays: number
   indexLines: number
   indexBytes: number
 }
@@ -165,6 +174,12 @@ export const Config: Schema<Config> = Schema.object({
     .description(
       "Tokens of context past which a conversation's scribe is replaced by a new one: a guard against a runaway scribe, not a setting to tune.",
     ),
+  transcripts: Schema.string().description(
+    'The directory where what the scribes were given of the conversations is kept for the tidying agent, as plain text. Without it, the memory directory with `-transcripts` added to its name.',
+  ),
+  transcriptDays: Schema.natural()
+    .default(7)
+    .description('Days for which what the scribes were given is kept.'),
   indexLines: Schema.natural()
     .default(200)
     .description('Lines of MEMORY.md a conversation is given when it starts.'),
@@ -303,14 +318,38 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
   const remembered = (session: Session): boolean =>
     session.header.origin !== 'subagent' && !inMemory(session)
 
-  /** The memory conversation's day: it starts at `dayStartsAt`, not at midnight. */
-  const day = (): string =>
+  /** The memory conversation's day at `at`: it starts at `dayStartsAt`, not at midnight. */
+  const day = (at = Date.now()): string =>
     new Intl.DateTimeFormat('en-CA', {
       timeZone: config.timeZone,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
-    }).format(new Date(Date.now() - config.dayStartsAt * 3_600_000))
+    }).format(new Date(at - config.dayStartsAt * 3_600_000))
+
+  // What the scribes are given, kept for the tidying agent: a directory for each
+  // day, a file for each conversation. Outside the memory directory, so that no
+  // search of memory finds it and git does not hold it.
+  const transcripts = config.transcripts ?? `${config.directory}-transcripts`
+  await mkdir(transcripts, { recursive: true, mode: 0o700 })
+  const keep = async (source: ScribeSource, transcript: string): Promise<void> => {
+    const directory = join(transcripts, day())
+    await mkdir(directory, { recursive: true, mode: 0o700 })
+    await appendFile(join(directory, `${source.sessionId}.md`), keptPart(source, transcript))
+  }
+  /** Drop the days older than `transcriptDays`. */
+  const forget = async (): Promise<void> => {
+    const oldest = day(Date.now() - config.transcriptDays * 86_400_000)
+    const kept = await readdir(transcripts).catch((error: unknown) => {
+      if (isMissing(error)) return []
+      throw error
+    })
+    for (const entry of kept) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(entry) && entry < oldest) {
+        await rm(join(transcripts, entry), { recursive: true, force: true })
+      }
+    }
+  }
 
   const workspace = async (): Promise<Workspace> =>
     (await ctx.workspaceRegistry.resolveByPath(config.directory)) ??
@@ -374,10 +413,12 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
           : { reasoningEffort: ReasoningEffortId(config.tidyReasoningEffort) }),
       })
     }
-    const text = tidyRequest(await memoryFile(GUIDANCE_FILE), {
-      indexLines: config.indexLines,
-      indexBytes: config.indexBytes,
-    })
+    await forget().catch(warn('dropping old transcripts'))
+    const text = tidyRequest(
+      await memoryFile(GUIDANCE_FILE),
+      { indexLines: config.indexLines, indexBytes: config.indexBytes },
+      { directory: transcripts, days: config.transcriptDays },
+    )
     agent.followup(
       createUserMessage({ content: [{ type: 'text', text }], source: { kind: DAY_KIND } }),
     )
@@ -557,6 +598,7 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     const title = ctx.get('sessionTitle')?.get(session)?.title
     const source = { sessionId: session.id, title, cwd: session.header.cwd, from, to }
     const parent = await memoryConversation()
+    await keep(source, transcript).catch(warn(`keeping what ${session.id} said`))
 
     // Until its turn completes, the conversation has no scribe to go on with.
     const known = scribes.get(session.id)
@@ -709,9 +751,9 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
 
   ctx.on(
     'agent/pre-step',
-    async ({ agent, step, signal }, next) => {
+    async ({ agent, signal }, next) => {
       const decision = await next()
-      if (decision.kind === 'reject' || signal.aborted || step !== 1) return decision
+      if (decision.kind === 'reject' || signal.aborted) return decision
       if (!remembered(agent.session)) return decision
       try {
         const message = await memoryFor(agent.session)

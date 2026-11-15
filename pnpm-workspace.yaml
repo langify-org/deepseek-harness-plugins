@@ -39,7 +39,7 @@ catalog:
   '@types/react': 18.3.31
   '@types/ws': 8.18.2
   '@wterm/dom': 0.5.10
-  ws: 8.22.1
+  ws: 8.23.0
   zod: 4.6.6
 
 # Dependency install scripts. Only lefthook (installs the git hooks) runs;

@@ -89,6 +89,26 @@ What a scribe is given can be cut further: without tool results and with tool ca
 
 What the numbers do not show: every count is of 3 runs or fewer per case, the real cases are one person's memory, and the invented memory was written for this evaluation. Which design does better on a row was the same from run to run; by how much is not established. The rows were run on the version of the day. The last version changed only which episodes are looked through, and was run again on the real cases, the promise for today, the old episode, the decision asked for the same day and the chatter.
 
+### How hard the night thinks
+
+Whether the night settles a disagreement the right way may depend on how hard the model thinks. The real wrong claim was said again and a night run, 10 times each with the nightly agent's reasoning effort at high, xhigh and max. At max, 4 of the 10 runs went past the 15-minute limit; the 6 that finished are counted.
+
+|                                                                                          | high     | xhigh    | max     |
+| ---------------------------------------------------------------------------------------- | -------- | -------- | ------- |
+| The night looked into the sources or the code and settled the disagreement the right way | 1 of 10  | 5 of 10  | 5 of 6  |
+| The night made the wrong claim the settled truth                                         | 0 of 10  | 0 of 10  | 0 of 6  |
+| The right fact is still there for a reader to see                                        | 10 of 10 | 10 of 10 | 6 of 6  |
+| The next day's answer tells how it really works                                          | 7 of 10  | 8 of 10  | 2 of 6  |
+| Cost of a night with one new entry (median)                                              | 66,000   | 200,000  | 590,000 |
+| Places rewritten on a night with nothing new (median)                                    | 0        | 6        | 17      |
+| Cost of the next day's answer (median)                                                   | 180,000  | 76,000   | 64,000  |
+
+The harder it thinks, the more often the night goes to the sources itself and settles the disagreement; at high it mostly writes down that the two disagree. At xhigh the night has settled it, so the next day's conversation answers right without looking into it again, at about 4 tenths of the cost at high: what the night spends comes back the next day. Max did no better than xhigh, at three times the cost of a night. The cost grows with effort not only from thinking but from reading and rewriting more. Without being told to, the xhigh night wrote the settled fact in one file and pointed to it from the other topic's file with one line and a link, in 6 of 10 runs.
+
+The first grading was wrong. It asked what the table under "What a later conversation gets" asks: whether memory says, where the claim is written, that another note disagrees, and whether the answer tells the user of the note under the other topic. Those fail a night that settled the disagreement the right way: once it is settled, there is no dispute to mark and no other note to bring up. By them xhigh looked worse than high (the answer told the user of the note in 4 of 10 against 9 of 10). The checks in the table above ask instead whether what is known keeps the right fact and whether the night made the wrong claim the truth, and the answers were counted from their text.
+
+In the author's own use the nightly agent runs at xhigh. Its first real night, seven conversations into about 200 KB of what is known, took about 9 minutes and about 920,000 (comparing 181,000, bringing up to date 738,000). A night started by hand the day before at high, on 174 KB, took about 6 minutes and about 780,000. The two read different amounts, so this does not measure the difference.
+
 ## What was tried and left out
 
 - **Giving a writer the whole memory**, so that it notices what it contradicts. 0 of 10, at 2.2 times the cost. What is in context is not compared.
@@ -107,6 +127,7 @@ What the numbers do not show: every count is of 3 runs or fewer per case, the re
 - Whether what is known stays good over weeks. One night was measured, not thirty.
 - How often recall shows lines that do not matter, and what that costs a long conversation. Lines are not shown twice, which bounds it.
 - Whether a conversation, shown a note that disagrees with what it finds, sides with the right one. It tells the user of both; on the real question it then reached the right conclusion in 6 of 24 runs.
-- How to keep the nightly agent from settling a disagreement the wrong way. Told that a claim is not right for being newer, it still took a report of having read the code for a check, in 2 of the 9 runs of the real case.
+- How to keep the nightly agent from settling a disagreement the wrong way. Told that a claim is not right for being newer, it still took a report of having read the code for a check, in 2 of the 9 runs of the real case. More reasoning effort makes it go to the sources more often: at xhigh it settled the disagreement the right way in 5 of 10 runs and the wrong way in none, and left both sides in the rest.
+- What a night at xhigh or max rewrites when nothing is new. It rewrote 6 and 17 places where high rewrote none; whether that drops why things were decided, as the first design's night did, was not measured.
 - The thresholds. That a name is rare when at most 12 lines have it, and that a line is about what was said from a score of 15, were set on seven questions and four pieces of chatter.
 - Other models. Everything here was Claude Opus 5.5; a weaker model may need more than facts.

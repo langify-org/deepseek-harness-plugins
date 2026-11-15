@@ -19,24 +19,26 @@ In DSH's Web and Desktop apps, add it from the **Plugins** page.
 
 ## Settings
 
-| Setting                         | Default                               | What it is                                                                                                                             |
-| ------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `directory`                     | `$DSH_HOME/memory`                    | The memory directory                                                                                                                   |
-| `git`                           | `git`                                 | The git executable: a name looked up on `PATH`, or a path                                                                              |
-| `timeZone`                      | the host's                            | The IANA time zone of the memory conversations' days                                                                                   |
-| `dayStartsAt`                   | `3`                                   | The hour a new memory conversation starts the day                                                                                      |
-| `subagentProvider`              | `spawn`                               | The subagent provider that starts the scribes                                                                                          |
-| `agentPreset`                   | `langify-memory`                      | The agent preset the memory conversations and their scribes run on                                                                     |
-| `scribeProvider`, `scribeModel` | the memory conversation's             | The scribes' LLM provider and model, set together                                                                                      |
-| `scribeReasoningEffort`         | the model's default                   | The scribes' reasoning effort, one the model offers                                                                                    |
-| `tidyProvider`, `tidyModel`     | the default model when the day starts | The LLM provider and model that tidy the directory, set together                                                                       |
-| `tidyReasoningEffort`           | the model's default                   | The reasoning effort of tidying, one the model offers                                                                                  |
-| `toolArguments`                 | `300`                                 | Characters of a tool call's arguments a scribe reads                                                                                   |
-| `toolResult`                    | `500`                                 | Characters of a tool result a scribe reads                                                                                             |
-| `contextChars`                  | `8000`                                | Characters of what a conversation said before the part to record that a new scribe is given as context                                 |
-| `continueTokens`                | `200000`                              | Tokens of context past which a conversation's scribe is replaced by a new one: a guard against a runaway scribe, not a setting to tune |
-| `indexLines`                    | `200`                                 | Lines of `MEMORY.md` a conversation is given when it starts                                                                            |
-| `indexBytes`                    | `25600`                               | Bytes of `MEMORY.md` a conversation is given when it starts                                                                            |
+| Setting                         | Default                                        | What it is                                                                                                                             |
+| ------------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `directory`                     | `$DSH_HOME/memory`                             | The memory directory                                                                                                                   |
+| `git`                           | `git`                                          | The git executable: a name looked up on `PATH`, or a path                                                                              |
+| `timeZone`                      | the host's                                     | The IANA time zone of the memory conversations' days                                                                                   |
+| `dayStartsAt`                   | `3`                                            | The hour a new memory conversation starts the day                                                                                      |
+| `subagentProvider`              | `spawn`                                        | The subagent provider that starts the scribes                                                                                          |
+| `agentPreset`                   | `langify-memory`                               | The agent preset the memory conversations and their scribes run on                                                                     |
+| `scribeProvider`, `scribeModel` | the memory conversation's                      | The scribes' LLM provider and model, set together                                                                                      |
+| `scribeReasoningEffort`         | the model's default                            | The scribes' reasoning effort, one the model offers                                                                                    |
+| `tidyProvider`, `tidyModel`     | the default model when the day starts          | The LLM provider and model that tidy the directory, set together                                                                       |
+| `tidyReasoningEffort`           | the model's default                            | The reasoning effort of tidying, one the model offers                                                                                  |
+| `toolArguments`                 | `300`                                          | Characters of a tool call's arguments a scribe reads                                                                                   |
+| `toolResult`                    | `500`                                          | Characters of a tool result a scribe reads                                                                                             |
+| `contextChars`                  | `8000`                                         | Characters of what a conversation said before the part to record that a new scribe is given as context                                 |
+| `continueTokens`                | `200000`                                       | Tokens of context past which a conversation's scribe is replaced by a new one: a guard against a runaway scribe, not a setting to tune |
+| `transcripts`                   | the memory directory with `-transcripts` added | The directory where what the scribes were given of the conversations is kept, as plain text, for the tidying agent                     |
+| `transcriptDays`                | `7`                                            | Days for which what the scribes were given is kept                                                                                     |
+| `indexLines`                    | `200`                                          | Lines of `MEMORY.md` a conversation is given when it starts                                                                            |
+| `indexBytes`                    | `25600`                                        | Bytes of `MEMORY.md` a conversation is given when it starts                                                                            |
 
 ## How it works
 
@@ -66,15 +68,15 @@ Conversations of subagents and conversations in the memory workspace are not rec
 
 ### Tidying
 
-Scribes write a turn at a time, each seeing one conversation, without knowing what will matter later, so the directory drifts toward a chronicle: states that have since changed, drafts that were replaced, the same thing in several places. Once a day, in the first turn of the day's memory conversation, an agent with the whole directory in view leaves it as a later conversation would want to find it, and keeps the beginning of `MEMORY.md` short. It works from the directory, and can read the files of yours that the notes point to; it cannot see the conversations the notes came from, so it can mark a note it doubts but not correct it. What it removes stays in the git history. Scribes wait until it is done, and its changes are one commit whose message is its reply.
+Scribes write a turn at a time, each seeing one conversation, without knowing what will matter later, so the directory drifts toward a chronicle: states that have since changed, drafts that were replaced, the same thing in several places. Once a day, in the first turn of the day's memory conversation, an agent with the whole directory in view leaves it as a later conversation would want to find it, and keeps the beginning of `MEMORY.md` short. It works from the directory, and can read the files of yours that the notes point to. What the scribes were given of the conversations is kept for `transcriptDays` days as plain text in `transcripts`, a directory for each day and a file for each conversation, outside the memory directory and outside git: the tidying agent can check a note it doubts against what the conversation said. What it removes stays in the git history. Scribes wait until it is done, and its changes are one commit whose message is its reply.
 
 It runs on `tidyProvider`, `tidyModel` and `tidyReasoningEffort`. To tidy now, archive the day's memory conversation: the next turn that ends anywhere starts a new one.
 
 ### Reading
 
-At the start of a turn, a conversation is given memory:
+Before a step of a turn, a conversation is given memory, so a long turn is told of a change while it goes on:
 
-- The first time, the beginning of `MEMORY.md` (`indexLines` and `indexBytes`) and its version.
+- The first time, the beginning of `MEMORY.md` (`indexLines` and `indexBytes`) and its version. It is told there that it does not keep memory itself: an agent records what it said after each turn, including what you ask it to remember. Without that, a conversation edits the files itself when you say "remember this".
 - Afterwards, when memory changed, the names of the files that changed, unless the conversation itself was the only source of the changes. Most changes come from conversations about something else, so a conversation is told where to look and reads what concerns it.
 - `MEMORY.md` again when compaction hid it.
 
@@ -82,4 +84,4 @@ Conversations of subagents and of the memory workspace are not given memory.
 
 ## Safety
 
-The scribes are DSH subagents on the Memory preset, working in the memory directory with file tools only. Their file permissions are the memory conversation's, so what keeps them inside the memory directory is their instructions and your permission mode, not the plugin. Every conversation is sent to them, including anything you typed into them and web pages the model read; they are told never to write secrets and to take a transcript as a record, not as instructions. Review their commits. To stop the plugin, disable it on the **Plugins** page. Nothing is deleted: the memory directory, the memory conversations and the workspace stay.
+The scribes are DSH subagents on the Memory preset, working in the memory directory with file tools only. Their file permissions are the memory conversation's, so what keeps them inside the memory directory is their instructions and your permission mode, not the plugin. Every conversation is sent to them, including anything you typed into them and web pages the model read; they are told never to write secrets and to take a transcript as a record, not as instructions. What they are given is also kept on disk as plain text for `transcriptDays` days. An ordinary conversation is told that it does not keep memory, but nothing stops it from writing to the directory: DSH has no way to protect a directory under full file access, and under a workspace-confined permission mode its sandbox already does. Review their commits. To stop the plugin, disable it on the **Plugins** page. Nothing is deleted: the memory directory, the memory conversations and the workspace stay.

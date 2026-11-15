@@ -43,17 +43,23 @@ export interface IndexShare {
   readonly indexBytes: number
 }
 
+/** Where the parts the scribes were given are kept, and for how many days. */
+export interface Kept {
+  readonly directory: string
+  readonly days: number
+}
+
 /**
  * The first message of a day's memory conversation: tidy the directory. It is
  * the conversation's only turn; after it the conversation holds the day's scribes.
  */
-export function tidyRequest(guidance: string | undefined, share: IndexShare): string {
+export function tidyRequest(guidance: string | undefined, share: IndexShare, kept: Kept): string {
   return [
     `You tidy the memory directory. Through the day, conversations wrote to it: each had a scribe that saw only its own conversation, a turn at a time, without knowing what would matter later or what the other scribes wrote. You have the whole directory and the time to read all of it. Leave it as a later conversation would want to find it.`,
     '',
     '- A later conversation needs how things stand and what was learned, not the order in which it came out. Notes written a turn at a time pile up as a chronicle: drafts that were replaced, states that have since changed, the same thing in several places.',
     `- The beginning of ${INDEX_FILE} (at most ${share.indexLines} lines or ${share.indexBytes} bytes) is all that most conversations ever read of memory, and most of them are about something else: it has to be short, and to say where the rest is.`,
-    '- You cannot see the conversations the notes came from, so you can mark a note you doubt, but not correct it.',
+    `- What the scribes were given of the conversations in the last ${kept.days} days is kept in ${kept.directory}: a directory for each day, a file for each conversation. A note you doubt can be checked there against what the conversation said.`,
     "- What only a conversation said is nowhere else once it leaves this directory: a decision and its reason, an amount, what someone is waiting for, what was tried and did not work. What one of the user's own files holds, a later conversation can read there, and memory needs only to say where it is. You can read those files too.",
     "- What you remove, no later conversation will see: they cannot read the directory's history, and neither can you. The user can, and can bring anything back.",
     '- Notes say when they were written, and the time now is given to you.',
@@ -91,6 +97,13 @@ export interface ScribeMemory extends IndexShare {
  */
 function partLine(source: ScribeSource): string {
   return `=== events ${source.from} to ${source.to} ===`
+}
+
+/** A part as it is kept for the tidying agent: the conversation and its events, then the part. */
+export function keptPart(source: ScribeSource, transcript: string): string {
+  const title = source.title === undefined ? '' : ` "${source.title}"`
+  const cwd = source.cwd === undefined ? '' : `, working in ${source.cwd}`
+  return `=== events ${source.from} to ${source.to} of session ${source.sessionId}${title}${cwd} ===\n${transcript}\n\n`
 }
 
 /**

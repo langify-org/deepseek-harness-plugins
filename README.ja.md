@@ -8,7 +8,7 @@
 
 | パッケージ                                   | 説明                                                                                                                         |
 | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| [`@langify-org/dsh-exa`](packages/exa)       | DSH の `web_search` と `web_fetch` を、Exa の API キーだけで Exa で動かす。DeepSeek の API は使わない。                      |
+| [`@langify-org/dsh-exa`](packages/exa)       | DSH の `web_search` と `web_fetch` を、Exa の API キーだけで Exa で動かす。DeepSeek の API は使わない。未公開。              |
 | [`@langify-org/dsh-memory`](packages/memory) | 人の記憶と同じ作りの記憶。会話ごとに出来事を記録し、夜のあいだに知識にまとめ、発言が手がかりになったときに思い出す。未公開。 |
 | [`@langify-org/dsh-tasks`](packages/tasks)   | 右サイドバーのタスクのタブから、justfile の recipe を terminal のタブで実行する。                                            |
 | [`@langify-org/dsh-tmux`](packages/tmux)     | 会話ごとのターミナルを tmux でタブに持ち、モデルと共有する。再読み込みや再起動でも消えない。                                 |

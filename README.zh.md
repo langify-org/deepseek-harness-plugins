@@ -6,12 +6,12 @@
 
 ## 插件
 
-| 包                                           | 说明                                                                                               |
-| -------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| [`@langify-org/dsh-exa`](packages/exa)       | 只用 Exa API 密钥，让 DSH 自带的 `web_search` 和 `web_fetch` 在 Exa 上运行，不使用 DeepSeek API。  |
-| [`@langify-org/dsh-memory`](packages/memory) | 按人的记忆方式构建的记忆：从每个对话记录事件，夜间据此形成知识，在所说的话唤起它时回忆。尚未发布。 |
-| [`@langify-org/dsh-tasks`](packages/tasks)   | 在右侧边栏的任务标签页中，于终端标签页运行 justfile 的 recipe。                                    |
-| [`@langify-org/dsh-tmux`](packages/tmux)     | 用 tmux 为每个对话提供标签页终端，与模型共享，重新加载和重启后依然保留。                           |
+| 包                                           | 说明                                                                                                        |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| [`@langify-org/dsh-exa`](packages/exa)       | 只用 Exa API 密钥，让 DSH 自带的 `web_search` 和 `web_fetch` 在 Exa 上运行，不使用 DeepSeek API。尚未发布。 |
+| [`@langify-org/dsh-memory`](packages/memory) | 按人的记忆方式构建的记忆：从每个对话记录事件，夜间据此形成知识，在所说的话唤起它时回忆。尚未发布。          |
+| [`@langify-org/dsh-tasks`](packages/tasks)   | 在右侧边栏的任务标签页中，于终端标签页运行 justfile 的 recipe。                                             |
+| [`@langify-org/dsh-tmux`](packages/tmux)     | 用 tmux 为每个对话提供标签页终端，与模型共享，重新加载和重启后依然保留。                                    |
 
 ## 安装
 

@@ -1,6 +1,7 @@
 {
   "name": "@langify-org/dsh-exa",
   "version": "0.1.0",
+  "private": true,
   "description": "Exa behind DeepSeek Harness's web_search and web_fetch, with no DeepSeek API involved",
   "keywords": [
     "deepseek-harness",

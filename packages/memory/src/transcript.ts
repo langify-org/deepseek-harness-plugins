@@ -1,8 +1,8 @@
-// What the scribe reads of a conversation: the people's words and the work in
-// between, with tool traffic cut short, and before it what was said earlier, as
-// context. Context the harness injected (instruction files, skills, notices) is
-// left out of both: it is not something that happened.
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+// What the scribe reads of a conversation: the people's words, what other agents
+// sent back, and the work in between, with tool traffic cut short, and before it
+// what was said earlier, as context. Context the harness injected (instruction
+// files, skills, notices) is left out of both: it is not something that happened.
+import type { ContentBlock, MessageSource } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
 /** How much of each tool call and result the transcript keeps. */
@@ -17,6 +17,22 @@ export interface TranscriptLimits {
 const PROMPTS: Readonly<Record<string, string>> = {
   user: 'User',
   schedule: 'Scheduled instruction',
+}
+
+/**
+ * How a user-role message is headed, or undefined when it is injected context.
+ * What a subagent sent back is kept whole, with the session it came from: its
+ * findings reach the conversation only this way, and its own log is not read.
+ */
+function heading(source: MessageSource): string | undefined {
+  switch (source.kind) {
+    case 'subagent-settled':
+      return `Subagent result (${source.senderSessionId})`
+    case 'agent-message':
+      return `Agent message (${source.senderSessionId})`
+    default:
+      return PROMPTS[source.kind]
+  }
 }
 
 /**
@@ -74,10 +90,10 @@ function parts(events: readonly SessionEvent[], limits: TranscriptLimits | undef
   for (const event of events) {
     switch (event.type) {
       case 'user/message': {
-        const heading = PROMPTS[event.data.source.kind]
-        if (heading === undefined) break
+        const head = heading(event.data.source)
+        if (head === undefined) break
         const text = blocksText(event.data.content)
-        if (text !== '') rendered.push(`### ${heading}\n${text}`)
+        if (text !== '') rendered.push(`### ${head}\n${text}`)
         break
       }
       case 'assistant/message': {

@@ -29,6 +29,37 @@ describe('renderTranscript', () => {
     )
   })
 
+  it('keeps what subagents sent back whole, with the session it came from', () => {
+    const report = 'x'.repeat(100)
+    const text = renderTranscript(
+      events(
+        {
+          type: 'user/message',
+          data: {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Background subagent frontend finished.' },
+              { type: 'text', text: report },
+            ],
+            source: { kind: 'subagent-settled', form: 'notice', senderSessionId: 'child-1' },
+          },
+        },
+        {
+          type: 'user/message',
+          data: {
+            role: 'user',
+            content: [{ type: 'text', text: 'partial findings' }],
+            source: { kind: 'agent-message', form: 'relay', senderSessionId: 'child-2' },
+          },
+        },
+      ),
+      limits,
+    )
+    expect(text).toBe(
+      `### Subagent result (child-1)\nBackground subagent frontend finished.\n${report}\n\n### Agent message (child-2)\npartial findings`,
+    )
+  })
+
   it('cuts tool traffic short, and leaves out reasoning', () => {
     const text = renderTranscript(
       events(

@@ -64,13 +64,15 @@ Three choices follow from the failure.
 
 - **The watcher is outside the task.** A model in the middle of a task keeps to the pattern of its own replies. The scribe, the same model reading the same turns from outside, noted twice that the user had passed over the offer; the conversation did not see it. People reason better about someone else's problem than their own, and seeing their own from outside closes the gap ([self-distancing](https://doi.org/10.1177/0956797614535400)).
 - **Cues as they could be seen.** A hunch written with hindsight ("the user wanted to think aloud") cannot be matched when the moment comes again, because the conclusion is not there yet; what was there can be ("the user passed over the offer and widened the question"). In the notes, the user's tentative endings ("…かな") came with requests for work as well; what told the moments apart was the flow of the exchange.
-- **A recollection, not an instruction.** Said as what happened, it can sit beside a tool's result, where models discount instructions, and the conversation's model decides whether it fits. This is also why a rule's moment is worth keeping: given a rule, a model applies its words; given a reason, it applies the reason.
+- **A recollection, not an instruction.** Said as what happened, it can sit beside a tool's result, where models discount instructions, and the conversation's model decides whether it fits. This is also why a rule's moment is worth keeping: given a rule, a model applies its words; given a reason, it applies the reason. At first the watcher said in its own words what had happened; on the first day all three of its recollections ended in advice ("it would be better to look first"), and a retelling drops what the original holds. So the watcher only names the hunch, and the conversation is given the hunch as the night wrote it: the watcher tells the moment, memory says what it holds.
 
 What memory cannot settle without the user goes into `questions.md`. Asking is not memory's part. It is a chance to learn, which is a different thing: a scheduled task can ask in the morning, and the answers are noted like anything else said.
 
 ### How the watcher was measured
 
 Six invented moments, three runs each, with three hunches and Claude Haiku 5.5 as the watcher. Without reasoning it was right 16 times of 18; both misses named the hunch about a token switch for a diff that had none, while saying that it did not fit. At reasoning effort low it was right 18 times of 18: it said nothing in 1.1 to 1.6 seconds, or brought a hunch up in 2.5 to 5 seconds, reading its prompt from the cache after the first call. Asked to end with the hunch's file, it often shortened the name, so a shortened name is accepted, and a reply that names no hunch is dropped. In a throwaway DSH home, a diff with the token switch brought the hunch up before the next step, and the model asked before committing; a user stuck before a payment was answered with one small first step.
+
+Only naming the hunch, at effort low, it was right 18 times of 18 on the same moments, and 10 times of 10 on five moments against the eight hunches the first night wrote from real conversations (three that should call one up, two that should not).
 
 ## What was measured
 

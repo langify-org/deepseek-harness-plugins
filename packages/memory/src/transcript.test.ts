@@ -9,6 +9,22 @@ function events(...data: object[]): SessionEvent[] {
   return data.map((event, seq) => Object.assign({ seq, time: 0 }, event) as unknown as SessionEvent)
 }
 
+/** What memory brought up, as the watcher gives it: `files` named in its source, or not yet. */
+function hunch(text: string, files?: string[]): object {
+  return {
+    type: 'user/message',
+    data: {
+      role: 'user',
+      content: [{ type: 'text', text }],
+      source: {
+        kind: 'langify-memory-hunch',
+        form: 'notice',
+        ...(files === undefined ? {} : { files }),
+      },
+    },
+  }
+}
+
 const user = (kind: string, text: string): object => ({
   type: 'user/message',
   data: { role: 'user', content: [{ type: 'text', text }], source: { kind } },
@@ -58,6 +74,18 @@ describe('renderTranscript', () => {
     expect(text).toBe(
       `### Subagent result (child-1)\nBackground subagent frontend finished.\n${report}\n\n### Agent message (child-2)\npartial findings`,
     )
+  })
+
+  it('keeps which hunches memory brought up, by name, not what they say', () => {
+    const text = renderTranscript(
+      events(
+        hunch('<memory-hunch>\n=== hunches/a.md ===\nlong text\n</memory-hunch>', ['hunches/a.md']),
+        // Brought up before the hunches were named in the message's source.
+        hunch('Seen before (hunches/b.md).'),
+      ),
+      limits,
+    )
+    expect(text).toBe('### Memory brought up\nhunches/a.md\n\n### Memory brought up\nhunches/b.md')
   })
 
   it('cuts tool traffic short, and leaves out reasoning', () => {

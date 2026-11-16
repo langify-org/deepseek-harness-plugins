@@ -135,8 +135,11 @@ declare module '@deepseek-ai/dsh-llm' {
     'langify-memory-day': { kind: 'langify-memory-day' }
     /** Lines of memory put beside what was just said in a conversation. */
     'langify-memory-recall': { kind: 'langify-memory-recall' } & ContextFormed
-    /** What the watcher brought up in a conversation, and what it was shown. */
-    'langify-memory-hunch': { kind: 'langify-memory-hunch' } & ContextFormed
+    /** The hunches the watcher brought up in a conversation, by `files`; and what the watcher was shown. */
+    'langify-memory-hunch': {
+      kind: 'langify-memory-hunch'
+      files?: readonly string[]
+    } & ContextFormed
   }
 }
 
@@ -373,12 +376,14 @@ const RECALL = { lines: 14, rare: 12, shared: 8, perFile: PER_FILE, floor: 15 }
 const TODAY = 20
 
 /**
- * What the watcher reads: the newest characters of what was said before and of
- * what just happened, and of each tool call and result in it, out of the newest
- * events. A tool's result is often where a moment shows, so it reads more of
- * one than a scribe does.
+ * What the watcher reads: the newest characters of what happened before and of
+ * what just happened, and of each tool call and result in them, out of the
+ * newest events. A tool's result is often where a moment shows, so it reads more
+ * of one than a scribe does; of what happened before, it needs to see what was
+ * done, not all that it showed.
  */
-const WATCHED = { before: 3000, now: 8000, toolArguments: 1000, toolResult: 2000, events: 200 }
+const WATCHED = { before: 6000, now: 8000, toolArguments: 1000, toolResult: 2000, events: 200 }
+const WATCHED_BEFORE = { toolArguments: 300, toolResult: 300 }
 
 /** The events the watcher reads. */
 const WATCHED_EVENTS: ReadonlySet<string> = new Set([
@@ -1203,9 +1208,10 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
         const log = await ctx.sessionQuery.readSession(session.id)
         const shown = log.events.flatMap((event) =>
           event.type === 'user/message' && event.data.source.kind === HUNCH_KIND
-            ? event.data.content.flatMap((block) =>
+            ? (event.data.source.files ??
+              event.data.content.flatMap((block) =>
                 block.type === 'text' ? (block.text.match(HUNCH_FILE) ?? []) : [],
-              )
+              ))
             : [],
         )
         seen = {
@@ -1223,7 +1229,8 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
       }
       const fresh = seen.fresh
       seen.fresh = []
-      const before = renderContext(seen.seen, WATCHED.before)
+      // What was done before, tool calls included: a moment already dealt with is not one to bring a hunch up for.
+      const before = newest(renderTranscript(seen.seen, WATCHED_BEFORE), WATCHED.before)
       seen.seen = newestEvents([...seen.seen, ...fresh])
       const now = [renderTranscript(fresh, WATCHED), said === '' ? '' : `### User\n${said}`]
         .filter((part) => part !== '')
@@ -1242,15 +1249,17 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
         reply,
         hunches.filter(({ file }) => !shown.has(file)),
       )
-      if (found === undefined) return undefined
-      for (const file of found.files) shown.add(file)
+      if (found.length === 0) return undefined
+      const files = found.map(({ file }) => file)
+      for (const file of files) shown.add(file)
       seen.given += 1
       return createUserMessage({
-        content: [{ type: 'text', text: hunchText(found.text) }],
+        content: [{ type: 'text', text: hunchText(found) }],
         source: {
           kind: HUNCH_KIND,
           form: 'notice',
-          summary: `Memory brought up ${found.files.length} hunch(es)`,
+          summary: `Memory brought up ${files.join(', ')}`,
+          files,
         },
       })
     } catch (error) {

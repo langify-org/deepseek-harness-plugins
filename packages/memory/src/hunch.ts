@@ -9,9 +9,12 @@
 // can be told as it happens, what happened in it, the user's own words, and a
 // reason. A conversation is not given them to read. A small model watches it
 // from outside instead, and before a step, when what just happened is one of
-// those moments, says what happened then: a recollection, not an instruction,
-// for the conversation's model to weigh. A watcher that is not sure says
-// nothing, since one that speaks out of turn is soon not listened to.
+// those moments, names the hunch; the conversation is given the hunch as the
+// night wrote it, the user's words and all: a recollection, not an instruction,
+// for the conversation's model to weigh. The watcher only tells the moment: in
+// its own words a recollection turned into advice, and a retelling loses what
+// the original says. A watcher that is not sure says nothing, since one that
+// speaks out of turn is soon not listened to.
 
 /** The directory, in the memory directory, of the hunches. */
 export const HUNCHES = 'hunches'
@@ -46,11 +49,9 @@ export function watcherSystem(hunches: readonly Hunch[]): string {
     '',
     "Below are the hunches memory holds: what earlier conversations taught about a kind of moment. Each names the cues by which such a moment can be told as it happens, what happened in it before, the user's own words, and why it may matter.",
     '',
-    "You are shown what was happening in the conversation, then what just happened. When what just happened is one of the moments a hunch is about, its cues there in what the user says or does, in what the assistant just did or is setting out to do, or in what a tool showed, bring the hunch up. A moment can show over several turns: what the assistant offered and whether the user took it up, how the user answers. To bring a hunch up, say in one or two sentences what happened in a moment like this before, quoting the user where their words say it best, and end with the hunch's file in parentheses, exactly as it is named after === below, such as (hunches/example.md). Say what happened, not what to do: the assistant decides whether it fits.",
+    'You are shown what was happening in the conversation, then what just happened. When what just happened is one of the moments a hunch is about, its cues there in what the user says or does, in what the assistant just did or is setting out to do, or in what a tool showed, bring the hunch up. A moment can show over several turns: what the assistant offered and whether the user took it up, how the user answers. To bring a hunch up, reply with its file, exactly as it is named after === below, such as hunches/example.md, one to a line, and nothing else: the assistant is given the hunch itself and decides whether it fits.',
     '',
     `Judge by the moment, not by shared words: a hunch whose words appear but whose moment this is not is not called up, and one whose moment this is may share no word with what was said. Most moments call up nothing. A hunch brought up where it does not fit costs the assistant its attention, and a memory that speaks out of turn is soon not listened to. Bring up at most two. Naming a hunch brings it up, so do not name one to say that it does not fit. When nothing is called up, reply with exactly ${QUIET}.`,
-    '',
-    "Write in the language of the user's messages below, not in the language of these instructions.",
     '',
     ...hunches.flatMap(({ file, text }) => [`=== ${file} ===`, text, '']),
   ].join('\n')
@@ -82,38 +83,31 @@ export function watcherRequest(
 }
 
 /**
- * What the watcher brought up, and from which hunches: undefined when it
- * brought up nothing, or nothing it can show came from a hunch. A watcher that
- * names no hunch is saying something memory does not hold. A small model asked
- * to name a file often shortens it, so a hunch is also named by its file's name
- * alone, with or without the extension, or in parentheses without either.
+ * The hunches the watcher brought up: none when it named none it was given. A
+ * small model asked to name a file often shortens it, so a hunch is also named
+ * by its file's name alone, with the extension, or on a line of its own or in
+ * parentheses without it.
  */
-export function broughtUp(
-  reply: string,
-  hunches: readonly Hunch[],
-): { text: string; files: string[] } | undefined {
+export function broughtUp(reply: string, hunches: readonly Hunch[]): Hunch[] {
   const text = reply.trim()
-  if (text === '' || text === QUIET) return undefined
-  const files = hunches
-    .map(({ file }) => file)
-    .filter((file) => {
-      const name = file.slice(HUNCHES.length + 1).replace(/\.md$/, '')
-      const escaped = name.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      return (
-        text.includes(file) ||
-        text.includes(`${name}.md`) ||
-        new RegExp(`[(（[]\\s*${escaped}\\s*[)）\\]]`, 'u').test(text)
-      )
-    })
-  return files.length === 0 ? undefined : { text, files }
+  if (text === '' || text === QUIET) return []
+  return hunches.filter(({ file }) => {
+    const name = file.slice(HUNCHES.length + 1).replace(/\.md$/, '')
+    const escaped = name.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return (
+      text.includes(file) ||
+      text.includes(`${name}.md`) ||
+      new RegExp(`^\\s*${escaped}\\s*$|[(（[]\\s*${escaped}\\s*[)）\\]]`, 'mu').test(text)
+    )
+  })
 }
 
-/** What a conversation is given of what the watcher brought up. */
-export function hunchText(text: string): string {
+/** What a conversation is given of the hunches the watcher brought up: each as the night wrote it. */
+export function hunchText(hunches: readonly Hunch[]): string {
   return [
     '<memory-hunch>',
-    'Your memory brought this up at this point, from earlier conversations. It says what happened then, not what to do now: weigh it, and leave it where it does not fit. The file it names is in your memory directory.',
-    text,
+    'Your memory brought this up at this point: what earlier conversations taught about a moment like this one, as it was written down then. It says what happened then, not what to do now: weigh it, and leave it where it does not fit.',
+    ...hunches.flatMap(({ file, text }) => ['', `=== ${file} ===`, text]),
     '</memory-hunch>',
   ].join('\n')
 }

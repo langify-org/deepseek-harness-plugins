@@ -2,8 +2,10 @@
 // sent back, and the work in between, with tool traffic cut short, and before it
 // what was said earlier, as context. Context the harness injected (instruction
 // files, skills, notices) is left out of both: it is not something that happened.
+// That memory brought up a hunch is, and what came of it: it is kept by name.
 import type { ContentBlock, MessageSource } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import { HUNCHES } from './hunch.ts'
 
 /** How much of each tool call and result the transcript keeps. */
 export interface TranscriptLimits {
@@ -90,6 +92,18 @@ function parts(events: readonly SessionEvent[], limits: TranscriptLimits | undef
   for (const event of events) {
     switch (event.type) {
       case 'user/message': {
+        const { source } = event.data
+        if (source.kind === 'langify-memory-hunch') {
+          // Which hunches memory brought up, not what they say: what came of it is what the
+          // night needs, to keep the hunches that fit and narrow the ones that did not.
+          const files =
+            source.files ??
+            blocksText(event.data.content).match(new RegExp(`${HUNCHES}/[^\\s)]+\\.md`, 'g')) ??
+            []
+          if (files.length > 0)
+            rendered.push(`### Memory brought up\n${[...new Set(files)].join(', ')}`)
+          break
+        }
         const head = heading(event.data.source)
         if (head === undefined) break
         const text = blocksText(event.data.content)

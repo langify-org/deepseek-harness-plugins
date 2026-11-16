@@ -24,35 +24,35 @@ describe('hunchesOf', () => {
   })
 })
 
+/** The files of the hunches the watcher's `reply` brings up. */
+function named(reply: string): string[] {
+  return broughtUp(reply, hunches).map(({ file }) => file)
+}
+
 describe('broughtUp', () => {
   it('is nothing when the watcher is quiet', () => {
-    expect(broughtUp(` ${QUIET}\n`, hunches)).toBeUndefined()
-    expect(broughtUp('', hunches)).toBeUndefined()
+    expect(named(` ${QUIET}\n`)).toEqual([])
+    expect(named('')).toEqual([])
   })
 
   it('is nothing when the watcher names no hunch it was given', () => {
-    expect(broughtUp('The user may want to think aloud.', hunches)).toBeUndefined()
-    expect(broughtUp('Seen before (hunches/made-up.md).', hunches)).toBeUndefined()
+    expect(named('The user may want to think aloud.')).toEqual([])
+    expect(named('hunches/made-up.md')).toEqual([])
+  })
+
+  it('takes the hunches the watcher named, one to a line', () => {
+    expect(named('hunches/think-aloud.md\nhunches/bank-transfer.md\n')).toEqual([
+      'hunches/bank-transfer.md',
+      'hunches/think-aloud.md',
+    ])
   })
 
   it('knows a hunch by its file name when the watcher shortens it', () => {
-    expect(broughtUp('Seen before (think-aloud).', hunches)?.files).toEqual([
-      'hunches/think-aloud.md',
-    ])
-    expect(broughtUp('Seen before: bank-transfer.md', hunches)?.files).toEqual([
-      'hunches/bank-transfer.md',
-    ])
-    // A name alone, outside parentheses, is just a word.
-    expect(broughtUp('The user may want to think-aloud here.', hunches)).toBeUndefined()
-  })
-
-  it('names the hunches the watcher drew on', () => {
-    const reply =
-      'Last time a question was widened like this, the user wanted to think it through, not be given a step (hunches/think-aloud.md).'
-    expect(broughtUp(`${reply}\n`, hunches)).toEqual({
-      text: reply,
-      files: ['hunches/think-aloud.md'],
-    })
+    expect(named('think-aloud')).toEqual(['hunches/think-aloud.md'])
+    expect(named('Seen before (think-aloud).')).toEqual(['hunches/think-aloud.md'])
+    expect(named('bank-transfer.md')).toEqual(['hunches/bank-transfer.md'])
+    // A name inside a sentence is just a word.
+    expect(named('The user may want to think-aloud here.')).toEqual([])
   })
 })
 
@@ -64,10 +64,13 @@ describe('what the watcher is shown and what it brings up', () => {
     )
   })
 
-  it('gives a conversation what was brought up as a recollection', () => {
-    const text = hunchText('Seen before (hunches/think-aloud.md).')
+  it('gives a conversation each hunch as it was written, under its file', () => {
+    const text = hunchText(broughtUp('hunches/think-aloud.md', hunches))
     expect(text.startsWith('<memory-hunch>')).toBe(true)
     expect(text).toContain('not what to do now')
-    expect(text).toContain('Seen before (hunches/think-aloud.md).')
+    expect(text).toContain(
+      '=== hunches/think-aloud.md ===\n# Thinking aloud\n\nCues: the user passes over what was offered and widens the question.',
+    )
+    expect(text).not.toContain('bank-transfer')
   })
 })

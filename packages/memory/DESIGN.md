@@ -96,6 +96,8 @@ Six invented moments, three runs each, with three hunches and Claude Haiku 5.5 a
 
 Only naming the hunch, at effort low, it was right 18 times of 18 on the same moments, and 10 times of 10 on five moments against the eight hunches the first night wrote from real conversations (three that should call one up, two that should not).
 
+In use, on its first evening (four hours, three conversations with the user), the watcher brought hunches up 12 times, 16 hunches in all; two turns were given four. Judged from the episodes, where the scribe says how each came out, and from the logs, 12 of the 16 fitted the moment. One came after the moment had been dealt with, because the watcher was not shown tool calls; it is now. In three, a hunch's cues reached too far: the one about a user stuck before a task came up beside an open question about the design and beside a request for work, and the one about thinking together beside that request. The night is told to narrow such cues from what the episodes say. Where a hunch fitted, the conversation could be seen to weigh it: it said it would leave a question about the design open rather than end on a next step, and after the hunch about unchecked claims it looked at the pull request itself instead of its notes. Once it did not: twelve minutes after the hunch about thinking together, it ended a reply on a menu of three readings for the user to pick from, and the user said it felt like being made to answer. The watcher also speaks where the user is not, as in a scheduled conversation, where hunches about the user seldom fit.
+
 ## What was measured
 
 Everything was run in throwaway DSH homes with a real model (Claude Opus 5.5), by `eval/run.mjs`. Costs are in units of one uncached input token (cache read 0.1, cache write 1.25, output 5). "First design" is the plugin as it was just before this change, including every fix made to it until then.
@@ -180,5 +182,6 @@ In the author's own use the nightly agent runs at xhigh. Its first real night, s
 - What a night at xhigh or max rewrites when nothing is new. It rewrote 6 and 17 places where high rewrote none; whether that drops why things were decided, as the first design's night did, was not measured.
 - The thresholds. That a name is rare when at most 12 lines have it, and that a line is about what was said from a score of 15, were set on seven questions and four pieces of chatter.
 - Other models. Everything here was Claude Opus 5.5; a weaker model may need more than facts.
-- Whether the nightly agent writes hunches with cues that can be seen in the moment. It is told to; that was not measured.
+- Whether the nightly agent writes hunches with cues that can be seen in the moment. The eight the first night wrote do, read by hand; on the first evening the cues of two of them reached too far, and whether the night narrows them has not been seen yet.
+- How often a hunch that fits changes what the conversation does. On the first evening it could be seen to twice and not once; the same conversations have not been replayed with and without hunches.
 - How often the watcher speaks out of turn over weeks, and whether the conversation's model learns to pass it over, as people stop hearing an alarm that rings too often. A hunch is brought up once in a conversation, which bounds it.

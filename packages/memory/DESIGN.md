@@ -47,6 +47,31 @@ Two things do the work, and neither is a rule for the model.
 
 One more thing was learned the hard way. Once the nightly agent saw that a new statement disagreed with an old one, it replaced the old one, in 2 of 2 runs looked at: newer won. But a claim about how something works does not become true by being newer. The agent is now told the difference between a state that changed, which is replaced, and two claims that disagree, which are both kept and both say so until one is checked against the thing itself.
 
+## Hunches: how to act depends on the moment
+
+Two days after this design went into use, a design conversation showed something it did not hold. The model ended nine replies running with an offer of one next step, and the user passed over every one before saying that they wanted to think, not to be handed a step. It had followed the index: "replies short, the point only (as a guide, one short table and one next step)". The history of memory showed where that line came from. "Show one small next step" was learned when the user froze before a bank transfer; "shorter replies" was asked for while the user read long reports. A tidying pass, keeping the index short, had merged the two into one format for every reply and dropped the moment each was learned in, and the user's words. Each line was right; what was lost was where it held.
+
+People keep what to do with the moment it was learned in. A memory whose source is lost is used in the wrong place ([source monitoring](https://doi.org/10.1037/0033-2909.114.1.3)); a category is kept as examples with their context, not only as a summary ([context theory](https://doi.org/10.1037/0033-295X.85.3.207)); an expert's intuition is recognizing a moment as one of a kind, which brings what to expect and what to do (Klein's recognition-primed decisions). A rule kept without its moment is applied by its words.
+
+| In people                                                                                                                           | Here                                                                                                                                            |
+| ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| What to do is learned in a moment and comes back in moments like it                                                                 | The nightly agent keeps it in `hunches/`, a file for each kind of moment: its cues, what happened, the user's words, a reason that may be wrong |
+| Learning follows surprise, better or worse than expected ([reward prediction error](https://doi.org/10.1126/science.275.5306.1593)) | A hunch comes from a correction, an offer passed over, a pleased user, a mistake, a tool that showed what was not expected                      |
+| Distinctions grow finer only where they were needed                                                                                 | Hunches that expect the same in moments alike are merged; hunches that expect differently are given the cue that tells their moments apart      |
+| Recollections come unbidden, in the moment, and are weighed                                                                         | A small model watching from outside brings a hunch up before a step, beside what called it up, as what happened then                            |
+
+Three choices follow from the failure.
+
+- **The watcher is outside the task.** A model in the middle of a task keeps to the pattern of its own replies. The scribe, the same model reading the same turns from outside, noted twice that the user had passed over the offer; the conversation did not see it. People reason better about someone else's problem than their own, and seeing their own from outside closes the gap ([self-distancing](https://doi.org/10.1177/0956797614535400)).
+- **Cues as they could be seen.** A hunch written with hindsight ("the user wanted to think aloud") cannot be matched when the moment comes again, because the conclusion is not there yet; what was there can be ("the user passed over the offer and widened the question"). In the notes, the user's tentative endings ("…かな") came with requests for work as well; what told the moments apart was the flow of the exchange.
+- **A recollection, not an instruction.** Said as what happened, it can sit beside a tool's result, where models discount instructions, and the conversation's model decides whether it fits. This is also why a rule's moment is worth keeping: given a rule, a model applies its words; given a reason, it applies the reason.
+
+What memory cannot settle without the user goes into `questions.md`. Asking is not memory's part. It is a chance to learn, which is a different thing: a scheduled task can ask in the morning, and the answers are noted like anything else said.
+
+### How the watcher was measured
+
+Six invented moments, three runs each, with three hunches and Claude Haiku 5.5 as the watcher. Without reasoning it was right 16 times of 18; both misses named the hunch about a token switch for a diff that had none, while saying that it did not fit. At reasoning effort low it was right 18 times of 18: it said nothing in 1.1 to 1.6 seconds, or brought a hunch up in 2.5 to 5 seconds, reading its prompt from the cache after the first call. Asked to end with the hunch's file, it often shortened the name, so a shortened name is accepted, and a reply that names no hunch is dropped. In a throwaway DSH home, a diff with the token switch brought the hunch up before the next step, and the model asked before committing; a user stuck before a payment was answered with one small first step.
+
 ## What was measured
 
 Everything was run in throwaway DSH homes with a real model (Claude Opus 5.5), by `eval/run.mjs`. Costs are in units of one uncached input token (cache read 0.1, cache write 1.25, output 5). "First design" is the plugin as it was just before this change, including every fix made to it until then.
@@ -131,3 +156,5 @@ In the author's own use the nightly agent runs at xhigh. Its first real night, s
 - What a night at xhigh or max rewrites when nothing is new. It rewrote 6 and 17 places where high rewrote none; whether that drops why things were decided, as the first design's night did, was not measured.
 - The thresholds. That a name is rare when at most 12 lines have it, and that a line is about what was said from a score of 15, were set on seven questions and four pieces of chatter.
 - Other models. Everything here was Claude Opus 5.5; a weaker model may need more than facts.
+- Whether the nightly agent writes hunches with cues that can be seen in the moment. It is told to; that was not measured.
+- How often the watcher speaks out of turn over weeks, and whether the conversation's model learns to pass it over, as people stop hearing an alarm that rings too often. A hunch is brought up once in a conversation, which bounds it.

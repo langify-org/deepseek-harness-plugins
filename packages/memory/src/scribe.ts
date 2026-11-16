@@ -80,6 +80,20 @@ export function episodeEntries(text: string): { heading: string; entry: string }
     .filter(({ entry }) => entry !== '')
 }
 
+/**
+ * The entries of a file of episodes that it did not hold at `before`, its text
+ * when what is known was last brought up to date; undefined when the file was
+ * not there then. Episodes are only appended to, so what is new is what came
+ * after: a file that gained one entry is not read again from its first.
+ */
+export function newEntries(
+  before: string | undefined,
+  now: string,
+): { heading: string; entry: string }[] {
+  const known = new Set(episodeEntries(before ?? '').map(({ heading }) => heading))
+  return episodeEntries(now).filter(({ heading }) => !known.has(heading))
+}
+
 /** A line of a note as it is shown beside something it may be about. */
 export function shown(line: NoteLine): string {
   const text = line.text.length <= LINE_CHARS ? line.text : `${line.text.slice(0, LINE_CHARS)}…`
@@ -112,13 +126,22 @@ export function compareRequest(compared: readonly Compared[]): string {
   ].join('\n')
 }
 
+/** A file of episodes with entries that what is known does not hold yet. */
+export interface Added {
+  /** The file, as a path in the memory directory. */
+  readonly file: string
+  /** The heading of its first such entry, when the entries before it are part of what is known. */
+  readonly from?: string | undefined
+}
+
 /** The episodes that what is known does not hold yet, and how long episodes stay. */
 export interface Episodes {
-  /** Files, as paths in the memory directory. */
-  readonly added: readonly string[]
+  readonly added: readonly Added[]
   /** Whether their entries were just compared with what is known. */
   readonly compared: boolean
   readonly days: number
+  /** Whether the conversation brought up to date also holds the day's scribes. */
+  readonly scribes: boolean
 }
 
 /**
@@ -133,11 +156,18 @@ export function consolidateRequest(
   episodes: Episodes,
 ): string {
   return [
-    `You bring what memory knows up to date. The directory holds two kinds of files. Those in ${EPISODES}/ are the record: what a scribe noted of each conversation as it went, a file for each conversation and day. They stay as they are. All the others are what is known: how things stand and what was learned, by subject, with ${INDEX_FILE} as their index. Once a day, now, what the new episodes hold becomes part of what is known. Leave what is known as a later conversation would want to find it.`,
+    `You bring what memory knows up to date. The directory holds two kinds of files. Those in ${EPISODES}/ are the record: what a scribe noted of each conversation as it went, a file for each conversation and day. They stay as they are. All the others are what is known: how things stand and what was learned, by subject, with ${INDEX_FILE} as their index. Now what the new episodes hold becomes part of what is known. Leave what is known as a later conversation would want to find it.`,
     '',
     ...(episodes.added.length === 0
       ? ['No episodes were added since the last time.']
-      : ['Episodes added since the last time:', ...episodes.added.map((file) => `- ${file}`)]),
+      : [
+          'Episodes added since the last time:',
+          ...episodes.added.map(({ file, from }) =>
+            from === undefined
+              ? `- ${file}`
+              : `- ${file}, from the entry headed "${from}" on: the entries before it are already part of what is known`,
+          ),
+        ]),
     '',
     `- A later conversation is given the beginning of ${INDEX_FILE} (at most ${share.indexLines} lines or ${share.indexBytes} bytes) and reads the file it names for the subject at hand. It reads an episode only when it searches. So what an episode established has to be where that conversation will look: under the subject it is about, which is often not the conversation it came up in. What was learned about a tool while working on one project is needed by the next project that uses the tool.`,
     ...(episodes.compared
@@ -159,7 +189,7 @@ export function consolidateRequest(
     ...(guidance === undefined
       ? []
       : [`The user's guidance, ${GUIDANCE_FILE}:`, '', guidance.trim(), '']),
-    'Your reply becomes the commit message of your changes: write it for someone reading the history of memory. This conversation also holds the scribes of the day that follows, as its subagents. When this turn ends it has nothing more to do.',
+    `Your reply becomes the commit message of your changes: write it for someone reading the history of memory.${episodes.scribes ? ' This conversation also holds the scribes of the day that follows, as its subagents.' : ''} When this turn ends it has nothing more to do.`,
   ].join('\n')
 }
 

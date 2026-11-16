@@ -105,6 +105,7 @@ import {
   episodeEntries,
   episodeEntry,
   episodeHead,
+  newEntries,
   type Compared,
   GUIDANCE_FILE,
   INDEX_FILE,
@@ -548,7 +549,7 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     opened.add(agent.id)
     const log = await ctx.sessionQuery.readSession(agent.session.id)
     if (log.events.some((event) => event.type === 'turn/start')) return agent
-    await consolidate(agent)
+    await consolidate(agent, { holdsScribes: true })
     return agent
   }
 
@@ -558,7 +559,10 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
    * writer meanwhile. Its changes are committed as its turns end, like those of
    * anyone working in the workspace.
    */
-  const consolidate = async (agent: Agent): Promise<void> => {
+  const consolidate = async (
+    agent: Agent,
+    { holdsScribes }: { holdsScribes: boolean },
+  ): Promise<void> => {
     const now = agent.model.current()
     const provider = config.tidyProvider ?? now?.provider
     const model = config.tidyModel ?? now?.model
@@ -576,10 +580,22 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
       })
     }
     await forget().catch(warn('dropping old transcripts'))
-    const added = (await unconsolidated()).map(({ file }) => file)
+    const since = await consolidatedAt()
     const notes = await currentNotes()
-    const entries = added.flatMap((file) =>
-      episodeEntries(notes[file] ?? '').map(({ heading, entry }) => ({ file, heading, entry })),
+    // Of a file that gained entries since then, only those are new.
+    const added = (
+      await Promise.all(
+        (await unconsolidated()).map(async ({ file }) => {
+          const text = notes[file] ?? ''
+          const before = since === EMPTY_TREE ? undefined : await repository.show(since, file)
+          const fresh = newEntries(before, text)
+          const from = fresh.length < episodeEntries(text).length ? fresh[0]?.heading : undefined
+          return { file, from, fresh }
+        }),
+      )
+    ).filter(({ fresh }) => fresh.length > 0)
+    const entries = added.flatMap(({ file, fresh }) =>
+      fresh.map(({ heading, entry }) => ({ file, heading, entry })),
     )
     // On a day with many entries, each is set beside fewer lines: the best ones matter most.
     const beside = Math.max(
@@ -606,7 +622,12 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
         await memoryFile(GUIDANCE_FILE),
         { indexLines: config.indexLines, indexBytes: config.indexBytes },
         { directory: transcripts, days: config.transcriptDays },
-        { added, compared, days: config.episodeDays },
+        {
+          added: added.map(({ file, from }) => ({ file, from })),
+          compared,
+          days: config.episodeDays,
+          scribes: holdsScribes,
+        },
       ),
     )
     await committing
@@ -640,11 +661,16 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     return files
   }
 
-  /** The files of episodes that what is known does not hold yet, oldest first, with their conversations' titles. */
-  const unconsolidated = async (): Promise<Recent[]> => {
+  /** The commit up to which the episodes are part of what is known; the empty tree when none is. */
+  const consolidatedAt = async (): Promise<string> => {
     // A mark that the history no longer has, as after it was rewritten, marks nothing.
     const mark = marks.get('consolidated')?.head
-    const since = mark !== undefined && (await repository.has(mark)) ? mark : EMPTY_TREE
+    return mark !== undefined && (await repository.has(mark)) ? mark : EMPTY_TREE
+  }
+
+  /** The files of episodes that what is known does not hold yet, oldest first, with their conversations' titles. */
+  const unconsolidated = async (): Promise<Recent[]> => {
+    const since = await consolidatedAt()
     const files = (await repository.changed(since, current.head)).filter((file) =>
       file.startsWith(`${EPISODES}/`),
     )
@@ -1279,7 +1305,7 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     const resolved = await ctx.sessionController.resolveAgent(sessionId)
     if ('error' in resolved) throw resolved.error
     ctx.get('sessionTitle')?.rename(resolved.agent.session, `Memory · dream · ${date()} ${time()}`)
-    await consolidate(resolved.agent)
+    await consolidate(resolved.agent, { holdsScribes: false })
   }
   ctx.effect(
     () =>

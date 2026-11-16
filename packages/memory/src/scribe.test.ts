@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { compareRequest, episodeEntries, episodeEntry, episodeHead } from './scribe.ts'
+import {
+  compareRequest,
+  consolidateRequest,
+  episodeEntries,
+  episodeEntry,
+  episodeHead,
+  newEntries,
+} from './scribe.ts'
 
 const source = {
   sessionId: 'session-1234',
@@ -46,6 +53,51 @@ describe('a file of episodes', () => {
 
   it('has no entries before any was appended', () => {
     expect(episodeEntries(episodeHead(source))).toEqual([])
+  })
+
+  it('tells the entries appended since memory was last brought up to date', () => {
+    const before = episodeHead(source) + episodeEntry(source, '14:21', 'Recordings stay at home.')
+    const now = before + episodeEntry({ ...source, from: 19, to: 27 }, '14:40', 'Kept for 14 days.')
+    expect(newEntries(before, now)).toEqual([
+      { heading: '14:40 (events 19 to 27)', entry: 'Kept for 14 days.' },
+    ])
+    // A file that was not there then is new from its first entry.
+    expect(newEntries(undefined, now).map(({ heading }) => heading)).toEqual([
+      '14:21 (events 4 to 18)',
+      '14:40 (events 19 to 27)',
+    ])
+    expect(newEntries(now, now)).toEqual([])
+  })
+})
+
+describe('consolidateRequest', () => {
+  const share = { indexLines: 200, indexBytes: 25600 }
+  const kept = { directory: '/memory-transcripts', days: 7 }
+
+  it('says where in a file that grew the new entries start', () => {
+    const text = consolidateRequest(undefined, share, kept, {
+      added: [
+        { file: 'episodes/2026-11-16/aaaa.md', from: '19:17 (events 40 to 52)' },
+        { file: 'episodes/2026-11-16/bbbb.md' },
+      ],
+      compared: true,
+      days: 30,
+      scribes: true,
+    })
+    expect(text).toContain(
+      '- episodes/2026-11-16/aaaa.md, from the entry headed "19:17 (events 40 to 52)" on: the entries before it are already part of what is known',
+    )
+    expect(text).toContain('- episodes/2026-11-16/bbbb.md\n')
+  })
+
+  it('says it holds the scribes only where it does', () => {
+    const episodes = { added: [], compared: false, days: 30 }
+    expect(consolidateRequest(undefined, share, kept, { ...episodes, scribes: true })).toContain(
+      'also holds the scribes',
+    )
+    expect(
+      consolidateRequest(undefined, share, kept, { ...episodes, scribes: false }),
+    ).not.toContain('scribes of the day')
   })
 })
 

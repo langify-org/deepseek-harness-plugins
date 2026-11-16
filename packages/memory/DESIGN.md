@@ -6,12 +6,33 @@ This is the reasoning behind [`@langify-org/dsh-memory`](README.md): what it bor
 
 ## What memory is for
 
-Memory is for the conversations that were not there. A conversation keeps its own history; what it lacks is what other conversations found out, decided and promised. So memory is judged by one thing: whether a later conversation does the right thing without asking again.
+Memory builds a shared memory between the user and AI: the user can leave things in it and forget them, and AI comes to understand the user, moment by moment.
+
+People who live together split up what they remember. What they know the other one holds, they stop holding themselves ([transactive memory](https://doi.org/10.1037/0022-3514.61.6.923), Wegner, Erber & Raymond 1991). What makes this work is less the split than the map each has of the other: knowing what the other one holds. So the two halves cannot be separated. Things left with someone come back when they are needed, and so the person feels understood; only someone who understands knows when they are needed.
+
+Memory has failed the user when:
+
+- something left with it does not come back when it is needed;
+- something finished, or a suggestion the user let pass, comes back as if it were still open;
+- the user has to say the same thing twice;
+- what was learned in one kind of moment is carried into moments it does not fit;
+- the user can no longer tell what has been left with it;
+- a feeling the user has not yet put into words is filled in with an interpretation, or turned into a question to answer.
+
+Memory is judged by whether these happen in real conversations, not by a score. A conversation keeps its own history; what it lacks is what other conversations found out, decided and promised, and what they learned about the user.
 
 Two principles come from Anthropic's [The components of agent memory](https://www.anthropic.com/research/components-of-agent-memory), and both held up here:
 
 - Tell a strong model what memory is for, not how to keep it. Every instruction in this plugin is a statement of fact about who reads a note and when. Rules were tried and removed: a rule to "read a file again before changing it" cost a model call a turn, and the fact behind it (the file may have changed, and a change lands only where the text still matches) did the same work.
 - Keep what is always loaded small, and let the rest be found.
+
+## Changing it
+
+- Start from one of the failures above and the moment in a real conversation where it happened. A change that cannot name both is not made. Look for them in the conversation logs and in `episodes/`: the scribe watches from outside the conversation, and has noticed what the conversation itself missed (a suggestion let pass nine times in a row).
+- Try words first. If the memory directory's `AGENTS.md`, or a hunch the night writes, reaches the moment, no code is needed. Code is for what words were tried on and did not reach.
+- Count weight. Every mechanism, rule, line of code and extra conversation is something the user and the next agent have to carry.
+- Measured scores check that nothing went backwards; they are not the goal. A score made the goal stops measuring what it was for. Build test cases from real failures.
+- Some failures never show in a log: when the user gives up without saying so, or has a feeling they cannot yet put into words. Keep those in the user's words, and do not press for an answer.
 
 ## Where the first design failed
 

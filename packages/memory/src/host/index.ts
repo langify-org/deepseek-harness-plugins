@@ -34,7 +34,8 @@
 // given is kept beside the directory for some days, so a note can be checked
 // against what the conversation said. A turn that ends in any other conversation
 // of the memory workspace (someone working on memory there) is committed with its
-// reply.
+// reply. /dream does the same at any time, in a conversation of its own: what was
+// consolidated is marked, so the night takes up only what came after.
 //
 // The memory conversation and its scribes run on the memory preset (declared in
 // cordis.patch.yml): file tools and nothing else, and for scribes only those that read.
@@ -49,6 +50,7 @@
 // up a hunch when what just happened is the moment it is about (../hunch.ts).
 /// <reference types="@deepseek-ai/dsh-agent-preset-registry" />
 /// <reference types="@deepseek-ai/dsh-api-session-controller" />
+/// <reference types="@deepseek-ai/dsh-commands" />
 /// <reference types="@deepseek-ai/dsh-session-query" />
 /// <reference types="@deepseek-ai/dsh-session-title" />
 /// <reference types="@deepseek-ai/dsh-subagent" />
@@ -148,6 +150,7 @@ export const inject: readonly string[] = [
   'workspaceRegistry',
   'storageDomain',
   'llm',
+  'commands',
 ]
 
 export interface Config {
@@ -538,17 +541,24 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     return open(resolved.agent)
   }
 
-  /**
-   * Give a memory conversation that never had a turn its one turn, which tidies
-   * the directory, and wait for it: it is the only writer meanwhile. Its changes
-   * are committed as its turn ends, like those of anyone working in the workspace.
-   */
+  /** Give a memory conversation that never had a turn its one turn, which tidies the directory, and wait for it. */
   const opened = new Set<string>()
   const open = async (agent: Agent): Promise<Agent> => {
     if (opened.has(agent.id)) return agent
     opened.add(agent.id)
     const log = await ctx.sessionQuery.readSession(agent.session.id)
     if (log.events.some((event) => event.type === 'turn/start')) return agent
+    await consolidate(agent)
+    return agent
+  }
+
+  /**
+   * Bring what is known up to date from the episodes it does not hold yet, in the
+   * conversation of `agent`, which has had no turn, and wait for it: it is the only
+   * writer meanwhile. Its changes are committed as its turns end, like those of
+   * anyone working in the workspace.
+   */
+  const consolidate = async (agent: Agent): Promise<void> => {
     const now = agent.model.current()
     const provider = config.tidyProvider ?? now?.provider
     const model = config.tidyModel ?? now?.model
@@ -601,15 +611,14 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     )
     await committing
     if (!done) {
-      // The episodes stay new: the next day's conversation takes them up with its own.
+      // The episodes stay new: the next time takes them up with its own.
       warn('bringing what is known up to date')(endings.get(agent.session.id) ?? 'no turn ended')
-      return agent
+      return
     }
     await marks.put('consolidated', { head: current.head })
     if (await dropDaysBefore(join(config.directory, EPISODES), config.episodeDays)) {
       await commit(`Drop the episodes older than ${config.episodeDays} days\n`)
     }
-    return agent
   }
 
   /**
@@ -1254,6 +1263,55 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
       }
     },
     { prepend: true },
+  )
+
+  // Dreaming on demand: what the night does, now, in a conversation of its own in
+  // the memory workspace, so that the day's scribes stay where they are. A day
+  // brings much or little whenever it is taken up, and what was taken up is
+  // marked, so the night takes up only what came after.
+  let dreaming = false
+  const dream = async (): Promise<void> => {
+    const { id } = await workspace()
+    const { sessionId } = await ctx.sessionController.create({
+      workspaceId: id,
+      agentPreset: config.agentPreset,
+    })
+    const resolved = await ctx.sessionController.resolveAgent(sessionId)
+    if ('error' in resolved) throw resolved.error
+    ctx.get('sessionTitle')?.rename(resolved.agent.session, `Memory · dream · ${date()} ${time()}`)
+    await consolidate(resolved.agent)
+  }
+  ctx.effect(
+    () =>
+      ctx.commands.register({
+        name: 'dream',
+        description: 'Bring what memory knows up to date now, as each night does',
+        handler: async ({ rawInput }) => {
+          if (rawInput.trim() !== '') return { kind: 'error', text: 'Usage: /dream (no arguments)' }
+          if (dreaming)
+            return { kind: 'error', text: 'Memory is already being brought up to date.' }
+          const added = (await unconsolidated()).length
+          if (added === 0) {
+            return {
+              kind: 'success',
+              text: 'No episode is new since memory was last brought up to date.',
+            }
+          }
+          dreaming = true
+          // One writer at a time: it waits for the scribe at work, and the scribes wait for it.
+          recording = recording
+            .then(() => dream())
+            .catch(warn('dreaming'))
+            .finally(() => {
+              dreaming = false
+            })
+          return {
+            kind: 'success',
+            text: `Bringing ${added} file(s) of episodes into what memory knows, in a Memory · dream conversation of the memory workspace. Scribes wait until it is done.`,
+          }
+        },
+      }),
+    'memory: /dream',
   )
 }
 

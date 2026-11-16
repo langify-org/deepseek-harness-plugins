@@ -28,7 +28,8 @@ Two principles come from Anthropic's [The components of agent memory](https://ww
 
 ## Changing it
 
-- Start from one of the failures above and the moment in a real conversation where it happened. A change that cannot name both is not made. Look for them in the conversation logs and in `episodes/`: the scribe watches from outside the conversation, and has noticed what the conversation itself missed (a suggestion let pass nine times in a row).
+- Start from a moment in a real conversation: one where memory failed the user in one of the ways above, or one where it could have served them better. A change that cannot name such a moment is not made. Look for them in the conversation logs and in `episodes/`: the scribe watches from outside the conversation, and has noticed what the conversation itself missed (a suggestion let pass nine times in a row).
+- Research ahead of failures. Read what is known about how people remember, try ideas in a throwaway DSH, replay real conversations. What reaches production is what was shown, on real moments, to serve the user better.
 - Try words first. If the memory directory's `AGENTS.md`, or a hunch the night writes, reaches the moment, no code is needed. Code is for what words were tried on and did not reach.
 - Count weight. Every mechanism, rule, line of code and extra conversation is something the user and the next agent have to carry.
 - Measured scores check that nothing went backwards; they are not the goal. A score made the goal stops measuring what it was for. Build test cases from real failures.

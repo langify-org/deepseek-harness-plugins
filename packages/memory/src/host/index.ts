@@ -44,7 +44,9 @@
 // first time, and afterwards the names of the files that changed; a long turn
 // is told while it goes on. When something is said in it, it is also given the
 // lines of the current notes that what was said calls for, and on the first
-// time of a day those that name the day.
+// time of a day those that name the day. With a watcher model set, a small
+// model also watches each conversation from outside and, before a step, brings
+// up a hunch when what just happened is the moment it is about (../hunch.ts).
 /// <reference types="@deepseek-ai/dsh-agent-preset-registry" />
 /// <reference types="@deepseek-ai/dsh-api-session-controller" />
 /// <reference types="@deepseek-ai/dsh-session-query" />
@@ -56,9 +58,11 @@ import { dirname, join, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
 import {
+  BlockAssembler,
   createUserMessage,
   ReasoningEffortId,
   type ContextFormed,
+  type GenerateOptions,
   type UserMessage,
 } from '@deepseek-ai/dsh-llm'
 import {
@@ -79,6 +83,16 @@ import {
   updateText,
   type Recent,
 } from '../delivery.ts'
+import {
+  broughtUp,
+  HUNCHES,
+  hunchesOf,
+  hunchText,
+  QUESTIONS_FILE,
+  watcherRequest,
+  watcherSystem,
+  type Hunch,
+} from '../hunch.ts'
 import { naming, noteLines, recall, scored, type NoteLine } from '../related.ts'
 import {
   AGENTS_MD,
@@ -107,6 +121,7 @@ export const name = 'langify-memory'
 const CONTEXT_KIND = 'langify-memory'
 const RECALL_KIND = 'langify-memory-recall'
 const DAY_KIND = 'langify-memory-day'
+const HUNCH_KIND = 'langify-memory-hunch'
 const PROJECTION_KEY = 'langifyMemory'
 
 declare module '@deepseek-ai/dsh-llm' {
@@ -117,6 +132,8 @@ declare module '@deepseek-ai/dsh-llm' {
     'langify-memory-day': { kind: 'langify-memory-day' }
     /** Lines of memory put beside what was just said in a conversation. */
     'langify-memory-recall': { kind: 'langify-memory-recall' } & ContextFormed
+    /** What the watcher brought up in a conversation, and what it was shown. */
+    'langify-memory-hunch': { kind: 'langify-memory-hunch' } & ContextFormed
   }
 }
 
@@ -130,6 +147,7 @@ export const inject: readonly string[] = [
   'subagents',
   'workspaceRegistry',
   'storageDomain',
+  'llm',
 ]
 
 export interface Config {
@@ -145,6 +163,9 @@ export interface Config {
   tidyProvider?: string
   tidyModel?: string
   tidyReasoningEffort?: string
+  watcherProvider?: string
+  watcherModel?: string
+  watcherReasoningEffort?: string
   toolArguments: number
   toolResult: number
   contextChars: number
@@ -189,6 +210,15 @@ export const Config: Schema<Config> = Schema.object({
   ),
   tidyReasoningEffort: Schema.string().description(
     "The reasoning effort of tidying, one the model offers. Without it, the model's default.",
+  ),
+  watcherProvider: Schema.string().description(
+    'The LLM provider of the small model that watches conversations and brings up hunches, set together with watcherModel. Without them, no hunch is brought up.',
+  ),
+  watcherModel: Schema.string().description(
+    'The model that watches conversations and brings up hunches, set together with watcherProvider.',
+  ),
+  watcherReasoningEffort: Schema.string().description(
+    "The watcher's reasoning effort, one the model offers. Without it, the model's default.",
   ),
   toolArguments: Schema.natural()
     .default(300)
@@ -338,6 +368,29 @@ const RECALL = { lines: 14, rare: 12, shared: 8, perFile: PER_FILE, floor: 15 }
 /** How many lines that name today a conversation is shown. */
 const TODAY = 20
 
+/**
+ * What the watcher reads: the newest characters of what was said before and of
+ * what just happened, and of each tool call and result in it, out of the newest
+ * events. A tool's result is often where a moment shows, so it reads more of
+ * one than a scribe does.
+ */
+const WATCHED = { before: 3000, now: 8000, toolArguments: 1000, toolResult: 2000, events: 200 }
+
+/** The events the watcher reads. */
+const WATCHED_EVENTS: ReadonlySet<string> = new Set([
+  'user/message',
+  'assistant/message',
+  'tool/result',
+  'turn/end',
+])
+
+/** How long a step waits for the watcher, and how much it may write, thinking included. */
+const WATCHER_MS = 10_000
+const WATCHER_TOKENS = 2000
+
+/** How many times one turn is given hunches at most. */
+const HUNCHES_PER_TURN = 3
+
 /** Git's name for a tree with nothing in it: what every file differs from. */
 const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
 
@@ -353,6 +406,14 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
   if ((config.tidyProvider === undefined) !== (config.tidyModel === undefined)) {
     throw new Error('memory: tidyProvider and tidyModel are set together')
   }
+  if ((config.watcherProvider === undefined) !== (config.watcherModel === undefined)) {
+    throw new Error('memory: watcherProvider and watcherModel are set together')
+  }
+  /** The model that brings up hunches; without it, none is. */
+  const watcher =
+    config.watcherProvider === undefined || config.watcherModel === undefined
+      ? undefined
+      : { provider: config.watcherProvider, model: config.watcherModel }
   /** What a scribe runs on where it differs from the memory conversation. */
   const scribeOptions: AgentOptions = {
     ...(config.scribeProvider === undefined ? {} : { provider: config.scribeProvider }),
@@ -828,8 +889,37 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     })
   }
 
+  /** What the watcher saw of a conversation, so that it is shown each event once. */
+  interface Watched {
+    /** The events it has not looked at, oldest first. */
+    fresh: SessionEvent[]
+    /** The newest of the events it looked at, oldest first. */
+    seen: SessionEvent[]
+    /** The hunches it brought up in the conversation. */
+    shown: Set<string>
+    /** The turn it last looked in, and how many times that turn was given hunches. */
+    turn: number
+    given: number
+  }
+  const watched = new Map<string, Watched>()
+
+  /** Keep an event of a conversation for its watcher, once the watcher has looked at it. */
+  const watchEvent = (session: Session, event: SessionEvent): void => {
+    if (watcher === undefined || !WATCHED_EVENTS.has(event.type)) return
+    const seen = watched.get(session.id)
+    // Not looked at yet: the first look reads the conversation's log.
+    if (seen === undefined) return
+    if (event.type === 'user/message' && event.data.source.kind === 'user') {
+      // What the user says reaches a step before it is logged: the watcher saw it there.
+      seen.seen = newestEvents([...seen.seen, event])
+      return
+    }
+    seen.fresh = newestEvents([...seen.fresh, event])
+  }
+
   ctx.on('session/event', (session: Session, event: SessionEvent) => {
     if (remembered(session)) {
+      watchEvent(session, event)
       if (event.type !== 'turn/end') return
       recording = recording
         .then(() => record(session, event.seq))
@@ -929,7 +1019,20 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
   ctx.on('agent/disposed', ({ agent }) => {
     recalled.delete(agent.session.id)
     reminded.delete(agent.session.id)
+    watched.delete(agent.session.id)
   })
+
+  /**
+   * The notes a conversation is shown lines of. Hunches are brought up by the
+   * watcher, and questions are for the user: neither is put beside what was said.
+   */
+  const shownNotes = async (): Promise<Record<string, string>> =>
+    Object.fromEntries(
+      Object.entries(await currentNotes()).filter(
+        ([file]) =>
+          file !== INDEX_FILE && file !== QUESTIONS_FILE && !file.startsWith(`${HUNCHES}/`),
+      ),
+    )
 
   /** The calendar day now, as a date. */
   const date = (): string =>
@@ -946,11 +1049,9 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     if (reminded.get(session.id) === today) return undefined
     reminded.set(session.id, today)
     // What was noted today names today because it happened today, not because it was planned for it.
-    const earlier = Object.entries(await currentNotes()).filter(
+    const earlier = Object.entries(await shownNotes()).filter(
       ([file]) =>
-        file !== INDEX_FILE &&
-        !file.startsWith(`${EPISODES}/${today}/`) &&
-        !file.startsWith(`${EPISODES}/${day()}/`),
+        !file.startsWith(`${EPISODES}/${today}/`) && !file.startsWith(`${EPISODES}/${day()}/`),
     )
     const lines = naming(today, noteLines(Object.fromEntries(earlier))).slice(0, TODAY)
     if (lines.length === 0) return undefined
@@ -970,8 +1071,7 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
    * enough about it. The index is left out, since the conversation has it.
    */
   const recallFor = async (session: Session, said: string): Promise<UserMessage | undefined> => {
-    const files = await currentNotes()
-    delete files[INDEX_FILE]
+    const files = await shownNotes()
     const shownBefore = recalled.get(session.id) ?? new Set<string>()
     const lines: NoteLine[] = []
     for (const line of recall(said, noteLines(files), RECALL)) {
@@ -993,24 +1093,157 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     })
   }
 
+  /** The hunches as they are now: read again only when memory changed. */
+  let hunchesAt: { head: string; hunches: Hunch[] } | undefined
+  const currentHunches = async (): Promise<Hunch[]> => {
+    const { head } = current
+    if (hunchesAt?.head === head) return hunchesAt.hunches
+    const files: Record<string, string> = {}
+    for (const file of await repository.files()) {
+      if (!file.startsWith(`${HUNCHES}/`) || !file.endsWith('.md')) continue
+      const text = await memoryFile(file)
+      if (text !== undefined) files[file] = text
+    }
+    hunchesAt = { head, hunches: hunchesOf(files) }
+    return hunchesAt.hunches
+  }
+
+  /** The watcher's reply to `request`, given every hunch. */
+  const watch = async (
+    model: { provider: string; model: string },
+    hunches: readonly Hunch[],
+    request: string,
+    signal: AbortSignal,
+  ): Promise<string> => {
+    const deadline = AbortSignal.any([signal, AbortSignal.timeout(WATCHER_MS)])
+    const call = await ctx.llm.prepareCall(
+      {
+        ...model,
+        maxTokens: WATCHER_TOKENS,
+        ...(config.watcherReasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: ReasoningEffortId(config.watcherReasoningEffort) }),
+      },
+      deadline,
+    )
+    const options: GenerateOptions = {
+      ...call.config,
+      system: watcherSystem(hunches),
+      messages: [
+        createUserMessage({
+          content: [{ type: 'text', text: request }],
+          source: { kind: HUNCH_KIND, form: 'notice', summary: 'What the watcher was shown' },
+        }),
+      ],
+      signal: deadline,
+    }
+    const assembler = new BlockAssembler()
+    for await (const chunk of call.stream(options)) assembler.push(chunk)
+    const { finish } = assembler
+    if (finish.kind === 'error' || finish.kind === 'aborted')
+      throw new Error(finish.failure.message)
+    return assembler
+      .blocks()
+      .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+      .join('\n')
+  }
+
+  /**
+   * What the watcher brings up before a step of `session`, if anything: it is
+   * shown what was said before and what happened since it last looked, what
+   * the user just said included. A watcher that fails or takes too long brings
+   * up nothing, and the step goes on.
+   */
+  const hunchFor = async (
+    session: Session,
+    turn: number,
+    said: string,
+    signal: AbortSignal,
+  ): Promise<UserMessage | undefined> => {
+    if (watcher === undefined) return undefined
+    try {
+      let seen = watched.get(session.id)
+      if (seen === undefined) {
+        // The first look: what the conversation said before, and the hunches it was given then.
+        const log = await ctx.sessionQuery.readSession(session.id)
+        const shown = log.events.flatMap((event) =>
+          event.type === 'user/message' && event.data.source.kind === HUNCH_KIND
+            ? event.data.content.flatMap((block) =>
+                block.type === 'text' ? (block.text.match(HUNCH_FILE) ?? []) : [],
+              )
+            : [],
+        )
+        seen = {
+          fresh: [],
+          seen: newestEvents(log.events.filter((event) => WATCHED_EVENTS.has(event.type))),
+          shown: new Set(shown),
+          turn,
+          given: 0,
+        }
+        watched.set(session.id, seen)
+      }
+      if (seen.turn !== turn) {
+        seen.turn = turn
+        seen.given = 0
+      }
+      const fresh = seen.fresh
+      seen.fresh = []
+      const before = renderContext(seen.seen, WATCHED.before)
+      seen.seen = newestEvents([...seen.seen, ...fresh])
+      const now = [renderTranscript(fresh, WATCHED), said === '' ? '' : `### User\n${said}`]
+        .filter((part) => part !== '')
+        .join('\n\n')
+      if (now === '' || seen.given >= HUNCHES_PER_TURN) return undefined
+      const hunches = await currentHunches()
+      if (hunches.length === 0) return undefined
+      const shown = seen.shown
+      const reply = await watch(
+        watcher,
+        hunches,
+        watcherRequest(before, newest(now, WATCHED.now), [...shown]),
+        signal,
+      )
+      const found = broughtUp(
+        reply,
+        hunches.filter(({ file }) => !shown.has(file)),
+      )
+      if (found === undefined) return undefined
+      for (const file of found.files) shown.add(file)
+      seen.given += 1
+      return createUserMessage({
+        content: [{ type: 'text', text: hunchText(found.text) }],
+        source: {
+          kind: HUNCH_KIND,
+          form: 'notice',
+          summary: `Memory brought up ${found.files.length} hunch(es)`,
+        },
+      })
+    } catch (error) {
+      if (!signal.aborted) warn(`watching ${session.id}`)(error)
+      return undefined
+    }
+  }
+
   ctx.on(
     'agent/pre-step',
-    async ({ agent, signal }, next) => {
+    async ({ agent, turn, signal }, next) => {
       const decision = await next()
       if (decision.kind === 'reject' || signal.aborted) return decision
       if (!remembered(agent.session)) return decision
       try {
-        const said = decision.messages
+        const prompts = decision.messages.filter(
+          (message) => message.role === 'user' && message.source.kind === 'user',
+        )
+        const said = prompts
           .flatMap((message) =>
-            message.role === 'user' && message.source.kind === 'user'
-              ? message.content.flatMap((block) => (block.type === 'text' ? [block.text] : []))
-              : [],
+            message.content.flatMap((block) => (block.type === 'text' ? [block.text] : [])),
           )
           .join('\n')
         const given = [
           await memoryFor(agent.session),
           said === '' ? undefined : await todayFor(agent.session),
           said === '' ? undefined : await recallFor(agent.session, said),
+          await hunchFor(agent.session, turn, said, signal),
         ].filter((message) => message !== undefined)
         return given.length === 0
           ? decision
@@ -1029,6 +1262,19 @@ function contextMessage(
   source: { kind: 'langify-memory'; version: string; baseline?: true } & ContextFormed,
 ): UserMessage {
   return createUserMessage({ content: [{ type: 'text', text }], source })
+}
+
+/** How a hunch's file is named where it is brought up. */
+const HUNCH_FILE = new RegExp(`${HUNCHES}/[^\\s)]+\\.md`, 'g')
+
+/** The newest of `events` that the watcher keeps. */
+function newestEvents(events: readonly SessionEvent[]): SessionEvent[] {
+  return events.slice(-WATCHED.events)
+}
+
+/** The end of `text`, at most `limit` characters of it. */
+function newest(text: string, limit: number): string {
+  return text.length <= limit ? text : `…${text.slice(-limit)}`
 }
 
 function isExists(error: unknown): boolean {

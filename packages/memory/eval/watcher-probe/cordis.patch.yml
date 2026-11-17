@@ -1,0 +1,4 @@
+# Evaluation only: replays the watcher on recorded moments in a throwaway DSH home.
+- insert:
+    - id: memory-watcher-probe
+      name: '@langify-org/dsh-memory-watcher-probe'

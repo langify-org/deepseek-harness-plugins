@@ -1239,15 +1239,17 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
       const hunches = await currentHunches()
       if (hunches.length === 0) return undefined
       const shown = seen.shown
+      const happened = newest(now, WATCHED.now)
       const reply = await watch(
         watcher,
         hunches,
-        watcherRequest(before, newest(now, WATCHED.now), [...shown]),
+        watcherRequest(before, happened, [...shown]),
         signal,
       )
       const found = broughtUp(
         reply,
         hunches.filter(({ file }) => !shown.has(file)),
+        happened,
       )
       if (found.length === 0) return undefined
       const files = found.map(({ file }) => file)

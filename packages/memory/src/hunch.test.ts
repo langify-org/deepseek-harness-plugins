@@ -24,9 +24,13 @@ describe('hunchesOf', () => {
   })
 })
 
+/** What the watcher was shown had just happened. */
+const NOW =
+  '### User\nユーザーに届けたい価値ってなんだと思う？ The rent is due and I have not started the transfer.'
+
 /** The files of the hunches the watcher's `reply` brings up. */
 function named(reply: string): string[] {
-  return broughtUp(reply, hunches).map(({ file }) => file)
+  return broughtUp(reply, hunches, NOW).map(({ file }) => file)
 }
 
 describe('broughtUp', () => {
@@ -37,22 +41,39 @@ describe('broughtUp', () => {
 
   it('is nothing when the watcher names no hunch it was given', () => {
     expect(named('The user may want to think aloud.')).toEqual([])
-    expect(named('hunches/made-up.md')).toEqual([])
+    expect(named('hunches/made-up.md "届けたい価値ってなんだと思う"')).toEqual([])
   })
 
-  it('takes the hunches the watcher named, one to a line', () => {
-    expect(named('hunches/think-aloud.md\nhunches/bank-transfer.md\n')).toEqual([
-      'hunches/bank-transfer.md',
+  it('takes the hunches the watcher named, one to a line, each with its cue quoted', () => {
+    expect(
+      named(
+        'hunches/think-aloud.md 「ユーザーに届けたい価値ってなんだと思う？」\nhunches/bank-transfer.md "I have not started the transfer"\n',
+      ),
+    ).toEqual(['hunches/bank-transfer.md', 'hunches/think-aloud.md'])
+  })
+
+  it('finds a cue whatever its spacing and quotation marks', () => {
+    expect(named('- hunches/think-aloud.md: “届けたい 価値って なんだと思う”')).toEqual([
       'hunches/think-aloud.md',
     ])
   })
 
+  it('brings up no hunch whose cue is not in what just happened', () => {
+    // Named to say that it does not fit.
+    expect(named('hunches/think-aloud.md does not fit here: nothing is offered.')).toEqual([])
+    // A cue put in other words, or from before.
+    expect(named('hunches/bank-transfer.md "the user is stuck before paying"')).toEqual([])
+    // Named alone.
+    expect(named('hunches/think-aloud.md')).toEqual([])
+    // A quote too short to point at anything.
+    expect(named('hunches/think-aloud.md "価値"')).toEqual([])
+  })
+
   it('knows a hunch by its file name when the watcher shortens it', () => {
-    expect(named('think-aloud')).toEqual(['hunches/think-aloud.md'])
-    expect(named('Seen before (think-aloud).')).toEqual(['hunches/think-aloud.md'])
-    expect(named('bank-transfer.md')).toEqual(['hunches/bank-transfer.md'])
+    expect(named('think-aloud "なんだと思う？"')).toEqual(['hunches/think-aloud.md'])
+    expect(named('bank-transfer.md "The rent is due"')).toEqual(['hunches/bank-transfer.md'])
     // A name inside a sentence is just a word.
-    expect(named('The user may want to think-aloud here.')).toEqual([])
+    expect(named('The user may want to think-aloud here: "なんだと思う？"')).toEqual([])
   })
 })
 
@@ -65,7 +86,7 @@ describe('what the watcher is shown and what it brings up', () => {
   })
 
   it('gives a conversation each hunch as it was written, under its file', () => {
-    const text = hunchText(broughtUp('hunches/think-aloud.md', hunches))
+    const text = hunchText(broughtUp('hunches/think-aloud.md "なんだと思う？"', hunches, NOW))
     expect(text.startsWith('<memory-hunch>')).toBe(true)
     expect(text).toContain('not what to do now')
     expect(text).toContain(

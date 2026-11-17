@@ -14,7 +14,10 @@
 // for the conversation's model to weigh. The watcher only tells the moment: in
 // its own words a recollection turned into advice, and a retelling loses what
 // the original says. A watcher that is not sure says nothing, since one that
-// speaks out of turn is soon not listened to.
+// speaks out of turn is soon not listened to. It points at the moment, too: it
+// quotes the words of what just happened that are the hunch's cue, and a hunch
+// whose cue is not there is not brought up. Asked only to name hunches, the
+// model named them for a subject the moment shared and to say they did not fit.
 
 /** The directory, in the memory directory, of the hunches. */
 export const HUNCHES = 'hunches'
@@ -49,7 +52,7 @@ export function watcherSystem(hunches: readonly Hunch[]): string {
     '',
     "Below are the hunches memory holds: what earlier conversations taught about a kind of moment. Each names the cues by which such a moment can be told as it happens, what happened in it before, the user's own words, and why it may matter.",
     '',
-    'You are shown what was happening in the conversation, then what just happened. When what just happened is one of the moments a hunch is about, its cues there in what the user says or does, in what the assistant just did or is setting out to do, or in what a tool showed, bring the hunch up. A moment can show over several turns: what the assistant offered and whether the user took it up, how the user answers. To bring a hunch up, reply with its file, exactly as it is named after === below, such as hunches/example.md, one to a line, and nothing else: the assistant is given the hunch itself and decides whether it fits.',
+    'You are shown what was happening in the conversation, then what just happened. When what just happened is one of the moments a hunch is about, its cues there in what the user says or does, in what the assistant just did or is setting out to do, or in what a tool showed, bring the hunch up. A moment can show over several turns: what the assistant offered and whether the user took it up, how the user answers. To bring a hunch up, reply with its file, exactly as it is named after === below, such as hunches/example.md, at the start of a line, and after it on the same line the words in what just happened that are its cue, quoted as they are, and nothing else: the assistant is given the hunch itself and decides whether it fits.',
     '',
     `Judge by the moment, not by shared words: a hunch whose words appear but whose moment this is not is not called up, and one whose moment this is may share no word with what was said. Most moments call up nothing. A hunch brought up where it does not fit costs the assistant its attention, and a memory that speaks out of turn is soon not listened to. Bring up at most two. Naming a hunch brings it up, so do not name one to say that it does not fit. When nothing is called up, reply with exactly ${QUIET}.`,
     '',
@@ -82,24 +85,37 @@ export function watcherRequest(
   ].join('\n')
 }
 
+/** The fewest characters, spacing and punctuation aside, that a quoted cue has. */
+const CUE_CHARS = 4
+
 /**
- * The hunches the watcher brought up: none when it named none it was given. A
- * small model asked to name a file often shortens it, so a hunch is also named
- * by its file's name alone, with the extension, or on a line of its own or in
- * parentheses without it.
+ * The hunches the watcher brought up from `now`, what it was shown had just
+ * happened: each named at the start of a line, followed by words it quotes from
+ * `now` as the cue. A hunch named without such words is not brought up. A small
+ * model asked to name a file often shortens it, so a hunch is also named by its
+ * file's name alone, with or without the extension.
  */
-export function broughtUp(reply: string, hunches: readonly Hunch[]): Hunch[] {
+export function broughtUp(reply: string, hunches: readonly Hunch[], now: string): Hunch[] {
   const text = reply.trim()
   if (text === '' || text === QUIET) return []
+  const happened = plain(now)
+  const named = text.split('\n').flatMap((line) => {
+    const parts = /^\s*(?:[-*]\s+)?(\S+)\s+(.+)$/u.exec(line)
+    if (parts === null) return []
+    const cue = plain(parts[2] ?? '')
+    return cue.length >= CUE_CHARS && happened.includes(cue)
+      ? [(parts[1] ?? '').replace(/[:：,、]$/u, '')]
+      : []
+  })
   return hunches.filter(({ file }) => {
     const name = file.slice(HUNCHES.length + 1).replace(/\.md$/, '')
-    const escaped = name.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    return (
-      text.includes(file) ||
-      text.includes(`${name}.md`) ||
-      new RegExp(`^\\s*${escaped}\\s*$|[(（[]\\s*${escaped}\\s*[)）\\]]`, 'mu').test(text)
-    )
+    return named.some((token) => token === file || token === `${name}.md` || token === name)
   })
+}
+
+/** `text` without spacing, quotation marks or punctuation, so that a quote is found in what it quotes. */
+function plain(text: string): string {
+  return text.replaceAll(/[\s"'`“”‘’「」『』（）()…。、，．,.!?！？:：]/gu, '')
 }
 
 /** What a conversation is given of the hunches the watcher brought up: each as the night wrote it. */

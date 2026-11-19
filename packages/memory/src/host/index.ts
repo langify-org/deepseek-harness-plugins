@@ -72,6 +72,7 @@ import {
   SessionId,
   type Session,
   type SessionEvent,
+  type SessionSeq,
 } from '@deepseek-ai/dsh-session'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import type { Workspace } from '@deepseek-ai/dsh-workspace'
@@ -935,7 +936,7 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     fresh: SessionEvent[]
     /** The newest of the events it looked at, oldest first. */
     seen: SessionEvent[]
-    /** The hunches it brought up in the conversation. */
+    /** The hunches it brought up in the conversation that the conversation can still see. */
     shown: Set<string>
     /** The turn it last looked in, and how many times that turn was given hunches. */
     turn: number
@@ -945,7 +946,13 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
 
   /** Keep an event of a conversation for its watcher, once the watcher has looked at it. */
   const watchEvent = (session: Session, event: SessionEvent): void => {
-    if (watcher === undefined || !WATCHED_EVENTS.has(event.type)) return
+    if (watcher === undefined) return
+    // Compaction may have hidden hunches from the model: the next look reads the log again.
+    if (isReplacementSurfaceEvent(event)) {
+      watched.delete(session.id)
+      return
+    }
+    if (!WATCHED_EVENTS.has(event.type)) return
     const seen = watched.get(session.id)
     // Not looked at yet: the first look reads the conversation's log.
     if (seen === undefined) return
@@ -1206,18 +1213,10 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
       if (seen === undefined) {
         // The first look: what the conversation said before, and the hunches it was given then.
         const log = await ctx.sessionQuery.readSession(session.id)
-        const shown = log.events.flatMap((event) =>
-          event.type === 'user/message' && event.data.source.kind === HUNCH_KIND
-            ? (event.data.source.files ??
-              event.data.content.flatMap((block) =>
-                block.type === 'text' ? (block.text.match(HUNCH_FILE) ?? []) : [],
-              ))
-            : [],
-        )
         seen = {
           fresh: [],
           seen: newestEvents(log.events.filter((event) => WATCHED_EVENTS.has(event.type))),
-          shown: new Set(shown),
+          shown: shownHunches(log.events),
           turn,
           given: 0,
         }
@@ -1360,6 +1359,28 @@ function contextMessage(
 }
 
 /** How a hunch's file is named where it is brought up. */
+/**
+ * The hunches a conversation was given that it can still see. One that
+ * compaction hid is no longer before the model, so it can be brought up again.
+ */
+export function shownHunches(events: readonly SessionEvent[]): Set<string> {
+  const given = new Map<string, SessionSeq>()
+  for (const event of events) {
+    if (event.type === 'user/message' && event.data.source.kind === HUNCH_KIND) {
+      const files =
+        event.data.source.files ??
+        event.data.content.flatMap((block) =>
+          block.type === 'text' ? (block.text.match(HUNCH_FILE) ?? []) : [],
+        )
+      for (const file of files) given.set(file, event.seq)
+    } else if (isReplacementSurfaceEvent(event)) {
+      const hidden = new Set(event.sourceEventSeqs ?? [])
+      for (const [file, seq] of given) if (hidden.has(seq)) given.delete(file)
+    }
+  }
+  return new Set(given.keys())
+}
+
 const HUNCH_FILE = new RegExp(`${HUNCHES}/[^\\s)]+\\.md`, 'g')
 
 /** The newest of `events` that the watcher keeps. */

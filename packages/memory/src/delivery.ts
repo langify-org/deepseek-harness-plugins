@@ -106,7 +106,7 @@ export function recallText(lines: readonly NoteLine[]): string {
 export function todayText(date: string, lines: readonly NoteLine[]): string {
   return [
     `<memory-today date="${date}">`,
-    'Lines of your memory that name today:',
+    'Lines of your memory, written before today, that name today. What conversations noted today is not among them, and it may have settled some of these: it is in the files of what was noted since.',
     ...lines.map((line) => `- ${shown(line)}`),
     '</memory-today>',
   ].join('\n')

@@ -65,5 +65,7 @@ describe('what is put beside what was said', () => {
     const text = todayText('2026-11-16', [line])
     expect(text).toContain('<memory-today date="2026-11-16">')
     expect(text).toContain('- projects/cat.md:12:')
+    // A promise for today may have been kept by a conversation of today, which these lines are not from.
+    expect(text).toContain('What conversations noted today is not among them')
   })
 })

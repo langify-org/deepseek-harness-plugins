@@ -112,6 +112,29 @@ export function todayText(date: string, lines: readonly NoteLine[]): string {
   ].join('\n')
 }
 
+/** A line as a message of `recallText` or `todayText` showed it: its file, and its text as shown. */
+export interface ShownLine {
+  readonly file: string
+  readonly text: string
+}
+
+const SHOWN_LINE = /^- (.+?):\d+: (.*)$/
+const TODAY_TAG = /^<memory-today date="([^"]+)">$/m
+
+/**
+ * What a message of `recallText` or `todayText` showed: its lines, and the
+ * date of a message of the lines that name today. The conversation's own log
+ * says so, and the log is what it still has when the plugin starts again.
+ */
+export function shownIn(text: string): { readonly date?: string; readonly lines: ShownLine[] } {
+  const lines = text.split('\n').flatMap((line) => {
+    const match = SHOWN_LINE.exec(line)
+    return match === null ? [] : [{ file: match[1] ?? '', text: match[2] ?? '' }]
+  })
+  const date = TODAY_TAG.exec(text)?.[1]
+  return date === undefined ? { lines } : { date, lines }
+}
+
 /**
  * What changed in memory since `from`: the files, not what was written. Most
  * changes come from conversations about something else, so a conversation is

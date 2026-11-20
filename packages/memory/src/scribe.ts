@@ -96,8 +96,12 @@ export function newEntries(
 
 /** A line of a note as it is shown beside something it may be about. */
 export function shown(line: NoteLine): string {
-  const text = line.text.length <= LINE_CHARS ? line.text : `${line.text.slice(0, LINE_CHARS)}…`
-  return `${line.file}:${line.line}: ${text}`
+  return `${line.file}:${line.line}: ${shownText(line.text)}`
+}
+
+/** What is shown of a line's text: all of it, or the beginning of a long one. Shown again, it stays the same. */
+export function shownText(text: string): string {
+  return text.length <= LINE_CHARS ? text : `${text.slice(0, LINE_CHARS)}…`
 }
 
 /** How much of a long line is shown; the rest is in its file. */

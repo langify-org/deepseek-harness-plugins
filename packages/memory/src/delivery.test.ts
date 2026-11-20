@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { baselineText, indexHead, parseCommits, recallText, todayText } from './delivery.ts'
+import {
+  baselineText,
+  indexHead,
+  parseCommits,
+  recallText,
+  shownIn,
+  todayText,
+} from './delivery.ts'
 
 describe('parseCommits', () => {
   it('separates each message from its source trailers', () => {
@@ -67,5 +74,34 @@ describe('what is put beside what was said', () => {
     expect(text).toContain('- projects/cat.md:12:')
     // A promise for today may have been kept by a conversation of today, which these lines are not from.
     expect(text).toContain('What conversations noted today is not among them')
+  })
+
+  it('reads back from the message what it showed, as it showed it', () => {
+    const long = { file: 'MEMORY.md', line: 3, text: `- ${'記'.repeat(450)}` }
+    expect(shownIn(recallText([line, long]))).toEqual({
+      lines: [
+        { file: 'projects/cat.md', text: '- postbox drops what is over 200 a day.' },
+        { file: 'MEMORY.md', text: `- ${'記'.repeat(398)}…` },
+      ],
+    })
+    expect(shownIn(todayText('2026-11-16', [line]))).toEqual({
+      date: '2026-11-16',
+      lines: [{ file: 'projects/cat.md', text: '- postbox drops what is over 200 a day.' }],
+    })
+  })
+
+  it('reads the lines that name today as messages before the wording changed showed them', () => {
+    const before = [
+      '<memory-today date="2026-11-19">',
+      'Lines of your memory that name today:',
+      '- projects/phuket-trip.md:12: - 11/19 までに HIS に大きな荷物を連絡する',
+      '</memory-today>',
+    ].join('\n')
+    expect(shownIn(before)).toEqual({
+      date: '2026-11-19',
+      lines: [
+        { file: 'projects/phuket-trip.md', text: '- 11/19 までに HIS に大きな荷物を連絡する' },
+      ],
+    })
   })
 })

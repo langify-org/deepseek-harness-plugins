@@ -45,7 +45,8 @@
 // first time, and afterwards the names of the files that changed; a long turn
 // is told while it goes on. When something is said in it, it is also given the
 // lines of the current notes that what was said calls for, and on the first
-// time of a day those that name the day. With a watcher model set, a small
+// time of a day those that name the day; none it was shown and can still see,
+// as its log tells. With a watcher model set, a small
 // model also watches each conversation from outside and, before a step, brings
 // up a hunch when what just happened is the moment it is about (../hunch.ts).
 /// <reference types="@deepseek-ai/dsh-agent-preset-registry" />
@@ -55,6 +56,7 @@
 /// <reference types="@deepseek-ai/dsh-session-title" />
 /// <reference types="@deepseek-ai/dsh-subagent" />
 /// <reference types="@deepseek-ai/dsh-tools" />
+import { createHash } from 'node:crypto'
 import { appendFile, mkdir, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
@@ -82,6 +84,7 @@ import {
   baselineText,
   indexHead,
   recallText,
+  shownIn,
   todayText,
   updateText,
   type Recent,
@@ -96,7 +99,7 @@ import {
   watcherSystem,
   type Hunch,
 } from '../hunch.ts'
-import { naming, noteLines, recall, scored, type NoteLine } from '../related.ts'
+import { naming, noteLines, recall, scored } from '../related.ts'
 import {
   AGENTS_MD,
   commitMessage,
@@ -115,6 +118,7 @@ import {
   firstRequest,
   keptPart,
   nextRequest,
+  shownText,
   type ScribeSource,
 } from '../scribe.ts'
 import { renderContext, renderTranscript, unreadFrom } from '../transcript.ts'
@@ -127,6 +131,7 @@ const RECALL_KIND = 'langify-memory-recall'
 const DAY_KIND = 'langify-memory-day'
 const HUNCH_KIND = 'langify-memory-hunch'
 const PROJECTION_KEY = 'langifyMemory'
+const RECALLED_KEY = 'langifyMemoryRecalled'
 
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
@@ -313,6 +318,23 @@ interface Given {
 const givenState: z.ZodType<Given | null> = z
   .object({ baseline: z.string(), baselineSeq: z.number(), version: z.string() })
   .nullable()
+
+/**
+ * What a conversation was shown beside what was said and can still see: each
+ * line, by `lineId`, and each day it was shown the lines that name the day, with
+ * the event that showed it.
+ */
+export interface Recalled {
+  readonly lines: Readonly<Record<string, number>>
+  readonly days: Readonly<Record<string, number>>
+}
+
+const recalledState: z.ZodType<Recalled> = z.object({
+  lines: z.record(z.string(), z.number()),
+  days: z.record(z.string(), z.number()),
+})
+
+const NOTHING_RECALLED: Recalled = { lines: {}, days: {} }
 
 /**
  * One projection unit, after `ProjectionDefinition` in
@@ -1017,6 +1039,20 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     'memory: given projection',
   )
 
+  // What each conversation was shown beside what it said, read back from its log:
+  // a plugin that starts again shows none of it again.
+  ctx.effect(
+    () =>
+      projections.register<Recalled>({
+        key: RECALLED_KEY,
+        stateVersion: 1,
+        stateSchema: recalledState,
+        init: () => NOTHING_RECALLED,
+        apply: recalledAfter,
+      }),
+    'memory: recalled projection',
+  )
+
   /** What `session` should be given now, if anything. */
   const memoryFor = async (session: Session): Promise<UserMessage | undefined> => {
     const parsed = givenState.safeParse(projections.stateOf(session, PROJECTION_KEY))
@@ -1059,13 +1095,7 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     })
   }
 
-  // The lines each conversation was shown beside what it said, so that none is shown twice,
-  // and the day each was last shown the lines that name the day.
-  const recalled = new Map<string, Set<string>>()
-  const reminded = new Map<string, string>()
   ctx.on('agent/disposed', ({ agent }) => {
-    recalled.delete(agent.session.id)
-    reminded.delete(agent.session.id)
     watched.delete(agent.session.id)
   })
 
@@ -1090,54 +1120,57 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
       day: '2-digit',
     }).format(new Date())
 
-  /** The lines of memory, written before today, that name today: given the first time something is said in `session` that day. */
-  const todayFor = async (session: Session): Promise<UserMessage | undefined> => {
-    const today = date()
-    if (reminded.get(session.id) === today) return undefined
-    reminded.set(session.id, today)
-    // What was noted today names today because it happened today, not because it was planned for it.
-    const earlier = Object.entries(await shownNotes()).filter(
-      ([file]) =>
-        !file.startsWith(`${EPISODES}/${today}/`) && !file.startsWith(`${EPISODES}/${day()}/`),
-    )
-    const lines = naming(today, noteLines(Object.fromEntries(earlier))).slice(0, TODAY)
-    if (lines.length === 0) return undefined
-    const text = todayText(today, lines)
-    return createUserMessage({
-      content: [{ type: 'text', text }],
-      source: {
-        kind: RECALL_KIND,
-        form: 'notice',
-        summary: `${lines.length} line(s) of memory name today`,
-      },
-    })
-  }
-
   /**
-   * The lines of memory most about what was just said in `session`, when any is
-   * enough about it. The index is left out, since the conversation has it.
+   * What is put beside what was just said in `session`: the first time of a day,
+   * the lines of memory, written before today, that name today; and the lines
+   * most about what was said, when any is enough about it. The index is left out,
+   * since the conversation has it, and so is a line the conversation was shown
+   * and can still see. Compaction hiding one lets it be shown again.
    */
-  const recallFor = async (session: Session, said: string): Promise<UserMessage | undefined> => {
+  const linesFor = async (session: Session, said: string): Promise<UserMessage[]> => {
+    const parsed = recalledState.safeParse(projections.stateOf(session, RECALLED_KEY))
+    const before = parsed.success ? parsed.data : NOTHING_RECALLED
+    const shownBefore = new Set(Object.keys(before.lines))
     const files = await shownNotes()
-    const shownBefore = recalled.get(session.id) ?? new Set<string>()
-    const lines: NoteLine[] = []
-    for (const line of recall(said, noteLines(files), RECALL)) {
-      const key = `${line.file}\n${line.text}`
-      if (shownBefore.has(key)) continue
-      shownBefore.add(key)
-      lines.push(line)
+    const given: UserMessage[] = []
+    const today = date()
+    if (before.days[today] === undefined) {
+      // What was noted today names today because it happened today, not because it was planned for it.
+      const earlier = Object.entries(files).filter(
+        ([file]) =>
+          !file.startsWith(`${EPISODES}/${today}/`) && !file.startsWith(`${EPISODES}/${day()}/`),
+      )
+      const lines = naming(today, noteLines(Object.fromEntries(earlier))).slice(0, TODAY)
+      if (lines.length > 0) {
+        for (const line of lines) shownBefore.add(lineId(line))
+        given.push(
+          createUserMessage({
+            content: [{ type: 'text', text: todayText(today, lines) }],
+            source: {
+              kind: RECALL_KIND,
+              form: 'notice',
+              summary: `${lines.length} line(s) of memory name today`,
+            },
+          }),
+        )
+      }
     }
-    if (lines.length === 0) return undefined
-    recalled.set(session.id, shownBefore)
-    const text = recallText(lines)
-    return createUserMessage({
-      content: [{ type: 'text', text }],
-      source: {
-        kind: RECALL_KIND,
-        form: 'notice',
-        summary: `Recalled ${lines.length} line(s) of memory`,
-      },
-    })
+    const lines = recall(said, noteLines(files), RECALL).filter(
+      (line) => !shownBefore.has(lineId(line)),
+    )
+    if (lines.length > 0) {
+      given.push(
+        createUserMessage({
+          content: [{ type: 'text', text: recallText(lines) }],
+          source: {
+            kind: RECALL_KIND,
+            form: 'notice',
+            summary: `Recalled ${lines.length} line(s) of memory`,
+          },
+        }),
+      )
+    }
+    return given
   }
 
   /** The hunches as they are now: read again only when memory changed. */
@@ -1286,8 +1319,7 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
           .join('\n')
         const given = [
           await memoryFor(agent.session),
-          said === '' ? undefined : await todayFor(agent.session),
-          said === '' ? undefined : await recallFor(agent.session, said),
+          ...(said === '' ? [] : await linesFor(agent.session, said)),
           await hunchFor(agent.session, turn, said, signal),
         ].filter((message) => message !== undefined)
         return given.length === 0
@@ -1382,6 +1414,48 @@ export function shownHunches(events: readonly SessionEvent[]): Set<string> {
 }
 
 const HUNCH_FILE = new RegExp(`${HUNCHES}/[^\\s)]+\\.md`, 'g')
+
+/**
+ * `state` after `event` of a conversation: lines of memory put beside what was
+ * said are added, with the day of the lines that name it; those that compaction
+ * hid are no longer before the model, so they can be shown again.
+ */
+export function recalledAfter(state: Recalled, event: SessionEvent): Recalled {
+  if (event.type === 'user/message' && event.data.source.kind === RECALL_KIND) {
+    const text = event.data.content.flatMap((block) => (block.type === 'text' ? [block.text] : []))
+    const { date, lines } = shownIn(text.join('\n'))
+    if (date === undefined && lines.length === 0) return state
+    return {
+      lines: {
+        ...state.lines,
+        ...Object.fromEntries(lines.map((line) => [lineId(line), event.seq])),
+      },
+      days: date === undefined ? state.days : { ...state.days, [date]: event.seq },
+    }
+  }
+  if (!isReplacementSurfaceEvent(event)) return state
+  const hidden = new Set<number>(event.sourceEventSeqs ?? [])
+  const seen = (shown: Readonly<Record<string, number>>): Record<string, number> =>
+    Object.fromEntries(Object.entries(shown).filter(([, seq]) => !hidden.has(seq)))
+  const lines = seen(state.lines)
+  const days = seen(state.days)
+  const same =
+    Object.keys(lines).length === Object.keys(state.lines).length &&
+    Object.keys(days).length === Object.keys(state.days).length
+  return same ? state : { lines, days }
+}
+
+/**
+ * How a line put beside what was said is known again: by its file and its text
+ * as shown, not its number, which moves as the file changes; kept short, since a
+ * long conversation is shown thousands.
+ */
+function lineId(line: { readonly file: string; readonly text: string }): string {
+  return createHash('sha256')
+    .update(`${line.file}\n${shownText(line.text)}`)
+    .digest('base64url')
+    .slice(0, 16)
+}
 
 /** The newest of `events` that the watcher keeps. */
 function newestEvents(events: readonly SessionEvent[]): SessionEvent[] {

@@ -4,7 +4,9 @@ import {
   consolidateRequest,
   episodeEntries,
   episodeEntry,
+  episodeFile,
   episodeHead,
+  isEpisodeOf,
   newEntries,
 } from './scribe.ts'
 
@@ -67,6 +69,20 @@ describe('a file of episodes', () => {
       '14:40 (events 19 to 27)',
     ])
     expect(newEntries(now, now)).toEqual([])
+  })
+})
+
+describe('whose episodes a file holds', () => {
+  const id = 'session-38b4bbc5-ad88-46fb-bee0-5e4527e65414'
+
+  it("names a conversation's file of a day by the beginning of its id", () => {
+    expect(episodeFile('2026-11-20', id)).toBe('episodes/2026-11-20/38b4bbc5.md')
+  })
+
+  it("tells the conversation's own episodes, of any day, from those of others and from what is known", () => {
+    expect(isEpisodeOf('episodes/2026-11-19/38b4bbc5.md', id)).toBe(true)
+    expect(isEpisodeOf('episodes/2026-11-20/44924cbe.md', id)).toBe(false)
+    expect(isEpisodeOf('projects/38b4bbc5.md', id)).toBe(false)
   })
 })
 

@@ -111,11 +111,21 @@ const LINE_CHARS = 400
  * The message before what is known is brought up to date: each new entry beside
  * the lines of what is known that it may be about, and the question whether they
  * agree. A model that only has two notes in front of it does not compare them;
- * asked about the pair, it does.
+ * asked about the pair, it does. A line that an earlier entry was set beside is
+ * named again by its place, not shown again: the message stays in the memory
+ * conversation while what is known is brought up to date, and on a long day most
+ * of its lines were the same lines again (11/21: 879 shown, 316 different).
  */
 export function compareRequest(compared: readonly Compared[]): string {
+  const seen = new Set<string>()
+  const listed = (line: NoteLine): string => {
+    const place = `${line.file}:${line.line}`
+    if (seen.has(place)) return `${place} (shown above)`
+    seen.add(place)
+    return shown(line)
+  }
   return [
-    `Before what memory knows is brought up to date, compare. Below are the entries that scribes noted from conversations since the last time. Under each are the lines of what is known that share the most words with it: some are about the same thing, some only look so.`,
+    `Before what memory knows is brought up to date, compare. Below are the entries that scribes noted from conversations since the last time. Under each are the lines of what is known that share the most words with it: some are about the same thing, some only look so. A line already shown under an earlier entry is named by its place only.`,
     '',
     'For each entry, name the lines it disagrees with or makes out of date, and say in a sentence what each side says. Say nothing about the other lines; where there is none, say: none. Change no file yet: the next message asks for the changes.',
     ...compared.flatMap(({ file, heading, entry, lines }) => [
@@ -125,7 +135,7 @@ export function compareRequest(compared: readonly Compared[]): string {
       '',
       ...(lines.length === 0
         ? ['(No line of what is known shares words with it.)']
-        : lines.map((line, index) => `${index + 1}. ${shown(line)}`)),
+        : lines.map((line, index) => `${index + 1}. ${listed(line)}`)),
     ]),
   ].join('\n')
 }

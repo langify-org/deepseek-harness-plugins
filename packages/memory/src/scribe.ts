@@ -280,6 +280,19 @@ export function nextRequest(source: ScribeSource, transcript: string): string {
   return [partLine(source), transcript].join('\n')
 }
 
+/** The file of a conversation's episodes for `day`: one a day, named by the beginning of the conversation's id. */
+export function episodeFile(day: string, sessionId: string): string {
+  return `${EPISODES}/${day}/${episodeName(sessionId)}`
+}
+
+/** Whether `file` holds what the conversation `sessionId` said, on any day. */
+export function isEpisodeOf(file: string, sessionId: string): boolean {
+  return file.startsWith(`${EPISODES}/`) && file.endsWith(`/${episodeName(sessionId)}`)
+}
+
+const episodeName = (sessionId: string): string =>
+  `${sessionId.replace(/^session-/, '').slice(0, 8)}.md`
+
 /** How a conversation's file of episodes for one day begins. */
 export function episodeHead(source: ScribeSource): string {
   const cwd = source.cwd === undefined ? '' : `, working in ${source.cwd}`

@@ -108,7 +108,9 @@ import {
   EPISODES,
   episodeEntries,
   episodeEntry,
+  episodeFile,
   episodeHead,
+  isEpisodeOf,
   newEntries,
   type Compared,
   GUIDANCE_FILE,
@@ -934,7 +936,7 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     }
     const entry = turn.reply.trim()
     if (entry !== '' && entry !== NOTHING) {
-      const file = join(EPISODES, day(), `${session.id.replace(/^session-/, '').slice(0, 8)}.md`)
+      const file = episodeFile(day(), session.id)
       const path = join(config.directory, file)
       await mkdir(dirname(path), { recursive: true })
       await writeFile(path, episodeHead(source), { flag: 'wx' }).catch((error: unknown) => {
@@ -1123,9 +1125,10 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
   /**
    * What is put beside what was just said in `session`: the first time of a day,
    * the lines of memory, written before today, that name today; and the lines
-   * most about what was said, when any is enough about it. The index is left out,
-   * since the conversation has it, and so is a line the conversation was shown
-   * and can still see. Compaction hiding one lets it be shown again.
+   * most about what was said, when any is enough about it, out of the notes other
+   * than the conversation's own episodes. The index is left out, since the
+   * conversation has it, and so is a line the conversation was shown and can
+   * still see. Compaction hiding one lets it be shown again.
    */
   const linesFor = async (session: Session, said: string): Promise<UserMessage[]> => {
     const parsed = recalledState.safeParse(projections.stateOf(session, RECALLED_KEY))
@@ -1155,7 +1158,9 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
         )
       }
     }
-    const lines = recall(said, noteLines(files), RECALL).filter(
+    // What this conversation noted itself, it knows: its own episodes leave the room to the others'.
+    const others = Object.entries(files).filter(([file]) => !isEpisodeOf(file, session.id))
+    const lines = recall(said, noteLines(Object.fromEntries(others)), RECALL).filter(
       (line) => !shownBefore.has(lineId(line)),
     )
     if (lines.length > 0) {

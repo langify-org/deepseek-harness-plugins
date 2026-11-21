@@ -137,4 +137,28 @@ describe('compareRequest', () => {
     expect(text).toContain('1. projects/blog.md:9: - kiln resumes with --resume.')
     expect(text).toContain('(No line of what is known shares words with it.)')
   })
+
+  it('names a line shown under an earlier entry by its place', () => {
+    const line = {
+      file: 'projects/mail.md',
+      line: 2,
+      text: '- postbox drops what is over 200 a day.',
+    }
+    const text = compareRequest([
+      {
+        file: 'episodes/2026-11-15/1234.md',
+        heading: '14:21 (events 4 to 18)',
+        entry: 'Sent 50 with postbox.',
+        lines: [line],
+      },
+      {
+        file: 'episodes/2026-11-15/5678.md',
+        heading: '15:00 (events 2 to 6)',
+        entry: 'postbox sent all 320.',
+        lines: [line],
+      },
+    ])
+    expect(text.split(line.text)).toHaveLength(2)
+    expect(text).toContain('1. projects/mail.md:2 (shown above)')
+  })
 })

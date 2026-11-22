@@ -1,6 +1,6 @@
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { describe, expect, it } from 'vitest'
-import { renderContext, renderTranscript, unreadFrom } from './transcript.ts'
+import { endedUnread, renderContext, renderTranscript, unreadFrom } from './transcript.ts'
 
 const limits = { toolArguments: 20, toolResult: 10 }
 
@@ -154,6 +154,35 @@ describe('unreadFrom', () => {
   it('starts a conversation it never read at the turn that ended, not at a later one', () => {
     expect(unreadFrom(log, undefined, 5)).toBe(3)
     expect(unreadFrom(log, undefined, 2)).toBe(0)
+  })
+
+  it('starts a conversation it never read at the first turn since it was not running', () => {
+    const timed = log.map((event) => Object.assign(event, { time: event.seq * 10 }))
+    expect(unreadFrom(timed, undefined, 5, 0)).toBe(0)
+    expect(unreadFrom(timed, undefined, 5, 20)).toBe(3)
+    expect(unreadFrom(timed, undefined, 5, 100)).toBe(3)
+    expect(unreadFrom(timed, 2, 5, 0)).toBe(3)
+  })
+})
+
+describe('endedUnread', () => {
+  const log = events(
+    { type: 'turn/start', data: {} },
+    { type: 'turn/end', data: { reason: { kind: 'completed' } } },
+    { type: 'turn/start', data: {} },
+    { type: 'turn/end', data: { reason: { kind: 'completed' } } },
+    { type: 'turn/start', data: {} },
+  ).map((event) => Object.assign(event, { time: event.seq * 10 }))
+
+  it('names the last turn that ended, when it is unread', () => {
+    expect(endedUnread(log, undefined, 0)).toBe(3)
+    expect(endedUnread(log, 1, 0)).toBe(3)
+  })
+
+  it('names none that was read, or that ended before since', () => {
+    expect(endedUnread(log, 3, 0)).toBeUndefined()
+    expect(endedUnread(log, undefined, 31)).toBeUndefined()
+    expect(endedUnread(log.slice(0, 1), undefined, 0)).toBeUndefined()
   })
 })
 

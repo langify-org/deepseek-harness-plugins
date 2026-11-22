@@ -123,7 +123,7 @@ import {
   shownText,
   type ScribeSource,
 } from '../scribe.ts'
-import { renderContext, renderTranscript, unreadFrom } from '../transcript.ts'
+import { endedUnread, renderContext, renderTranscript, unreadFrom } from '../transcript.ts'
 import { Repository } from './repository.ts'
 
 export const name = 'langify-memory'
@@ -377,6 +377,9 @@ const SCRIBE_PROTOCOL = 2
 /** The memory preset's tools that change files. */
 const WRITING = ['edit', 'apply_patch']
 
+/** How long before starting a turn that ended unread is still read then. */
+const CATCH_UP_MS = 86_400_000
+
 /** How many files of episodes a conversation is told of when it starts: the newest. */
 const RECENT = 40
 
@@ -487,12 +490,12 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
     return done
   }
 
-  const inMemory = (session: Session): boolean => {
+  const inMemory = (session: Pick<Session, 'header'>): boolean => {
     const { cwd } = session.header
     return cwd !== undefined && directories.some((d) => cwd === d || cwd.startsWith(d + sep))
   }
   /** Conversations that are remembered and given memory: not subagents, not memory's own. */
-  const remembered = (session: Session): boolean =>
+  const remembered = (session: Pick<Session, 'header'>): boolean =>
     session.header.origin !== 'subagent' && !inMemory(session)
 
   /** The memory conversation's day at `at`: it starts at `dayStartsAt`, not at midnight. */
@@ -868,10 +871,19 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
   }, 60_000)
   ctx.effect(() => () => clearInterval(clock), 'memory: day clock')
 
-  const record = async (session: Session, to: number): Promise<void> => {
+  /**
+   * Note what a conversation said up to `to`, from where the scribe stopped reading.
+   * One never read starts at the turn that ended, or with `since` at the first turn since then.
+   */
+  const record = async (
+    session: Pick<Session, 'id' | 'header'>,
+    to: number,
+    title: string | undefined,
+    since?: number,
+  ): Promise<void> => {
     const log = await ctx.sessionQuery.readSession(session.id)
     const from = Math.max(
-      unreadFrom(log.events, read.get(session.id)?.seq, to),
+      unreadFrom(log.events, read.get(session.id)?.seq, to, since),
       log.inheritedEventCount,
     )
     if (from > to) return
@@ -884,7 +896,6 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
       await read.put(session.id, { seq: to })
       return
     }
-    const title = ctx.get('sessionTitle')?.get(session)?.title
     const source = { sessionId: session.id, title, cwd: session.header.cwd, from, to }
     const parent = await memoryConversation()
     await keep(source, transcript).catch(warn(`keeping what ${session.id} said`))
@@ -993,12 +1004,34 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
       watchEvent(session, event)
       if (event.type !== 'turn/end') return
       recording = recording
-        .then(() => record(session, event.seq))
+        .then(() => record(session, event.seq, ctx.get('sessionTitle')?.get(session)?.title))
         .catch(warn(`recording ${session.id}`))
     } else if (inMemory(session)) {
       follow(session, event)
     }
   })
+
+  // A scribe reads a conversation when one of its turns ends. Turns that ended
+  // while the plugin was not running (switched off, or DSH down) are read by none
+  // until the conversation speaks again, and the night is not given them. So on
+  // starting it reads what ended within a day: the conversations still open, and
+  // those started since. An older one that was closed is left to its next turn.
+  const endedSince = Date.now() - CATCH_UP_MS
+  recording = recording
+    .then(async () => {
+      for (const known of await ctx.sessionQuery.listSessions()) {
+        if (!remembered(known)) continue
+        if (!known.live && known.header.createdAt < endedSince) continue
+        const { id } = known.header
+        const to = endedUnread(await ctx.sessionQuery.listEvents(id), read.get(id)?.seq, endedSince)
+        if (to === undefined) continue
+        const title = (await ctx.sessionQuery.readTitle(id))?.title
+        await record({ id, header: known.header }, to, title, endedSince).catch(
+          warn(`recording ${id} on starting`),
+        )
+      }
+    })
+    .catch(warn('reading what ended while not running'))
 
   // A memory conversation only holds scribes. DSH tells a conversation when a
   // subagent that was sent a message has finished; that alone starts no turn here.

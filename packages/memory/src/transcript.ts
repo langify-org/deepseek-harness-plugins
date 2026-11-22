@@ -41,19 +41,35 @@ function heading(source: MessageSource): string | undefined {
  * The first event the scribe has not read, up to `to`: the one after `read`, the
  * last event it was given. A conversation it has never been given starts at the
  * turn that just ended: what came before is from before the plugin was there.
+ * Given `since`, it starts instead at the first turn that started then or later:
+ * the plugin was there, but not running.
  */
 export function unreadFrom(
-  events: readonly SessionEvent[],
+  events: readonly Pick<SessionEvent, 'seq' | 'type' | 'time'>[],
   read: number | undefined,
   to: number,
+  since?: number,
 ): number {
   if (read !== undefined) return read + 1
   let from = 0
   for (const event of events) {
     if (event.seq > to) break
-    if (event.type === 'turn/start') from = event.seq
+    if (event.type !== 'turn/start') continue
+    from = event.seq
+    if (since !== undefined && event.time >= since) break
   }
   return from
+}
+
+/** The last turn that ended at `since` or later, when it is past `read`, the last event read. */
+export function endedUnread(
+  events: readonly Pick<SessionEvent, 'seq' | 'type' | 'time'>[],
+  read: number | undefined,
+  since: number,
+): number | undefined {
+  const end = events.findLast((event) => event.type === 'turn/end')
+  if (end === undefined || end.time < since) return undefined
+  return read !== undefined && read >= end.seq ? undefined : end.seq
 }
 
 /** The events as text, oldest first; empty when nothing in them is worth reading. */

@@ -8,7 +8,7 @@ Why it is built this way, what was measured, and what was tried and left out: [D
 
 ## Requirements
 
-- DSH `>=0.2.2-rc.2 <0.3.0-0` with the Web app (it creates the memory conversations) and in-process subagents.
+- DSH `>=0.2.2-rc.5 <0.3.0-0` with the Web app (it creates the memory conversations) and in-process subagents.
 - [`git`](https://git-scm.com) on the host's `PATH`.
 
 ## Install

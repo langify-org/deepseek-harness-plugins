@@ -6,7 +6,7 @@ Runs DeepSeek Harness's own `web_search` and `web_fetch` on [Exa](https://exa.ai
 
 ## Requirements
 
-- DSH `>=0.2.2-rc.2 <0.3.0-0`.
+- DSH `>=0.2.2-rc.5 <0.3.0-0`.
 - An Exa API key, from the [Exa dashboard](https://dashboard.exa.ai/api-keys).
 
 ## Install

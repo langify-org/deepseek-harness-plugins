@@ -6,7 +6,7 @@ DeepSeek Harness の `web_search` と `web_fetch` を [Exa](https://exa.ai) で�
 
 ## 必要なもの
 
-- DSH `>=0.2.2-rc.2 <0.3.0-0`。
+- DSH `>=0.2.2-rc.5 <0.3.0-0`。
 - Exa の API キー。[Exa の dashboard](https://dashboard.exa.ai/api-keys) で作れます。
 
 ## インストール

@@ -6,7 +6,7 @@
 
 ## 要求
 
-- DSH `>=0.2.2-rc.2 <0.3.0-0`。
+- DSH `>=0.2.2-rc.5 <0.3.0-0`。
 - Exa API 密钥，可在 [Exa 控制台](https://dashboard.exa.ai/api-keys)创建。
 
 ## 安装

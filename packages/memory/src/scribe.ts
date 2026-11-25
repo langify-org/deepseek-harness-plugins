@@ -199,6 +199,7 @@ export function consolidateRequest(
     `- What memory cannot settle without the user goes in ${QUESTIONS_FILE}: where what the user said and what they did disagree, or hunches conflict and the notes cannot tell why. A question quotes what was said and where, gives the readings that are possible, and says what the answer would change. Only the few that matter; a question goes once the user has answered it.`,
     `- What the scribes were given of the conversations in the last ${kept.days} days is kept in ${kept.directory}: a directory for each day, a file for each conversation. A note you doubt can be checked there against what the conversation said.`,
     "- What one of the user's own files holds, a later conversation can read there, and memory needs only to say where it is. You can read those files too.",
+    '- Each step of this turn reads again the whole conversation so far, with everything read and changed in it. What is read together, or changed together, is one step; one at a time, each is a step of its own.',
     '- The time now is given to you.',
     '',
     ...(guidance === undefined

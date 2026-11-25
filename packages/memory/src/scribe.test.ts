@@ -106,6 +106,13 @@ describe('consolidateRequest', () => {
     expect(text).toContain('- episodes/2026-11-16/bbbb.md\n')
   })
 
+  it('says that each step reads the conversation again', () => {
+    const episodes = { added: [], compared: false, days: 30, scribes: false }
+    expect(consolidateRequest(undefined, share, kept, episodes)).toContain(
+      '- Each step of this turn reads again the whole conversation so far',
+    )
+  })
+
   it('says it holds the scribes only where it does', () => {
     const episodes = { added: [], compared: false, days: 30 }
     expect(consolidateRequest(undefined, share, kept, { ...episodes, scribes: true })).toContain(

@@ -39,19 +39,51 @@ export function parseCommits(output: string): MemoryCommit[] {
   })
 }
 
-/** The beginning of the index within the limits, saying how much was left out. */
-export function indexHead(text: string, limits: IndexLimits): string {
+/** A line of the index as the limit counts it: with its line break. */
+const lineBytes = (line: string): number => Buffer.byteLength(line, 'utf8') + 1
+
+/** The lines of the index, and how many of them from the beginning are within the limits. */
+function cut(text: string, limits: IndexLimits): { lines: string[]; kept: number } {
   const lines = text.trimEnd().split('\n')
-  const kept: string[] = []
+  let kept = 0
   let bytes = 0
   for (const line of lines) {
-    const size = Buffer.byteLength(line, 'utf8') + 1
-    if (kept.length >= limits.lines || bytes + size > limits.bytes) break
-    kept.push(line)
+    const size = lineBytes(line)
+    if (kept >= limits.lines || bytes + size > limits.bytes) break
+    kept += 1
     bytes += size
   }
-  const left = lines.length - kept.length
-  return left === 0 ? kept.join('\n') : `${kept.join('\n')}\n\n(${left} more lines in MEMORY.md)`
+  return { lines, kept }
+}
+
+/** The beginning of the index within the limits, saying how much was left out. */
+export function indexHead(text: string, limits: IndexLimits): string {
+  const { lines, kept } = cut(text, limits)
+  const head = lines.slice(0, kept).join('\n')
+  const left = lines.length - kept
+  return left === 0 ? head : `${head}\n\n(${left} more lines in MEMORY.md)`
+}
+
+/** How the index stands against what a conversation is given of it. */
+export interface IndexFit {
+  readonly lines: number
+  /** As the limit counts them: every line with its line break. */
+  readonly bytes: number
+  /** How many lines at the end a conversation is not given. */
+  readonly left: number
+  /** The first of those lines; undefined when a conversation is given all of the index. */
+  readonly firstLeft: string | undefined
+}
+
+/** The size of the index, and what of it the limits leave out: `indexHead`, counted. */
+export function indexFit(text: string, limits: IndexLimits): IndexFit {
+  const { lines, kept } = cut(text, limits)
+  return {
+    lines: lines.length,
+    bytes: lines.reduce((sum, line) => sum + lineBytes(line), 0),
+    left: lines.length - kept,
+    firstLeft: lines[kept],
+  }
 }
 
 const short = (hash: string): string => hash.slice(0, 7)

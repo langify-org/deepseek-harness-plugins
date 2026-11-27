@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   baselineText,
+  indexFit,
   indexHead,
   parseCommits,
   recallText,
@@ -38,6 +39,30 @@ describe('indexHead', () => {
     expect(indexHead('記憶\n記憶\n記憶', { lines: 10, bytes: 8 })).toBe(
       '記憶\n\n(2 more lines in MEMORY.md)',
     )
+  })
+})
+
+describe('indexFit', () => {
+  it('counts the index as the limit does, line breaks included', () => {
+    expect(indexFit('# Memory\n- 記憶\n', { lines: 2, bytes: 100 })).toEqual({
+      lines: 2,
+      bytes: 18,
+      left: 0,
+      firstLeft: undefined,
+    })
+  })
+
+  it('says which lines are left out where indexHead leaves them out', () => {
+    expect(indexFit('記憶\n記憶\n終わり', { lines: 10, bytes: 8 })).toEqual({
+      lines: 3,
+      bytes: 24,
+      left: 2,
+      firstLeft: '記憶',
+    })
+    expect(indexFit('1\n2\n3\n4', { lines: 3, bytes: 100 })).toMatchObject({
+      left: 1,
+      firstLeft: '4',
+    })
   })
 })
 

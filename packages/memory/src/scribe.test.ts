@@ -87,8 +87,33 @@ describe('whose episodes a file holds', () => {
 })
 
 describe('consolidateRequest', () => {
-  const share = { indexLines: 200, indexBytes: 25600 }
+  const share = { indexLines: 200, indexBytes: 25600, fit: undefined }
   const kept = { directory: '/memory-transcripts', days: 7 }
+  const nothingNew = { added: [], compared: false, days: 30, scribes: false }
+
+  it('says how large the index is', () => {
+    const fit = { lines: 57, bytes: 25114, left: 0, firstLeft: undefined }
+    expect(consolidateRequest(undefined, { ...share, fit }, kept, nothingNew)).toContain(
+      '- MEMORY.md is 57 lines and 25114 bytes now. Every night is told this as it starts.',
+    )
+    expect(consolidateRequest(undefined, share, kept, nothingNew)).not.toContain('bytes now')
+  })
+
+  it('says which lines of the index a conversation is not given', () => {
+    const one = {
+      lines: 58,
+      bytes: 25714,
+      left: 1,
+      firstLeft: '- Calling an LLM directly: [llm-apis.md](llm-apis.md)',
+    }
+    expect(consolidateRequest(undefined, { ...share, fit: one }, kept, nothingNew)).toContain(
+      '- MEMORY.md is 58 lines and 25714 bytes now: a conversation is not given the last line, which begins "- Calling an LLM directly: [llm-apis.md]". Every night is told',
+    )
+    const three = { lines: 60, bytes: 26900, left: 3, firstLeft: '- 環境の構成' }
+    expect(consolidateRequest(undefined, { ...share, fit: three }, kept, nothingNew)).toContain(
+      'a conversation is not given the last 3 lines, from the one that begins "- 環境の構成" on.',
+    )
+  })
 
   it('says where in a file that grew the new entries start', () => {
     const text = consolidateRequest(undefined, share, kept, {

@@ -82,6 +82,7 @@ import Schema from '@deepseek-ai/schemastery'
 import { z } from 'zod'
 import {
   baselineText,
+  indexFit,
   indexHead,
   recallText,
   shownIn,
@@ -646,11 +647,20 @@ export async function apply(ctx: Context & Services, config: Config): Promise<vo
       await agent.whenIdle()
       return endings.get(agent.session.id) === 'completed'
     }
+    const index = await memoryFile(INDEX_FILE)
     const compared = pairs.length > 0 && (await ask(compareRequest(pairs)))
     const done = await ask(
       consolidateRequest(
         await memoryFile(GUIDANCE_FILE),
-        { indexLines: config.indexLines, indexBytes: config.indexBytes },
+        {
+          indexLines: config.indexLines,
+          indexBytes: config.indexBytes,
+          // The night has no tool that counts bytes.
+          fit:
+            index === undefined
+              ? undefined
+              : indexFit(index, { lines: config.indexLines, bytes: config.indexBytes }),
+        },
         { directory: transcripts, days: config.transcriptDays },
         {
           added: added.map(({ file, from }) => ({ file, from })),

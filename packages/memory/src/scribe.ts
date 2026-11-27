@@ -10,6 +10,7 @@
 // directory's AGENTS.md, which the plugin only starts and quotes.
 
 import { HUNCHES, QUESTIONS_FILE } from './hunch.ts'
+import type { IndexFit } from './delivery.ts'
 import type { NoteLine } from './related.ts'
 
 /** The file that holds the user's guidance, and the one that holds the index. */
@@ -51,6 +52,27 @@ The part comes last in a message: it starts after a line that names its events, 
 export interface IndexShare {
   readonly indexLines: number
   readonly indexBytes: number
+}
+
+/**
+ * The index as the night finds it: how much of it every conversation is given, and
+ * how it stands against that. The night has no tool that counts bytes, so the
+ * plugin counts for it.
+ */
+export interface IndexState extends IndexShare {
+  /** Undefined when there is no index. */
+  readonly fit: IndexFit | undefined
+}
+
+/** How the beginning of a line is quoted to say which line it is. */
+const QUOTED = 40
+
+/** What of the index a conversation is not given, for a sentence that goes on after "not". */
+function leftOut(fit: IndexFit): string {
+  const begins = `begins "${(fit.firstLeft ?? '').slice(0, QUOTED)}"`
+  return fit.left === 1
+    ? `the last line, which ${begins}`
+    : `the last ${fit.left} lines, from the one that ${begins} on`
 }
 
 /** Where the parts the scribes were given are kept, and for how many days. */
@@ -165,10 +187,11 @@ export interface Episodes {
  */
 export function consolidateRequest(
   guidance: string | undefined,
-  share: IndexShare,
+  share: IndexState,
   kept: Kept,
   episodes: Episodes,
 ): string {
+  const { fit } = share
   return [
     `You bring what memory knows up to date. The directory holds two kinds of files. Those in ${EPISODES}/ are the record: what a scribe noted of each conversation as it went, a file for each conversation and day. They stay as they are. All the others are what is known: how things stand and what was learned, by subject, with ${INDEX_FILE} as their index. Now what the new episodes hold becomes part of what is known. Leave what is known as a later conversation would want to find it.`,
     '',
@@ -184,6 +207,11 @@ export function consolidateRequest(
         ]),
     '',
     `- A later conversation is given the beginning of ${INDEX_FILE} (at most ${share.indexLines} lines or ${share.indexBytes} bytes) and reads the file it names for the subject at hand. It reads an episode only when it searches. So what an episode established has to be where that conversation will look: under the subject it is about, which is often not the conversation it came up in. What was learned about a tool while working on one project is needed by the next project that uses the tool.`,
+    ...(fit === undefined
+      ? []
+      : [
+          `- ${INDEX_FILE} is ${fit.lines} lines and ${fit.bytes} bytes now${fit.left === 0 ? '' : `: a conversation is not given ${leftOut(fit)}`}. Every night is told this as it starts.`,
+        ]),
     ...(episodes.compared
       ? [
           '- You have just compared the new entries with what was known. A decision or a state of things can change, and then what is known says the new one. A statement about how something works does not become true by being newer, or by who made it: where two of those disagree, one of them is wrong, and which is not known until it is checked against the thing itself, the code or the document. Until then both places say that they disagree and what the other says, so that a conversation that reads only one of them is not misled.',
